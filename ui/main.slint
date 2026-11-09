@@ -7,17 +7,16 @@ import { Theme } from "theme.slint";
 import { Logos } from "logos.slint";
 import { BootEntry, InfoItem, MemorySegment, Panel, Spinner, BatteryInfo, BatteryFact, Focus } from "widgets.slint";
 import { Palette } from "std-widgets.slint";
-import { Mock } from "mock.slint";
 import { TopBar } from "top-bar.slint";
 import { Footer } from "footer.slint";
-import { BootScreen } from "boot-screen.slint";
-import { SystemScreen } from "system-screen.slint";
-import { SettingsScreen } from "settings-screen.slint";
+import { BootMenu, BootScreen } from "boot-screen.slint";
+import { System, SystemScreen } from "system-screen.slint";
+import { SettingsPage, SettingsScreen } from "settings-screen.slint";
 import { SplashScreen } from "splash-screen.slint";
-import { InstallScreen, InstallInfo } from "install-screen.slint";
-import { Dialog, TimeDialog, OptionsDialog, CustomizeDialog, PasswordDialog, FileDialog, FileRow, UnlockDialog } from "dialogs.slint";
+import { Install, InstallScreen, InstallInfo } from "install-screen.slint";
+import { Customize, Dialog, FileBrowser, FileDialog, FileRow, CustomizeDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
 
-export { Theme, Logos, BootEntry, InfoItem, MemorySegment, FileRow, InstallInfo, BatteryInfo, BatteryFact, Focus }
+export { Theme, Logos, BootMenu, Customize, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, InstallInfo, BatteryInfo, BatteryFact, Focus }
 
 // A dialog over the whole window, in a popup: modal (Tab stays in it), and
 // the keyboard focus goes back where it was when it closes. Shown while
@@ -80,101 +79,11 @@ export component AppWindow inherits Window {
     // 2 = customizing an entry, 3 = the file browser, 4 = the kernel options.
     property <int> password-for;
 
-    // Customizing entry `cust-entry` of the boot menu.
-    in-out property <bool> cust-visible;
-    in-out property <string> cust-title;
-    property <string> cust-entry-title: root.entries[root.cust-entry].title;
-    // Like E: kernel options saved for every start, when they can be edited.
-    property <bool> cust-linux: root.entries[root.cust-entry].editable && root.can-edit-options;
-    in property <string> cust-options-placeholder;
-    in-out property <string> cust-options;
-    in-out property <bool> cust-more;
-    in-out property <bool> cust-default;
-    in-out property <int> cust-entry;
-    // 0 = the entry's own, else 1 + an index in `config::ICONS`.
-    in-out property <int> cust-icon;
-    // An index in `picture-names`.
-    in-out property <int> cust-picture;
-    in property <image> cust-picture-preview;
-    in property <bool> cust-has-picture-preview;
-    callback cust-picture-changed(int);
-    // On the desktop: pictures can be added with a file dialog.
-    callback cust-add-picture();
-    callback add-splash-picture();
-    // "None", then the pictures (PNG, JPEG) next to Slingshot.
-    in property <[string]> picture-names: Platform.uses-mock-data ? Mock.picture-names : ["None"];
-    callback customize(int);
-    callback save-customize(int);
-
-    // The passphrase of an encrypted disk the entry being started needs
-    // (Rust drives it: `open-unlock`, then `unlock-*`).
-    in-out property <bool> unlock-visible;
-    in property <string> unlock-detail;
-    in property <string> unlock-counter;
-    // For the file browser (to see the disk's files), not to start Linux.
-    in property <bool> unlock-browsing;
-    // The entry being started: its logo and name on the passphrase screen.
-    in property <BootEntry> unlock-entry;
-    in property <string> unlock-title;
-    in property <bool> unlock-checking;
-    in-out property <bool> unlock-wrong;
-    in property <string> unlock-error;
-    callback unlock-submit(string);
-    callback unlock-skip();
-    callback unlock-cancel();
-    public function open-unlock() {
-        root.unlock-visible = true;
-    }
-    property <int> unlock-clear-request;
-    public function retry-unlock() {
-        root.unlock-clear-request += 1;
-    }
-    public function close-unlock() {
-        root.unlock-visible = false;
-    }
-
     // Why an entry couldn't start.
     in-out property <bool> error-visible;
     in property <string> error-title;
     in property <string> error-text;
 
-    // The Install screen (screen 3): only in `slingshot config`.
-    in property <bool> install-available: Platform.uses-mock-data;
-    // The Settings screen saves to slingshot.toml (on the desktop).
-    in property <bool> settings-in-file;
-    in property <InstallInfo> install-info: Platform.uses-mock-data ? Mock.install : {};
-    in property <bool> install-busy;
-    in property <string> install-confirm-title;
-    in property <string> install-confirm-text;
-    in property <bool> install-confirm-destructive;
-    property <bool> install-confirm-visible;
-    in property <bool> install-result-ok;
-    in property <string> install-result-text;
-    in property <bool> install-offer-restart;
-    property <bool> install-result-visible;
-    callback install-refresh();
-    callback install-act(int);
-    callback install-confirm();
-    callback install-choose();
-    callback install-restart();
-    callback show-install-confirm();
-    callback show-install-result();
-    show-install-confirm => { root.install-confirm-visible = true; }
-    show-install-result => { root.install-result-visible = true; }
-    // "Start a file…": the file browser, filled by the Rust code.
-    in-out property <bool> files-visible;
-    in property <string> files-location: Platform.uses-mock-data ? "Sample disks" : "";
-    in property <[FileRow]> files-rows: Platform.uses-mock-data ? Mock.files : [];
-    in-out property <int> files-current;
-    in property <string> files-message;
-    in property <string> files-path;
-    in property <bool> files-picking;
-    pure callback files-find(string) -> int;
-    callback files-go(string) -> bool;
-    callback open-browser();
-    callback files-open(int);
-    callback files-up();
-    callback files-add(int);
     // Starting any file is a setting: locked like the Settings screen.
     callback ask-browse();
     // Asks for the settings' password, to unlock `purpose` (password-for).
@@ -188,133 +97,32 @@ export component AppWindow inherits Window {
             root.ask-password(3);
             return;
         }
-        root.open-browser();
+        FileBrowser.show();
     }
 
-    // The boot picker shows the "More…" level.
-    in property <bool> more-level;
-    // Editing the kernel options of entry `options-entry` (E).
-    in-out property <bool> options-visible;
-    in property <string> options-text: Platform.uses-mock-data ? "root=UUID=sample rw quiet splash" : "";
-    property <string> options-title: root.entries[root.options-entry].title;
-    in-out property <int> options-entry;
-    callback edit-options(int);
-    callback boot-with-options(int, string);
-
-    // The firmware clock, on the System screen.
-    in property <string> date-time-text: Platform.uses-mock-data ? "Sample date\n12:00" : "";
-    in property <bool> clock-settable: Platform.uses-mock-data;
-    property <bool> can-change-time: clock-settable && settings-access != 1;
-    in-out property <bool> time-dialog-visible;
-    in property <[int]> time-fields: [1, 1, 2026, 0, 0];
+    // The firmware clock, on the System screen, and the field being set.
+    property <bool> can-change-time: System.clock-settable && settings-access != 1;
     property <int> time-field;
-    callback open-time-dialog();
-    callback time-step(int, int);
-    // A number typed in a field.
-    callback time-set(int, int);
-    callback apply-time();
 
-    // Slingshot's version, shown on the System screen.
-    in property <string> app-version: Platform.uses-mock-data ? "0.0" : "";
+    // The top bar's clock, and the footer's lines.
     in property <string> clock: Platform.uses-mock-data ? "Sample date · 12:00" : "";
     in property <string> firmware-line: Platform.uses-mock-data ? "Sample data for the live preview" : "";
+    in property <string> pointer-status: Platform.uses-mock-data ? "Pointer: sample data" : "";
+    in property <string> status-message;
 
-    // Boot picker
-    in property <[BootEntry]> entries: Platform.uses-mock-data ? Mock.entries : [];
-    in property <int> default-entry;
-    in-out property <int> focused-entry;
-    in property <int> countdown: Platform.uses-mock-data ? 7 : -1;
-    in property <int> countdown-total: 10;
-    // A system hibernated (`resume-known`: it's the default entry).
-    in property <bool> hibernated;
-    in property <bool> resume-known;
-    // Continuous progress of the countdown, from 1 (just started) to 0 (boot).
-    // Measured from when the countdown started, so the ring and the progress
-    // bar reach 0 exactly when the entry starts.
-    property <duration> countdown-start;
-    property <float> countdown-progress: root.countdown >= 0
-        ? clamp(1 - (animation-tick() - root.countdown-start) / (root.countdown-total * 1s), 0, 1)
-        : 1;
-    changed countdown => {
-        if root.countdown == root.countdown-total {
-            root.countdown-start = animation-tick();
-        }
-    }
-    in property <bool> firmware-setup-supported: Platform.uses-mock-data;
+    // The splash screen, over everything.
+    in-out property <bool> splash-visible;
     // "Starting Arch Linux…", "Restarting…": over everything while it happens.
     in property <string> starting-title;
-    // The Boot screen's Restart and Shut down buttons.
-    in property <bool> power-buttons: Platform.uses-mock-data;
-    callback power-off(/* shut down */ bool);
+    // F10: the firmware's setup.
+    in property <bool> firmware-setup-supported: Platform.uses-mock-data;
+    callback firmware-setup();
     // F12 saves the log next to Slingshot (the firmware keeps one).
     in property <bool> can-save-log;
     callback save-log();
-
-    // Splash screen
-    in-out property <bool> splash-visible;
-    in property <image> splash-image;
-    // Behind the boot menu (slingshot.toml), and its index in
-    // `picture-names`.
-    in property <image> wallpaper;
-    in-out property <int> wallpaper-picture;
-    callback wallpaper-picture-selected(int);
-    callback add-wallpaper-picture();
-    // The splash picture, as an index in `picture-names`.
-    in-out property <int> splash-picture;
-    callback splash-picture-selected(int);
-    in-out property <string> splash-text;
-    in property <bool> splash-name: true;
-    in property <bool> splash-picture-shown: true;
-    in property <bool> splash-hint: true;
-    callback splash-text-entered(string);
-    callback splash-shown(string, bool);
-
-    // System info
-    in property <[InfoItem]> info-items: Platform.uses-mock-data ? Mock.info-items : [];
-    in property <[MemorySegment]> memory: Platform.uses-mock-data ? Mock.memory : [];
-    in property <BatteryInfo> battery: Platform.uses-mock-data ? Mock.battery : {};
-    in property <string> pointer-status: Platform.uses-mock-data ? "Pointer: sample data" : "";
-
-    // Settings
-    in-out property <int> theme-index;
-    in-out property <int> startup-index;
-    // The default entry: 0 as set (slingshot.toml, systemd-boot), 1 the
-    // one started last.
-    in-out property <int> default-index;
-    in-out property <int> timeout-seconds;
-    in property <string> mode-label: Platform.uses-mock-data ? "Sample resolution" : "";
-    in property <bool> mode-is-current: Platform.uses-mock-data;
-    // How many modes the display has, and the largest.
-    in property <int> mode-count: Platform.uses-mock-data ? 4 : 0;
-    in property <string> mode-max: Platform.uses-mock-data ? root.mode-label : "";
-    in property <[BootEntry]> order: Platform.uses-mock-data ? Mock.order : [];
-    in property <bool> order-dirty;
-    in property <bool> order-changed-from-original;
-    // Seconds left before a new resolution is reverted, or -1.
-    in property <int> revert-countdown: -1;
-    in-out property <bool> confirm-save-visible;
-    in-out property <bool> confirm-reset-visible;
-    in property <string> status-message;
-
-    callback boot(int);
-    callback firmware-setup();
     // Any key press or pointer activity: stops the auto-boot countdown.
     callback user-activity();
     callback screen-changed(int);
-    callback theme-selected(int);
-    callback accent-selected(int);
-    callback startup-selected(int);
-    callback default-selected(int);
-    callback timeout-changed(int);
-    callback previous-mode();
-    callback next-mode();
-    callback apply-mode();
-    callback keep-mode();
-    callback revert-mode();
-    callback move-entry(int, int);
-    callback restore-order();
-    callback save-order();
-    callback reset-settings();
 
     title: root.simulated ? @tr("Slingshot (simulator)") : @tr("Slingshot");
     background: Theme.background;
@@ -327,7 +135,7 @@ export component AppWindow inherits Window {
     // Boot and System are always there; Settings unless hidden; Install
     // only in `slingshot config`.
     function screen-available(s: int) -> bool {
-        return s == 0 || s == 1 || (s == 2 && root.settings-access != 1) || (s == 3 && root.install-available);
+        return s == 0 || s == 1 || (s == 2 && root.settings-access != 1) || (s == 3 && Install.available);
     }
 
     function step-screen(back: bool) {
@@ -375,7 +183,7 @@ export component AppWindow inherits Window {
     // the window's shortcuts.
     function enter-screen() {
         if root.screen == 0 {
-            boot-screen.focus-entry(root.focused-entry);
+            boot-screen.focus-entry(BootMenu.focused-entry);
         } else if root.screen == 1 && root.can-change-time {
             system-screen.enter();
         } else if root.screen == 2 {
@@ -410,7 +218,7 @@ export component AppWindow inherits Window {
 
     // Customizing an entry is a setting: locked like the Settings screen.
     function ask-customize(i: int) {
-        if root.settings-access == 1 || i < 0 || i >= root.entries.length || !root.entries[i].customizable {
+        if root.settings-access == 1 || i < 0 || i >= BootMenu.entries.length || !BootMenu.entries[i].customizable {
             return;
         }
         if !root.settings-unlocked {
@@ -418,7 +226,7 @@ export component AppWindow inherits Window {
             root.ask-password(2);
             return;
         }
-        root.customize(i);
+        Customize.open(i);
     }
     property <int> password-entry;
 
@@ -427,7 +235,7 @@ export component AppWindow inherits Window {
     in property <bool> options-editor: Platform.uses-mock-data;
     out property <bool> can-edit-options: options-editor && settings-access != 1;
     function ask-edit-options(i: int) {
-        if !root.can-edit-options || i < 0 || i >= root.entries.length || !root.entries[i].editable {
+        if !root.can-edit-options || i < 0 || i >= BootMenu.entries.length || !BootMenu.entries[i].editable {
             return;
         }
         if !root.settings-unlocked {
@@ -435,7 +243,7 @@ export component AppWindow inherits Window {
             root.ask-password(4);
             return;
         }
-        root.edit-options(i);
+        BootMenu.open-options(i);
     }
 
     // Changing the clock is a setting: locked like the Settings screen.
@@ -448,81 +256,20 @@ export component AppWindow inherits Window {
             return;
         }
         root.time-field = 0;
-        root.open-time-dialog();
+        System.open-time-dialog();
     }
 
-
-    // In slint-viewer, the dialogs the Rust code opens open too (the Rust
-    // code replaces these handlers).
-    customize(i) => {
-        if Platform.uses-mock-data {
-            root.cust-entry = i;
-            root.cust-visible = true;
-        }
-    }
-    edit-options(i) => {
-        if Platform.uses-mock-data {
-            root.options-entry = i;
-            root.options-visible = true;
-        }
-    }
-    open-browser => {
-        if Platform.uses-mock-data {
-            root.files-visible = true;
-        }
-    }
-    open-time-dialog => {
-        if Platform.uses-mock-data {
-            root.time-dialog-visible = true;
-        }
-    }
-    apply-time => {
-        if Platform.uses-mock-data {
-            root.time-dialog-visible = false;
-        }
-    }
-
-    // Language and keyboard layout: "Automatic (…)" first.
-    in property <[string]> language-names: Platform.uses-mock-data ? Mock.language-names : [];
-    in-out property <int> language-index;
-    in property <[string]> keyboard-names: Platform.uses-mock-data ? Mock.keyboard-names : [];
-    in-out property <int> keyboard-index;
-    callback language-selected(int);
-    callback keyboard-selected(int);
-    function select-language(i: int) {
-        if i != root.language-index {
-            root.language-index = i;
-            root.language-selected(i);
-        }
-    }
-    function select-keyboard(i: int) {
-        if i != root.keyboard-index {
-            root.keyboard-index = i;
-            root.keyboard-selected(i);
-        }
-    }
-
-    function select-theme(i: int) {
-        root.theme-index = i;
-        Theme.theme-index = i;
-        root.theme-selected(i);
-    }
-
-    function select-accent(i: int) {
-        Theme.accent-index = i;
-        root.accent-selected(i);
-    }
 
     // The wallpaper, behind everything, as it is: the panels over it are
     // frosted glass, which keeps the text readable. Explicit geometry: its
     // size must not size the window. Not under the opaque splash screen,
     // nor are the top bar and the footer.
-    if root.wallpaper.width > 0 && !root.splash-visible: Image {
+    if SettingsPage.wallpaper.width > 0 && !root.splash-visible: Image {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
-        source: root.wallpaper;
+        source: SettingsPage.wallpaper;
         image-fit: cover;
     }
 
@@ -541,8 +288,8 @@ export component AppWindow inherits Window {
             root.user-activity();
             if on-splash {
                 root.splash-visible = false;
-                if event.text == Key.Return && root.entries.length > 0 {
-                    root.boot(root.default-entry);
+                if event.text == Key.Return && BootMenu.entries.length > 0 {
+                    BootMenu.boot(BootMenu.default-entry);
                 } else {
                     root.enter-screen();
                 }
@@ -587,9 +334,9 @@ export component AppWindow inherits Window {
                 return accept;
             }
             if event.text == Key.Escape {
-                if root.screen == 0 && root.more-level {
+                if root.screen == 0 && BootMenu.more-level {
                     // The "Back" card.
-                    root.boot(0);
+                    BootMenu.boot(0);
                 } else {
                     root.show-screen(0);
                 }
@@ -619,7 +366,6 @@ export component AppWindow inherits Window {
             clock: root.clock;
             screen: root.screen;
             settings-access: root.settings-access;
-            install-available: root.install-available;
             go-to(s) => { root.show-screen(s); }
             step(back) => { root.step-screen(back); }
             enter => { root.enter-screen(); }
@@ -633,32 +379,17 @@ export component AppWindow inherits Window {
                 visible: root.screen == 0 && !root.splash-visible;
                 x: root.screen-shift;
                 opacity: root.screen-opacity;
-                entries: root.entries;
-                default-entry: root.default-entry;
-                focused-entry <=> root.focused-entry;
-                countdown: root.countdown;
-                hibernated: root.hibernated;
-                resume-known: root.resume-known;
-                progress: root.countdown-progress;
                 active: root.screen == 0 && !root.splash-visible && !root.modal;
-                power-buttons: root.power-buttons;
-                boot(i) => { root.boot(i); }
                 customize(i) => { root.ask-customize(i); }
                 edit-options(i) => { root.ask-edit-options(i); }
                 leave-up => { top-bar.focus-tab(); }
                 pointer-activity => { root.user-activity(); }
-                power(shut-down) => { root.power-off(shut-down); }
             }
             system-screen := SystemScreen {
                 visible: root.screen == 1;
                 x: root.screen-shift;
                 opacity: root.screen-opacity;
-                items: root.info-items;
-                memory: root.memory;
-                app-version: root.app-version;
-                battery: root.battery;
                 active: root.screen == 1;
-                date-time-text: root.date-time-text;
                 can-change-time: root.can-change-time;
                 change-time => { root.ask-change-time(); }
             }
@@ -666,62 +397,12 @@ export component AppWindow inherits Window {
                 visible: root.screen == 3;
                 x: root.screen-shift;
                 opacity: root.screen-opacity;
-                info: root.install-info;
-                busy: root.install-busy;
-                act(i) => { root.install-act(i); }
-                choose-program => { root.install-choose(); }
-                refresh => { root.install-refresh(); }
             }
             settings := SettingsScreen {
-                settings-in-file: root.settings-in-file;
                 visible: root.screen == 2;
                 x: root.screen-shift;
                 opacity: root.screen-opacity;
-                theme-index <=> root.theme-index;
-                startup-index <=> root.startup-index;
-                default-index <=> root.default-index;
-                picture-names: root.picture-names;
-                splash-picture <=> root.splash-picture;
-                splash-text <=> root.splash-text;
-                splash-name: root.splash-name;
-                splash-picture-shown: root.splash-picture-shown;
-                splash-hint: root.splash-hint;
-                splash-text-entered(t) => { root.splash-text-entered(t); }
-                splash-shown(which, shown) => { root.splash-shown(which, shown); }
-                splash-preview: root.splash-image;
-                splash-picture-selected(i) => { root.splash-picture-selected(i); }
-                wallpaper-picture <=> root.wallpaper-picture;
-                wallpaper-preview: root.wallpaper;
-                wallpaper-picture-selected(i) => { root.wallpaper-picture-selected(i); }
-                add-wallpaper-picture => { root.add-wallpaper-picture(); }
-                add-splash-picture => { root.add-splash-picture(); }
-                timeout-seconds <=> root.timeout-seconds;
-                mode-label: root.mode-label;
-                mode-is-current: root.mode-is-current;
-                mode-count: root.mode-count;
-                mode-max: root.mode-max;
-                order: root.order;
-                order-dirty: root.order-dirty;
-                order-changed-from-original: root.order-changed-from-original;
-                theme-selected(i) => { root.select-theme(i); }
-                accent-selected(i) => { root.select-accent(i); }
-                startup-selected(i) => { root.startup-selected(i); }
-                default-selected(i) => { root.default-selected(i); }
-                timeout-changed(s) => { root.timeout-changed(s); }
-                previous-mode => { root.previous-mode(); }
-                next-mode => { root.next-mode(); }
-                apply-mode => { root.apply-mode(); }
-                move-entry(a, b) => { root.move-entry(a, b); }
-                restore-order => { root.restore-order(); }
-                save-order => { root.confirm-save-visible = true; }
-                reset-settings => { root.confirm-reset-visible = true; }
                 leave-up => { top-bar.focus-tab(); }
-                language-names: root.language-names;
-                language-index: root.language-index;
-                keyboard-names: root.keyboard-names;
-                keyboard-index: root.keyboard-index;
-                language-selected(i) => { root.select-language(i); }
-                keyboard-selected(i) => { root.select-keyboard(i); }
             }
         }
 
@@ -733,8 +414,8 @@ export component AppWindow inherits Window {
             pointer-status: root.pointer-status;
             settings-access: root.settings-access;
             power-focus: boot-screen.power-focus;
-            entry-editable: root.can-edit-options && root.entries.length > 0 && root.entries[root.focused-entry].editable;
-            entry-customizable: root.entries.length > 0 && root.entries[root.focused-entry].customizable;
+            entry-editable: root.can-edit-options && BootMenu.entries.length > 0 && BootMenu.entries[BootMenu.focused-entry].editable;
+            entry-customizable: BootMenu.entries.length > 0 && BootMenu.entries[BootMenu.focused-entry].customizable;
             settings-section: settings.section;
             can-save-log: root.can-save-log;
         }
@@ -743,26 +424,12 @@ export component AppWindow inherits Window {
     }
 
     // A dialog is open.
-    property <bool> modal: root.unlock-visible || root.error-visible || root.install-confirm-visible || root.install-result-visible
-        || root.confirm-save-visible || root.cust-visible || root.options-visible || root.files-visible || root.password-visible
-        || root.time-dialog-visible || root.confirm-reset-visible || root.revert-countdown >= 0;
+    property <bool> modal: Passphrase.visible || root.error-visible || Install.confirm-visible || Install.result-visible
+        || SettingsPage.confirm-save-visible || Customize.visible || BootMenu.options-visible || FileBrowser.visible || root.password-visible
+        || System.time-dialog-visible || SettingsPage.confirm-reset-visible || SettingsPage.revert-countdown >= 0;
     ModalPopup {
-        shown: root.unlock-visible;
-        UnlockDialog {
-            detail: root.unlock-detail;
-            counter: root.unlock-counter;
-            browsing: root.unlock-browsing;
-            entry: root.unlock-entry;
-            entry-title: root.unlock-title;
-            checking: root.unlock-checking;
-            wrong: root.unlock-wrong;
-            error: root.unlock-error;
-            clear-request: root.unlock-clear-request;
-            typing => { root.unlock-wrong = false; }
-            submit(text) => { root.unlock-submit(text); }
-            skip => { root.unlock-skip(); }
-            cancel => { root.unlock-cancel(); }
-        }
+        shown: Passphrase.visible;
+        UnlockDialog { }
     }
 
     ModalPopup {
@@ -777,38 +444,38 @@ export component AppWindow inherits Window {
     }
 
     ModalPopup {
-        shown: root.install-confirm-visible;
+        shown: Install.confirm-visible;
         Dialog {
-            title: root.install-confirm-title;
-            message: @tr("These commands will run as root (your password is asked for):\n\n") + root.install-confirm-text;
+            title: Install.confirm-title;
+            message: @tr("These commands will run as root (your password is asked for):\n\n") + Install.confirm-text;
             cancel-text: @tr("Cancel");
-            accept-text: root.install-busy ? @tr("Running…") : root.install-confirm-destructive ? @tr("Remove") : @tr("Do it");
+            accept-text: Install.busy ? @tr("Running…") : Install.confirm-destructive ? @tr("Remove") : @tr("Do it");
             highlighted: 0;
-            cancel => { root.install-confirm-visible = false; }
+            cancel => { Install.confirm-visible = false; }
             accept => {
-                root.install-confirm-visible = false;
-                root.install-confirm();
+                Install.confirm-visible = false;
+                Install.confirm();
             }
         }
     }
 
     ModalPopup {
-        shown: root.install-result-visible;
+        shown: Install.result-visible;
         Dialog {
-            title: root.install-result-ok ? @tr("Done") : @tr("It didn't work");
-            message: root.install-result-text;
-            cancel-text: root.install-offer-restart ? @tr("Restart now") : "";
+            title: Install.result-ok ? @tr("Done") : @tr("It didn't work");
+            message: Install.result-text;
+            cancel-text: Install.offer-restart ? @tr("Restart now") : "";
             accept-text: @tr("Close");
             cancel => {
-                root.install-result-visible = false;
-                root.install-restart();
+                Install.result-visible = false;
+                Install.restart();
             }
-            accept => { root.install-result-visible = false; }
+            accept => { Install.result-visible = false; }
         }
     }
 
     ModalPopup {
-        shown: root.confirm-save-visible;
+        shown: SettingsPage.confirm-save-visible;
         Dialog {
             title: @tr("Save the new boot order?");
             message: @tr("This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen.");
@@ -816,67 +483,46 @@ export component AppWindow inherits Window {
             accept-text: @tr("Save");
             // "Cancel" first.
             highlighted: 0;
-            cancel => { root.confirm-save-visible = false; }
+            cancel => { SettingsPage.confirm-save-visible = false; }
             accept => {
-                root.confirm-save-visible = false;
-                root.save-order();
+                SettingsPage.confirm-save-visible = false;
+                SettingsPage.save-order();
             }
         }
     }
 
     ModalPopup {
-        shown: root.cust-visible;
+        shown: Customize.visible;
         CustomizeDialog {
-            entry-title: root.cust-entry-title;
-            linux: root.cust-linux;
-            options-placeholder: root.cust-options-placeholder;
-            title-text <=> root.cust-title;
-            options-text <=> root.cust-options;
-            more <=> root.cust-more;
-            default-entry <=> root.cust-default;
-            icon <=> root.cust-icon;
-            picture <=> root.cust-picture;
-            picture-names: root.picture-names;
-            picture-preview: root.cust-picture-preview;
-            has-picture-preview: root.cust-has-picture-preview;
-            picture-changed(i) => { root.cust-picture-changed(i); }
-            add-picture => { root.cust-add-picture(); }
-            cancel => { root.cust-visible = false; }
+            entry-title: BootMenu.entries[Customize.entry].title;
+            // Like E: kernel options saved for every start, when they can be edited.
+            linux: BootMenu.entries[Customize.entry].editable && root.can-edit-options;
+            picture-names: SettingsPage.picture-names;
+            cancel => { Customize.visible = false; }
             save => {
-                root.cust-visible = false;
-                root.save-customize(root.cust-entry);
+                Customize.visible = false;
+                Customize.save(Customize.entry);
             }
         }
     }
 
     ModalPopup {
-        shown: root.options-visible;
+        shown: BootMenu.options-visible;
         OptionsDialog {
-            entry-title: root.options-title;
-            initial-text: root.options-text;
-            cancel => { root.options-visible = false; }
+            entry-title: BootMenu.entries[BootMenu.options-entry].title;
+            initial-text: BootMenu.options-text;
+            cancel => { BootMenu.options-visible = false; }
             submit(text) => {
-                root.options-visible = false;
-                root.boot-with-options(root.options-entry, text);
+                BootMenu.options-visible = false;
+                BootMenu.boot-with-options(BootMenu.options-entry, text);
             }
         }
     }
 
     ModalPopup {
-        shown: root.files-visible;
+        shown: FileBrowser.visible;
         FileDialog {
-            location: root.files-location;
-            rows: root.files-rows;
-            current <=> root.files-current;
-            message: root.files-message;
-            path: root.files-path;
-            picking: root.files-picking;
-            find(text) => { return root.files-find(text); }
-            go(path) => { return root.files-go(path); }
-            open(i) => { root.files-open(i); }
-            up => { root.files-up(); }
-            add(i) => { root.files-add(i); }
-            close => { root.files-visible = false; }
+            close => { FileBrowser.visible = false; }
         }
     }
 
@@ -919,20 +565,20 @@ export component AppWindow inherits Window {
     }
 
     ModalPopup {
-        shown: root.time-dialog-visible;
+        shown: System.time-dialog-visible;
         TimeDialog {
-            fields: root.time-fields;
+            fields: System.time-fields;
             current: root.time-field;
             select(i) => { root.time-field = i; }
-            step(i, d) => { root.time-step(i, d); }
-            set(i, v) => { root.time-set(i, v); }
-            cancel => { root.time-dialog-visible = false; }
-            apply => { root.apply-time(); }
+            step(i, d) => { System.time-step(i, d); }
+            set(i, v) => { System.time-set(i, v); }
+            cancel => { System.time-dialog-visible = false; }
+            apply => { System.apply-time(); }
         }
     }
 
     ModalPopup {
-        shown: root.confirm-reset-visible;
+        shown: SettingsPage.confirm-reset-visible;
         Dialog {
             title: @tr("Reset all settings?");
             message: @tr("Theme, accent color, startup screen, timeout and resolution go back to their defaults. The boot order isn't changed.");
@@ -940,38 +586,38 @@ export component AppWindow inherits Window {
             accept-text: @tr("Reset");
             // "Cancel" first.
             highlighted: 0;
-            cancel => { root.confirm-reset-visible = false; }
+            cancel => { SettingsPage.confirm-reset-visible = false; }
             accept => {
-                root.confirm-reset-visible = false;
-                root.reset-settings();
+                SettingsPage.confirm-reset-visible = false;
+                SettingsPage.reset-settings();
             }
         }
     }
 
     ModalPopup {
-        shown: root.revert-countdown >= 0;
+        shown: SettingsPage.revert-countdown >= 0;
         Dialog {
             title: @tr("Keep this resolution?");
-            message: @tr("Going back to the previous resolution in {} s.", root.revert-countdown);
+            message: @tr("Going back to the previous resolution in {} s.", SettingsPage.revert-countdown);
             cancel-text: @tr("Revert");
             accept-text: @tr("Keep");
             // "Revert" first: Enter twice must not keep a mode that may not display.
             highlighted: 0;
-            cancel => { root.revert-mode(); }
-            accept => { root.keep-mode(); }
+            cancel => { SettingsPage.revert-mode(); }
+            accept => { SettingsPage.keep-mode(); }
         }
     }
 
     if root.splash-visible: SplashScreen {
-        image: root.splash-image;
-        text: root.splash-text;
-        show-name: root.splash-name;
-        show-picture: root.splash-picture-shown;
-        show-hint: root.splash-hint;
-        target-title: root.entries.length > 0 ? root.entries[root.default-entry].title : "";
-        entry: root.entries.length > 0 ? root.entries[root.default-entry] : { kind: "linux" };
-        countdown: root.countdown;
-        progress: root.countdown-progress;
+        image: SettingsPage.splash-image;
+        text: SettingsPage.splash-text;
+        show-name: SettingsPage.splash-name;
+        show-picture: SettingsPage.splash-picture-shown;
+        show-hint: SettingsPage.splash-hint;
+        target-title: BootMenu.entries.length > 0 ? BootMenu.entries[BootMenu.default-entry].title : "";
+        entry: BootMenu.entries.length > 0 ? BootMenu.entries[BootMenu.default-entry] : { kind: "linux" };
+        countdown: BootMenu.countdown;
+        progress: BootMenu.progress;
         dismissed => {
             root.user-activity();
             root.splash-visible = false;

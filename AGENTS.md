@@ -25,8 +25,10 @@ Notes for developers and coding agents. The README is for users: keep build and 
   (`Hub::devices_connected`).
 - `vendor/`: the `acpi` and `argon2` crates, patched (vendor/README.md).
 - `ui/`: the `.slint` files: `main.slint` (the window, its state and the keyboard), one file per screen, `top-bar`,
-  `footer`, `dialogs`, `widgets`, and `mock.slint`, sample data so that `slint-viewer ui/main.slint` shows the screens
-  and opens the dialogs.
+  `footer`, `dialogs` and `widgets`. What the Rust code shows and handles is in a global per screen (`BootMenu`,
+  `System`, `SettingsPage`, `Install`) and per dialog it fills, read where it's used; AppWindow keeps the window's state
+  and what the password locks. The globals have sample data (`Platform.uses-mock-data`), so that
+  `slint-viewer ui/main.slint` shows the screens and opens the dialogs.
 - Keyboard focus is Slint's own: each control has a FocusScope, and the arrows a control doesn't use move the focus
   like Tab (`Focus.move`). Dialogs are PopupWindows. Entering a screen focuses its first element (`enter-screen`). In
   Settings, ↑ ↓ go from setting to setting (`Section`'s `step`), and past the ends into the next section.

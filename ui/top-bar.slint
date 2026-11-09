@@ -3,6 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { Frost, Focus } from "widgets.slint";
+import { Install } from "install-screen.slint";
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -102,7 +103,6 @@ export component TopBar inherits Rectangle {
     in property <int> screen;
     // 1: the Settings screen is hidden.
     in property <int> settings-access;
-    in property <bool> install-available;
     callback go-to(int);
     // ← → on the tab bar: the previous or next screen.
     callback step(bool);
@@ -160,14 +160,14 @@ export component TopBar inherits Rectangle {
             HorizontalLayout {
                 padding: 4px;
                 spacing: 4px;
-                for tab in root.settings-access == 1 ? (root.install-available ? [
+                for tab in root.settings-access == 1 ? (Install.available ? [
                     { text: @tr("Boot"), shortcut: "F1", screen: 0 },
                     { text: @tr("System"), shortcut: "F2", screen: 1 },
                     { text: @tr("Install"), shortcut: "F4", screen: 3 },
                 ] : [
                     { text: @tr("Boot"), shortcut: "F1", screen: 0 },
                     { text: @tr("System"), shortcut: "F2", screen: 1 },
-                ]) : (root.install-available ? [
+                ]) : (Install.available ? [
                     { text: @tr("Boot"), shortcut: "F1", screen: 0 },
                     { text: @tr("System"), shortcut: "F2", screen: 1 },
                     { text: @tr("Settings"), shortcut: "F3", screen: 2 },

@@ -6,6 +6,58 @@ import { Icon } from "icons.slint";
 import { InfoItem, MemorySegment, Button, BatteryInfo, Panel } from "widgets.slint";
 import { AboutSlint } from "std-widgets.slint";
 
+// The System screen's data, and its clock.
+export global System {
+    in property <[InfoItem]> items: Platform.uses-mock-data ? [
+        { label: "Processor", icon: "cpu", title: "Sample processor", detail: "Sample data" },
+        { label: "Memory", icon: "memory", title: "Sample memory", detail: "Sample data" },
+        { label: "System", icon: "computer", title: "Sample computer", detail: "Sample data" },
+        { label: "Firmware", icon: "firmware", title: "Sample firmware", detail: "Sample data" },
+        { label: "Secure Boot", title: "Sample state", detail: "Sample data", icon: "shield-off" },
+    ] : [];
+    in property <[MemorySegment]> memory: Platform.uses-mock-data ? [
+        { weight: 30, color: #5b8cff },
+        { weight: 0.5, color: #2fb6a3 },
+        { weight: 0.3, color: #e58a3a },
+        { weight: 0.8, color: #6b7390 },
+    ] : [];
+    in property <BatteryInfo> battery: Platform.uses-mock-data ? {
+        present: true,
+        level: 63,
+        direction: 1,
+        state: "Charging",
+        time-left: "Sample: 46 min until full",
+        ac: "AC adapter plugged in",
+        facts: [{ label: "Charging at", value: "Sample" }, { label: "Energy", value: "Sample" }, { label: "Health", value: "Sample" }],
+        identity: "Sample battery",
+    } : {};
+    // Slingshot's version.
+    in property <string> app-version: Platform.uses-mock-data ? "0.0" : "";
+    // The firmware clock: the date, the time under it.
+    in property <string> date-time-text: Platform.uses-mock-data ? "Sample date\n12:00" : "";
+    in property <bool> clock-settable: Platform.uses-mock-data;
+    // Setting it: day, month, year, hour, minute.
+    in-out property <bool> time-dialog-visible;
+    in property <[int]> time-fields: [1, 1, 2026, 0, 0];
+    callback open-time-dialog();
+    callback time-step(int, int);
+    // A number typed in a field.
+    callback time-set(int, int);
+    callback apply-time();
+    // In slint-viewer, the dialog opens and closes (the Rust code replaces
+    // these handlers).
+    open-time-dialog => {
+        if Platform.uses-mock-data {
+            time-dialog-visible = true;
+        }
+    }
+    apply-time => {
+        if Platform.uses-mock-data {
+            time-dialog-visible = false;
+        }
+    }
+}
+
 // A row of the machine's list: an icon, what it is, the value.
 export component InfoRow inherits Rectangle {
     in property <string> icon;
@@ -263,14 +315,8 @@ component ClockCard inherits Panel {
 }
 
 export component SystemScreen inherits Rectangle {
-    in property <[InfoItem]> items;
-    in property <[MemorySegment]> memory;
-    in property <string> app-version;
-    in property <BatteryInfo> battery;
     // The screen is shown: the battery's gradient moves.
     in property <bool> active;
-    // The firmware clock.
-    in property <string> date-time-text;
     in property <bool> can-change-time;
     callback change-time();
     // Entering the screen: the keyboard focus on the Change button.
@@ -304,14 +350,14 @@ export component SystemScreen inherits Rectangle {
                             vertical-alignment: center;
                         }
                     }
-                    for item[i] in root.items: InfoRow {
+                    for item[i] in System.items: InfoRow {
                         icon: item.icon;
                         good: item.good;
                         label: item.label;
                         title: item.title;
                         detail: item.detail;
                         // The memory: how it's used (the memory map).
-                        if item.icon == "memory" && root.memory.length > 0: Rectangle {
+                        if item.icon == "memory" && System.memory.length > 0: Rectangle {
                             x: 18px + 34px + 14px + 120px + 14px;
                             width: parent.width * 0.26;
                             height: 10px;
@@ -320,7 +366,7 @@ export component SystemScreen inherits Rectangle {
                             clip: true;
                             HorizontalLayout {
                                 spacing: 2px;
-                                for segment in root.memory: Rectangle {
+                                for segment in System.memory: Rectangle {
                                     horizontal-stretch: segment.weight;
                                     min-width: 3px;
                                     background: segment.color;
@@ -328,8 +374,8 @@ export component SystemScreen inherits Rectangle {
                             }
                         }
                     }
-                    if root.battery.present: BatteryRow {
-                        info: root.battery;
+                    if System.battery.present: BatteryRow {
+                        info: System.battery;
                         animate: root.active;
                     }
                 }
@@ -340,8 +386,8 @@ export component SystemScreen inherits Rectangle {
             width: root.width < 1200px ? 260px : 300px;
             spacing: 16px;
             alignment: start;
-            if root.date-time-text != "": ClockCard {
-                text: root.date-time-text;
+            if System.date-time-text != "": ClockCard {
+                text: System.date-time-text;
                 can-change: root.can-change-time;
                 focus-request: root.focus-request;
                 change => { root.change-time(); }
@@ -367,8 +413,8 @@ export component SystemScreen inherits Rectangle {
                             font-weight: 600;
                             color: Theme.text;
                         }
-                        if root.app-version != "": Text {
-                            text: root.app-version;
+                        if System.app-version != "": Text {
+                            text: System.app-version;
                             font-size: 13px;
                             color: Theme.text-muted;
                         }

@@ -298,20 +298,63 @@ component BootRow inherits BootItem {
     }
 }
 
-export component BootScreen inherits Rectangle {
-    in property <[BootEntry]> entries;
+// The boot menu: the entries, the countdown, and starting one.
+export global BootMenu {
+    in property <[BootEntry]> entries: Platform.uses-mock-data ? [
+        { title: "Example OS", subtitle: "Sample entry", kind: "linux", editable: true, customizable: true },
+        { title: "Example OS (recovery)", subtitle: "Sample entry", kind: "linux", editable: true, customizable: true },
+        { title: "Other example OS", subtitle: "Sample entry", kind: "windows", customizable: true },
+        { title: "Sample USB drive", subtitle: "Sample entry", kind: "usb", arrived: true },
+        { title: "Sample network boot", subtitle: "Sample entry", kind: "network" },
+        { title: "Sample shell", subtitle: "Sample entry", kind: "shell" },
+    ] : [];
     in property <int> default-entry;
     in-out property <int> focused-entry;
+    // The "More…" level is shown.
+    in property <bool> more-level;
     // Remaining seconds of the auto-boot countdown, or -1 when stopped.
-    in property <int> countdown;
+    in property <int> countdown: Platform.uses-mock-data ? 7 : -1;
+    in property <int> countdown-total: 10;
+    // Continuous progress of the countdown, from 1 (just started) to 0 (boot).
+    // Measured from when the countdown started, so the ring and the progress
+    // bar reach 0 exactly when the entry starts.
+    property <duration> countdown-start;
+    out property <float> progress: countdown >= 0
+        ? clamp(1 - (animation-tick() - countdown-start) / (countdown-total * 1s), 0, 1)
+        : 1;
+    changed countdown => {
+        if countdown == countdown-total {
+            countdown-start = animation-tick();
+        }
+    }
     // A system hibernated: it must be started again (the default entry
     // when `resume-known`, else Slingshot can't tell which one).
     in property <bool> hibernated;
     in property <bool> resume-known;
+    // The Restart and Shut down buttons under the cards.
+    in property <bool> power-buttons: Platform.uses-mock-data;
+    callback boot(int);
+    callback power-off(/* shut down */ bool);
+
+    // E: the kernel options of entry `options-entry`, for this start.
+    in-out property <bool> options-visible;
+    in-out property <int> options-entry;
+    in property <string> options-text: Platform.uses-mock-data ? "root=UUID=sample rw quiet splash" : "";
+    callback open-options(int);
+    callback boot-with-options(int, string);
+    // In slint-viewer, the dialog opens (the Rust code replaces this handler).
+    open-options(i) => {
+        if Platform.uses-mock-data {
+            options-entry = i;
+            options-visible = true;
+        }
+    }
+}
+
+export component BootScreen inherits Rectangle {
     // The screen is shown, with nothing over it: the entry chosen takes the
     // keyboard focus.
     in property <bool> active;
-    callback boot(int);
     // E: the kernel options of the entry, for this start.
     callback edit-options(int);
     // ↑ from the entries: the tab bar.
@@ -321,15 +364,9 @@ export component BootScreen inherits Rectangle {
     // The pointer moved over a card: the user is here, stop the countdown.
     callback pointer-activity();
 
-    // The Restart and Shut down buttons under the cards.
-    in property <bool> power-buttons;
-    // Which of them has the keyboard focus: 0 Restart, 1 Shut down, -1 none
-    // (an entry has it).
+    // Which of the Restart and Shut down buttons has the keyboard focus: 0
+    // Restart, 1 Shut down, -1 none (an entry has it).
     out property <int> power-focus: restart.has-focus ? 0 : shut-down.has-focus ? 1 : -1;
-    callback power(/* shut down */ bool);
-
-    // From 1 to 0 over the countdown (computed by AppWindow).
-    in property <float> progress: 1;
 
     // Where the pointer was last over an entry: a move to the same place
     // doesn't take the focus.
@@ -348,11 +385,11 @@ export component BootScreen inherits Rectangle {
     // entries just changed: it takes the focus then).
     property <int> focus-request;
     public function focus-entry(i: int) {
-        root.focused-entry = clamp(i, 0, max(0, root.entries.length - 1));
+        BootMenu.focused-entry = clamp(i, 0, max(0, BootMenu.entries.length - 1));
         root.focus-request += 1;
     }
     public function focus-power() {
-        if root.power-buttons {
+        if BootMenu.power-buttons {
             restart.focus();
         }
     }
@@ -362,14 +399,14 @@ export component BootScreen inherits Rectangle {
     function entry-key(i: int, event: KeyEvent) -> EventResult {
         let classic = Theme.style == 3;
         if event.text == Key.Return || event.text == " " {
-            root.boot(i);
+            BootMenu.boot(i);
             return accept;
         }
         if event.text == "c" || event.text == "C" {
             root.customize(i);
             return accept;
         }
-        if (event.text == "e" || event.text == "E") && root.entries[i].editable {
+        if (event.text == "e" || event.text == "E") && BootMenu.entries[i].editable {
             root.edit-options(i);
             return accept;
         }
@@ -378,7 +415,7 @@ export component BootScreen inherits Rectangle {
             return accept;
         }
         if event.text == Key.End {
-            root.focus-entry(root.entries.length - 1);
+            root.focus-entry(BootMenu.entries.length - 1);
             return accept;
         }
         let back = classic ? event.text == Key.UpArrow : event.text == Key.LeftArrow;
@@ -393,7 +430,7 @@ export component BootScreen inherits Rectangle {
             return accept;
         }
         if forward {
-            if i < root.entries.length - 1 {
+            if i < BootMenu.entries.length - 1 {
                 Focus.move(true);
             } else if classic {
                 root.focus-power();
@@ -412,11 +449,11 @@ export component BootScreen inherits Rectangle {
     }
 
     property <length> row-step: 56px + 4px;
-    property <length> list-height: max(0, root.entries.length * root.row-step - 4px);
+    property <length> list-height: max(0, BootMenu.entries.length * root.row-step - 4px);
     property <length> card-gap: 20px;
     property <length> available-width: self.width - 128px;
-    property <length> card-width: clamp((available-width - (entries.length - 1) * card-gap) / max(1, entries.length), 168px, 216px);
-    property <length> row-width: entries.length * card-width + max(0, entries.length - 1) * card-gap;
+    property <length> card-width: clamp((available-width - (BootMenu.entries.length - 1) * card-gap) / max(1, BootMenu.entries.length), 168px, 216px);
+    property <length> row-width: BootMenu.entries.length * card-width + max(0, BootMenu.entries.length - 1) * card-gap;
     // When the cards don't fit, the row scrolls just enough to keep the
     // focused card in view (so hovering a visible card never scrolls).
     property <length> scroll: 0;
@@ -426,7 +463,7 @@ export component BootScreen inherits Rectangle {
             root.scroll = 0;
             return;
         }
-        let left = root.focused-entry * (root.card-width + root.card-gap);
+        let left = BootMenu.focused-entry * (root.card-width + root.card-gap);
         let right = left + root.card-width + 24px;
         if left < root.scroll {
             root.scroll = max(0, left);
@@ -434,6 +471,8 @@ export component BootScreen inherits Rectangle {
             root.scroll = min(root.max-scroll, right - root.available-width);
         }
     }
+    // To see it change.
+    property <int> focused-entry: BootMenu.focused-entry;
     changed focused-entry => {
         root.keep-focus-visible();
         // Chosen by the Rust side (the "More…" level, a USB stick): the
@@ -471,13 +510,13 @@ export component BootScreen inherits Rectangle {
                 stroke: transparent;
             }
         status := Text {
-            text: root.entries.length == 0 ? @tr("No boot entries found in the firmware.")
-                : root.hibernated && root.resume-known && root.countdown >= 0
-                    ? @tr("Resuming {} in {} s. Press any key to stay here.", root.entries[root.default-entry].title, root.countdown)
-                : root.hibernated && root.resume-known
-                    ? @tr("{} is hibernated: start it to resume where you left off.", root.entries[root.default-entry].title)
-                : root.hibernated ? @tr("A system is hibernated: start it to resume where you left off.")
-                : root.countdown >= 0 ? @tr("{} starts in {} s. Press any key to stay here.", root.entries[root.default-entry].title, root.countdown)
+            text: BootMenu.entries.length == 0 ? @tr("No boot entries found in the firmware.")
+                : BootMenu.hibernated && BootMenu.resume-known && BootMenu.countdown >= 0
+                    ? @tr("Resuming {} in {} s. Press any key to stay here.", BootMenu.entries[BootMenu.default-entry].title, BootMenu.countdown)
+                : BootMenu.hibernated && BootMenu.resume-known
+                    ? @tr("{} is hibernated: start it to resume where you left off.", BootMenu.entries[BootMenu.default-entry].title)
+                : BootMenu.hibernated ? @tr("A system is hibernated: start it to resume where you left off.")
+                : BootMenu.countdown >= 0 ? @tr("{} starts in {} s. Press any key to stay here.", BootMenu.entries[BootMenu.default-entry].title, BootMenu.countdown)
                 : "";
             font-size: 15px;
             color: Theme.text-soft;
@@ -501,22 +540,22 @@ export component BootScreen inherits Rectangle {
                     width: parent.width - 16px;
                     height: parent.height - 16px;
                     content-height: root.list-height;
-                    content-y: -clamp(root.focused-entry * root.row-step - (self.height - 56px) / 2, 0, max(0, root.list-height - self.height));
+                    content-y: -clamp(BootMenu.focused-entry * root.row-step - (self.height - 56px) / 2, 0, max(0, root.list-height - self.height));
                     animate content-y { duration: 160ms; easing: ease-out; }
                     VerticalLayout {
                         spacing: 4px;
                         alignment: start;
-                        for entry[i] in root.entries: BootRow {
+                        for entry[i] in BootMenu.entries: BootRow {
                             entry: entry;
                             index: i;
-                            is-default: i == root.default-entry;
-                            focused-entry <=> root.focused-entry;
+                            is-default: i == BootMenu.default-entry;
+                            focused-entry <=> BootMenu.focused-entry;
                             focus-request: root.focus-request;
                             active: root.active;
                             key(event) => { return root.entry-key(i, event); }
                             hovered => { root.pointer-activity(); }
                             pointer-at(x, y) => { return root.pointer-moved(x, y); }
-                            clicked => { root.boot(i); }
+                            clicked => { BootMenu.boot(i); }
                             right-clicked => { root.customize(i); }
                         }
                     }
@@ -544,20 +583,20 @@ export component BootScreen inherits Rectangle {
                 width: root.row-width;
                 height: 288px;
                 spacing: root.card-gap;
-                for entry[i] in root.entries: card := BootCard {
+                for entry[i] in BootMenu.entries: card := BootCard {
                     width: root.card-width;
                     entry: entry;
                     index: i;
-                    is-default: i == root.default-entry;
-                    focused-entry <=> root.focused-entry;
+                    is-default: i == BootMenu.default-entry;
+                    focused-entry <=> BootMenu.focused-entry;
                     focus-request: root.focus-request;
                     active: root.active;
-                    counting: root.countdown >= 0;
-                    progress: root.progress;
+                    counting: BootMenu.countdown >= 0;
+                    progress: BootMenu.progress;
                     key(event) => { return root.entry-key(i, event); }
                     hovered => { root.pointer-activity(); }
                     pointer-at(x, y) => { return root.pointer-moved(x, y); }
-                    clicked => { root.boot(i); }
+                    clicked => { BootMenu.boot(i); }
                     right-clicked => { root.customize(i); }
                 }
             }
@@ -566,8 +605,8 @@ export component BootScreen inherits Rectangle {
         // Not an `if`: the buttons are focused by id. ↓ or → goes from
         // Restart to Shut down, ↑ or ← back; ↑ from Restart, to the entry.
         FocusScope {
-            visible: root.power-buttons;
-            height: root.power-buttons ? self.preferred-height : 0px;
+            visible: BootMenu.power-buttons;
+            height: BootMenu.power-buttons ? self.preferred-height : 0px;
             focus-on-click: false;
             focus-on-tab-navigation: false;
             key-pressed(event) => {
@@ -575,7 +614,7 @@ export component BootScreen inherits Rectangle {
                     if shut-down.has-focus {
                         restart.focus();
                     } else {
-                        root.focus-entry(root.focused-entry);
+                        root.focus-entry(BootMenu.focused-entry);
                     }
                     return accept;
                 }
@@ -601,12 +640,12 @@ export component BootScreen inherits Rectangle {
                     restart := Button {
                         icon: "restart";
                         text: @tr("Restart");
-                        clicked => { root.power(false); }
+                        clicked => { BootMenu.power-off(false); }
                     }
                     shut-down := Button {
                         icon: "power";
                         text: @tr("Shut down");
-                        clicked => { root.power(true); }
+                        clicked => { BootMenu.power-off(true); }
                     }
                 }
             }

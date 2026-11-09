@@ -15,7 +15,7 @@ use core::cell::RefCell;
 use slint::ComponentHandle;
 
 
-use super::{AppWindow, Backend, LockedVolume, Secret, Target, UnlockResult};
+use super::{AppWindow, Backend, LockedVolume, Passphrase, Secret, Target, UnlockResult};
 
 /// Starts a target (after the unlocking): the "Starting…" transition.
 pub type Start = Rc<dyn Fn(String, Target)>;
@@ -55,7 +55,7 @@ impl Unlocker {
         let Some(volume) = f.volumes.get(f.current).cloned() else {
             let f = flow.take().unwrap();
             drop(flow);
-            ui.invoke_close_unlock();
+            ui.global::<Passphrase>().set_visible(false);
             match f.then {
                 Then::Start(title, target) => (self.start)(title, target),
                 Then::Open(open) => open(f.unlocked > 0),
@@ -64,20 +64,19 @@ impl Unlocker {
         };
         // `luks-<uuid>` (rd.luks.uuid=) says nothing; `root`, `home` do.
         let detail = if volume.name.starts_with("luks-") { volume.detail.clone() } else { format!("{} · {}", volume.name, volume.detail) };
-        ui.set_unlock_detail(detail.into());
         let counter = if f.volumes.len() > 1 { crate::tr::trf("Disk {} of {}", &[&(f.current + 1), &f.volumes.len()]) } else { String::new() };
-        ui.set_unlock_counter(counter.into());
-        ui.set_unlock_browsing(matches!(f.then, Then::Open(_)));
-        ui.set_unlock_wrong(false);
-        ui.set_unlock_error(Default::default());
+        let dialog = ui.global::<Passphrase>();
+        dialog.set_detail(detail.into());
+        dialog.set_counter(counter.into());
+        dialog.set_browsing(matches!(f.then, Then::Open(_)));
+        dialog.set_wrong(false);
+        dialog.set_error(Default::default());
         let previous = f.previous.take();
         drop(flow);
-        if !ui.get_unlock_visible() {
-            ui.invoke_open_unlock();
-        }
+        dialog.set_visible(true);
         match previous {
             Some(p) => self.check(volume.id, p, true),
-            None => ui.invoke_retry_unlock(),
+            None => dialog.invoke_retry(),
         }
     }
 
@@ -85,9 +84,10 @@ impl Unlocker {
     /// the previous one, so a wrong one isn't an error, just a question.
     fn check(&self, id: usize, passphrase: Secret, reused: bool) {
         let Some(ui) = self.ui.upgrade() else { return };
-        ui.set_unlock_checking(true);
-        ui.set_unlock_wrong(false);
-        ui.set_unlock_error(Default::default());
+        let dialog = ui.global::<Passphrase>();
+        dialog.set_checking(true);
+        dialog.set_wrong(false);
+        dialog.set_error(Default::default());
         let keep = Secret(passphrase.0.clone());
         let this = self.clone();
         self.backend.unlock(
@@ -95,7 +95,8 @@ impl Unlocker {
             passphrase,
             Box::new(move |result| {
                 let Some(ui) = this.ui.upgrade() else { return };
-                ui.set_unlock_checking(false);
+                let dialog = ui.global::<Passphrase>();
+                dialog.set_checking(false);
                 // Cancelled while checking: the dialog is gone already.
                 if this.flow.borrow().is_none() {
                     return;
@@ -110,14 +111,14 @@ impl Unlocker {
                         this.show_current();
                     }
                     UnlockResult::WrongPassphrase => {
-                        ui.set_unlock_wrong(!reused);
-                        ui.invoke_retry_unlock();
+                        dialog.set_wrong(!reused);
+                        dialog.invoke_retry();
                     }
                     UnlockResult::Failed(why) => {
-                        ui.set_unlock_error(why.into());
-                        ui.invoke_retry_unlock();
+                        dialog.set_error(why.into());
+                        dialog.invoke_retry();
                     }
-                    UnlockResult::Cancelled => ui.invoke_unlock_cancel(),
+                    UnlockResult::Cancelled => dialog.invoke_cancel(),
                 }
             }),
         );
@@ -140,7 +141,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, start: Start, stop_countdo
     let unlocker = Unlocker { ui: ui.as_weak(), backend: backend.clone(), start: start.clone(), flow: Default::default() };
     {
         let u = unlocker.clone();
-        ui.on_unlock_submit(move |text| {
+        ui.global::<Passphrase>().on_submit(move |text| {
             if text.is_empty() {
                 return;
             }
@@ -150,7 +151,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, start: Start, stop_countdo
     }
     {
         let u = unlocker.clone();
-        ui.on_unlock_skip(move || {
+        ui.global::<Passphrase>().on_skip(move || {
             if let Some(f) = u.flow.borrow_mut().as_mut() {
                 f.current += 1;
             }
@@ -159,13 +160,14 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, start: Start, stop_countdo
     }
     {
         let u = unlocker.clone();
-        ui.on_unlock_cancel(move || {
+        ui.global::<Passphrase>().on_cancel(move || {
             u.flow.borrow_mut().take();
             // Also stops a check under way.
             u.backend.forget_unlocked();
             if let Some(ui) = u.ui.upgrade() {
-                ui.set_unlock_checking(false);
-                ui.invoke_close_unlock();
+                let dialog = ui.global::<Passphrase>();
+                dialog.set_checking(false);
+                dialog.set_visible(false);
             }
         });
     }

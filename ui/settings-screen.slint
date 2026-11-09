@@ -531,18 +531,37 @@ component Section inherits FocusScope {
     }
 }
 
-export component SettingsScreen inherits Rectangle {
-    in-out property <int> theme-index;
+// The Settings screen: what it shows and changes, saved by the Rust code
+// (in slingshot.toml with `slingshot config`, else in a firmware variable).
+export global SettingsPage {
+    in property <bool> in-file;
+    callback theme-selected(int);
+    callback accent-selected(int);
+    // The splash screen (1) or the boot menu (0) at startup.
     in-out property <int> startup-index;
+    callback startup-selected(int);
+    // The default entry: 0 as set (slingshot.toml, systemd-boot), 1 the
+    // one started last.
     in-out property <int> default-index;
-    // The splash picture: an index in `picture-names` ("None" first).
-    in property <[string]> picture-names;
-    in-out property <int> splash-picture;
+    callback default-selected(int);
+    in-out property <int> timeout-seconds;
+    callback timeout-changed(int);
+
+    // "None", then the pictures (PNG, JPEG) next to Slingshot.
+    in property <[string]> picture-names: Platform.uses-mock-data ? ["None", "sample-picture.jpg", "other-sample-picture.png"] : ["None"];
+    // Behind the boot menu, and its index in `picture-names`.
+    in property <image> wallpaper;
     in-out property <int> wallpaper-picture;
-    in property <image> wallpaper-preview;
-    in property <image> splash-preview;
-    // The splash screen's text and its "Press any key" line, saved in
-    // slingshot.toml (the text when Enter is pressed or the field is left).
+    callback wallpaper-picture-selected(int);
+    // On the desktop: pictures can be added with a file dialog.
+    callback add-wallpaper-picture();
+    // The splash screen: its picture, and its index in `picture-names`.
+    in property <image> splash-image;
+    in-out property <int> splash-picture;
+    callback splash-picture-selected(int);
+    callback add-splash-picture();
+    // The splash screen's text and its "Press any key" line (the text is
+    // saved when Enter is pressed or the field is left).
     in-out property <string> splash-text;
     in property <bool> splash-name: true;
     in property <bool> splash-picture-shown: true;
@@ -550,48 +569,77 @@ export component SettingsScreen inherits Rectangle {
     callback splash-text-entered(string);
     // "name", "picture" or "hint", and whether it's shown now.
     callback splash-shown(string, bool);
-    in-out property <int> timeout-seconds;
-    in property <string> mode-label;
-    in property <bool> mode-is-current;
-    in property <int> mode-count;
-    in property <string> mode-max;
-    in property <[BootEntry]> order;
-    in property <bool> order-dirty;
-    in property <bool> order-changed-from-original;
-    // "Automatic (…)" first.
-    in property <[string]> language-names;
-    in property <int> language-index;
-    in property <[string]> keyboard-names;
-    in property <int> keyboard-index;
 
-    callback theme-selected(int);
-    callback accent-selected(int);
-    callback startup-selected(int);
-    callback default-selected(int);
-    callback splash-picture-selected(int);
-    callback wallpaper-picture-selected(int);
-    callback add-wallpaper-picture();
-    // Where the settings are kept: slingshot.toml (`slingshot config`) or NVRAM.
-    in property <bool> settings-in-file;
-    callback add-splash-picture();
-    callback timeout-changed(int);
+    // The display mode, and how many the display has, up to the largest.
+    in property <string> mode-label: Platform.uses-mock-data ? "Sample resolution" : "";
+    in property <bool> mode-is-current: Platform.uses-mock-data;
+    in property <int> mode-count: Platform.uses-mock-data ? 4 : 0;
+    in property <string> mode-max: Platform.uses-mock-data ? mode-label : "";
     callback previous-mode();
     callback next-mode();
     callback apply-mode();
+    // Seconds left before a new resolution is reverted, or -1.
+    in property <int> revert-countdown: -1;
+    callback keep-mode();
+    callback revert-mode();
+
+    // The firmware's boot order.
+    in property <[BootEntry]> order: Platform.uses-mock-data ? [
+        { title: "Sample boot loader", subtitle: "Sample entry", kind: "linux" },
+        { title: "Other example OS", subtitle: "Sample entry", kind: "windows" },
+        { title: "Sample USB drive", subtitle: "Sample entry", kind: "usb" },
+        { title: "Sample network boot", subtitle: "Sample entry", kind: "network" },
+        { title: "Sample shell", subtitle: "Sample entry", kind: "shell" },
+    ] : [];
+    in property <bool> order-dirty;
+    in property <bool> order-changed-from-original;
     callback move-entry(int, int);
     callback restore-order();
+    in-out property <bool> confirm-save-visible;
     callback save-order();
-    callback reset-settings();
-    // ↑ above the first setting: the top bar (not the sidebar's tabs).
-    callback leave-up();
+
+    // Language and keyboard layout: "Automatic (…)" first.
+    in property <[string]> language-names: Platform.uses-mock-data ? ["Automatic (English)", "English", "Deutsch", "Français"] : [];
+    in-out property <int> language-index;
+    in property <[string]> keyboard-names: Platform.uses-mock-data ? ["Automatic (Sample)", "Sample layout", "Other sample layout"] : [];
+    in-out property <int> keyboard-index;
     callback language-selected(int);
     callback keyboard-selected(int);
+
+    in-out property <bool> confirm-reset-visible;
+    callback reset-settings();
+
+    public function select-theme(i: int) {
+        Theme.theme-index = i;
+        theme-selected(i);
+    }
+    public function select-accent(i: int) {
+        Theme.accent-index = i;
+        accent-selected(i);
+    }
+    public function select-language(i: int) {
+        if i != language-index {
+            language-index = i;
+            language-selected(i);
+        }
+    }
+    public function select-keyboard(i: int) {
+        if i != keyboard-index {
+            keyboard-index = i;
+            keyboard-selected(i);
+        }
+    }
+}
+
+export component SettingsScreen inherits Rectangle {
+    // ↑ above the first setting: the top bar (not the sidebar's tabs).
+    callback leave-up();
 
     // Drag and drop in the boot order: the dragged row, and where it goes.
     property <length> row-pitch: 58px; // row height + spacing
     property <int> drag-from: -1;
     property <length> drag-dy;
-    property <int> drag-to: drag-from < 0 ? -1 : clamp(drag-from + round(drag-dy / row-pitch), 0, order.length - 1);
+    property <int> drag-to: drag-from < 0 ? -1 : clamp(drag-from + round(drag-dy / row-pitch), 0, SettingsPage.order.length - 1);
 
     // The sections, in the sidebar's order (and the items').
     property <[{icon: string, title: string, about: string}]> sections: [
@@ -720,7 +768,7 @@ export component SettingsScreen inherits Rectangle {
                     padding-right: 12px;
                     padding-bottom: 12px;
                     Text {
-                        text: root.settings-in-file ? @tr("Settings are saved in slingshot.toml, next to Slingshot")
+                        text: SettingsPage.in-file ? @tr("Settings are saved in slingshot.toml, next to Slingshot")
                             : @tr("Settings are kept in this computer's firmware, not on a disk");
                         font-size: 12px;
                         color: Theme.text-muted;
@@ -746,7 +794,7 @@ export component SettingsScreen inherits Rectangle {
                         reset-button := Button {
                             text: @tr("Reset all settings");
                             danger: true;
-                            clicked => { root.reset-settings(); }
+                            clicked => { SettingsPage.confirm-reset-visible = true; }
                         }
                     }
                 }
@@ -820,9 +868,9 @@ export component SettingsScreen inherits Rectangle {
                         theme-picker := SegmentedControl {
                             width: root.control-width;
                             options: Theme.theme-names;
-                            current <=> root.theme-index;
+                            current <=> Theme.theme-index;
                             activated(i) => {
-                                root.theme-selected(i);
+                                SettingsPage.select-theme(i);
                             }
                         }
                     }
@@ -834,7 +882,7 @@ export component SettingsScreen inherits Rectangle {
                         alignment: start;
                         accent-picker := AccentPicker {
                             activated(i) => {
-                                root.accent-selected(i);
+                                SettingsPage.select-accent(i);
                             }
                         }
                     }
@@ -846,13 +894,13 @@ export component SettingsScreen inherits Rectangle {
                         alignment: start;
                         wallpaper-picker := PicturePicker {
                             width: root.control-width;
-                            names: root.picture-names;
+                            names: SettingsPage.picture-names;
                             none-text: @tr("No wallpaper");
-                            current <=> root.wallpaper-picture;
-                            preview: root.wallpaper-preview;
-                            has-preview: root.wallpaper-preview.width > 0;
-                            activated(i) => { root.wallpaper-picture-selected(i); }
-                            add => { root.add-wallpaper-picture(); }
+                            current <=> SettingsPage.wallpaper-picture;
+                            preview: SettingsPage.wallpaper;
+                            has-preview: SettingsPage.wallpaper.width > 0;
+                            activated(i) => { SettingsPage.wallpaper-picture-selected(i); }
+                            add => { SettingsPage.add-wallpaper-picture(); }
                         }
                     }
                 }
@@ -864,18 +912,18 @@ export component SettingsScreen inherits Rectangle {
                         alignment: start;
                         mode-picker := StepPicker {
                             width: root.control-width;
-                            text: root.mode-label + (root.mode-is-current ? @tr("  (current)") : "");
+                            text: SettingsPage.mode-label + (SettingsPage.mode-is-current ? @tr("  (current)") : "");
                             step(d) => {
                                 if d < 0 {
-                                    root.previous-mode();
+                                    SettingsPage.previous-mode();
                                 } else {
-                                    root.next-mode();
+                                    SettingsPage.next-mode();
                                 }
                             }
                             accepts-enter: true;
                             accepted => {
-                                if !root.mode-is-current {
-                                    root.apply-mode();
+                                if !SettingsPage.mode-is-current {
+                                    SettingsPage.apply-mode();
                                 }
                             }
                         }
@@ -888,13 +936,13 @@ export component SettingsScreen inherits Rectangle {
                             }
                             mode-apply := Button {
                                 text: @tr("Apply");
-                                enabled: !root.mode-is-current;
-                                clicked => { root.apply-mode(); }
+                                enabled: !SettingsPage.mode-is-current;
+                                clicked => { SettingsPage.apply-mode(); }
                             }
                         }
                     }
                     Text {
-                        text: root.mode-count > 0 ? @tr("{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it.", root.mode-count, root.mode-max)
+                        text: SettingsPage.mode-count > 0 ? @tr("{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it.", SettingsPage.mode-count, SettingsPage.mode-max)
                             : @tr("Applied right away. Reverts after 10 s unless you keep it.");
                         font-size: 13px;
                         color: Theme.text-muted;
@@ -920,7 +968,7 @@ export component SettingsScreen inherits Rectangle {
                 // what isn't the two others is the first setting. Its
                 // controls go one by one, like Tab.
                 step(d) => {
-                    if root.startup-index == 1 && !timeout-picker.has-focus
+                    if SettingsPage.startup-index == 1 && !timeout-picker.has-focus
                         && !(default-picker.has-focus && d > 0) && !(startup-picker.has-focus && d < 0) {
                         Focus.move(d > 0);
                         return true;
@@ -945,21 +993,21 @@ export component SettingsScreen inherits Rectangle {
                     startup-picker := SegmentedControl {
                         max-width: root.control-width;
                         options: [@tr("Boot menu"), @tr("Splash screen")];
-                        current <=> root.startup-index;
+                        current <=> SettingsPage.startup-index;
                         activated(i) => {
-                            root.startup-selected(i);
+                            SettingsPage.startup-selected(i);
                         }
                     }
-                    if root.startup-index == 1: PicturePicker {
+                    if SettingsPage.startup-index == 1: PicturePicker {
                         max-width: root.control-width;
-                        names: root.picture-names;
-                        current <=> root.splash-picture;
-                        preview: root.splash-preview;
-                        has-preview: root.splash-preview.width > 0;
-                        add => { root.add-splash-picture(); }
-                        activated(i) => { root.splash-picture-selected(i); }
+                        names: SettingsPage.picture-names;
+                        current <=> SettingsPage.splash-picture;
+                        preview: SettingsPage.splash-image;
+                        has-preview: SettingsPage.splash-image.width > 0;
+                        add => { SettingsPage.add-splash-picture(); }
+                        activated(i) => { SettingsPage.splash-picture-selected(i); }
                     }
-                    if root.startup-index == 1: Rectangle {
+                    if SettingsPage.startup-index == 1: Rectangle {
                         max-width: root.control-width;
                         height: 48px;
                         border-radius: Theme.radius;
@@ -971,22 +1019,22 @@ export component SettingsScreen inherits Rectangle {
                         splash-text-input := TextField {
                             x: 14px;
                             width: parent.width - 28px;
-                            text <=> root.splash-text;
+                            text <=> SettingsPage.splash-text;
                             placeholder: @tr("A text instead of the entry's name");
-                            accepted(text) => { root.splash-text-entered(text); }
+                            accepted(text) => { SettingsPage.splash-text-entered(text); }
                             arrow(down) => {
                                 Focus.move(down);
                                 true
                             }
                             changed has-focus => {
                                 if !self.has-focus {
-                                    root.splash-text-entered(self.text);
+                                    SettingsPage.splash-text-entered(self.text);
                                 }
                             }
                         }
                     }
                     // ← → from toggle to toggle, stopping at the ends.
-                    if root.startup-index == 1: FocusScope {
+                    if SettingsPage.startup-index == 1: FocusScope {
                         focus-on-click: false;
                         focus-on-tab-navigation: false;
                         key-pressed(event) => {
@@ -1004,18 +1052,18 @@ export component SettingsScreen inherits Rectangle {
                         alignment: start;
                         name-toggle := Toggle {
                             text: @tr("Name");
-                            checked: root.splash-name;
-                            clicked => { root.splash-shown("name", !root.splash-name); }
+                            checked: SettingsPage.splash-name;
+                            clicked => { SettingsPage.splash-shown("name", !SettingsPage.splash-name); }
                         }
                         Toggle {
                             text: @tr("Picture");
-                            checked: root.splash-picture-shown;
-                            clicked => { root.splash-shown("picture", !root.splash-picture-shown); }
+                            checked: SettingsPage.splash-picture-shown;
+                            clicked => { SettingsPage.splash-shown("picture", !SettingsPage.splash-picture-shown); }
                         }
                         hint-toggle := Toggle {
                             text: @tr("Key hint");
-                            checked: root.splash-hint;
-                            clicked => { root.splash-shown("hint", !root.splash-hint); }
+                            checked: SettingsPage.splash-hint;
+                            clicked => { SettingsPage.splash-shown("hint", !SettingsPage.splash-hint); }
                         }
                     }
                     }
@@ -1026,9 +1074,9 @@ export component SettingsScreen inherits Rectangle {
                     default-picker := SegmentedControl {
                         max-width: root.control-width;
                         options: [@tr("The one set as default"), @tr("The last one started")];
-                        current <=> root.default-index;
+                        current <=> SettingsPage.default-index;
                         activated(i) => {
-                            root.default-selected(i);
+                            SettingsPage.default-selected(i);
                         }
                     }
                 }
@@ -1040,10 +1088,10 @@ export component SettingsScreen inherits Rectangle {
                         alignment: start;
                         timeout-picker := SecondsField {
                             width: 200px;
-                            value: root.timeout-seconds;
+                            value: SettingsPage.timeout-seconds;
                             changed(v) => {
-                                root.timeout-seconds = v;
-                                root.timeout-changed(v);
+                                SettingsPage.timeout-seconds = v;
+                                SettingsPage.timeout-changed(v);
                             }
                         }
                         Text {
@@ -1088,11 +1136,11 @@ export component SettingsScreen inherits Rectangle {
                     SettingLabel { text: @tr("Language"); }
                     language-picker := StepPicker {
                         max-width: root.control-width;
-                        text: root.language-names[root.language-index];
-                        can-previous: root.language-index > 0;
-                        can-next: root.language-index < root.language-names.length - 1;
+                        text: SettingsPage.language-names[SettingsPage.language-index];
+                        can-previous: SettingsPage.language-index > 0;
+                        can-next: SettingsPage.language-index < SettingsPage.language-names.length - 1;
                         step(d) => {
-                            root.language-selected(clamp(root.language-index + d, 0, root.language-names.length - 1));
+                            SettingsPage.select-language(clamp(SettingsPage.language-index + d, 0, SettingsPage.language-names.length - 1));
                         }
                     }
                 }
@@ -1101,11 +1149,11 @@ export component SettingsScreen inherits Rectangle {
                     SettingLabel { text: @tr("Keyboard layout"); }
                     keyboard-picker := StepPicker {
                         max-width: root.control-width;
-                        text: root.keyboard-names[root.keyboard-index];
-                        can-previous: root.keyboard-index > 0;
-                        can-next: root.keyboard-index < root.keyboard-names.length - 1;
+                        text: SettingsPage.keyboard-names[SettingsPage.keyboard-index];
+                        can-previous: SettingsPage.keyboard-index > 0;
+                        can-next: SettingsPage.keyboard-index < SettingsPage.keyboard-names.length - 1;
                         step(d) => {
-                            root.keyboard-selected(clamp(root.keyboard-index + d, 0, root.keyboard-names.length - 1));
+                            SettingsPage.select-keyboard(clamp(SettingsPage.keyboard-index + d, 0, SettingsPage.keyboard-names.length - 1));
                         }
                     }
                 }
@@ -1125,8 +1173,8 @@ export component SettingsScreen inherits Rectangle {
                     if at-end && self.focus-buttons() {
                         return;
                     }
-                    if root.order.length > 0 {
-                        root.row-focus = at-end ? root.order.length - 1 : 0;
+                    if SettingsPage.order.length > 0 {
+                        root.row-focus = at-end ? SettingsPage.order.length - 1 : 0;
                         root.row-request += 1;
                     }
                 }
@@ -1145,10 +1193,10 @@ export component SettingsScreen inherits Rectangle {
                 // Row by row, then the buttons.
                 step(d) => {
                     if restore.has-focus || save-order.has-focus {
-                        if d > 0 || root.order.length == 0 {
+                        if d > 0 || SettingsPage.order.length == 0 {
                             return false;
                         }
-                        root.row-focus = root.order.length - 1;
+                        root.row-focus = SettingsPage.order.length - 1;
                         root.row-request += 1;
                         return true;
                     }
@@ -1156,7 +1204,7 @@ export component SettingsScreen inherits Rectangle {
                     if n < 0 {
                         return false;
                     }
-                    if n >= root.order.length {
+                    if n >= SettingsPage.order.length {
                         return self.focus-buttons();
                     }
                     root.row-focus = n;
@@ -1179,10 +1227,10 @@ export component SettingsScreen inherits Rectangle {
                             content-height: rows.preferred-height;
                             rows := VerticalLayout {
                                 spacing: root.row-pitch - 50px;
-                                for entry[i] in root.order: order-row := OrderRow {
+                                for entry[i] in SettingsPage.order: order-row := OrderRow {
                                     entry: entry;
                                     position: i;
-                                    count: root.order.length;
+                                    count: SettingsPage.order.length;
                                     shown-position: i == root.drag-from ? root.drag-to
                                         : self.shift < 0 ? i - 1 : self.shift > 0 ? i + 1 : i;
                                     shift: root.drag-from < 0 || i == root.drag-from ? 0px
@@ -1226,17 +1274,17 @@ export component SettingsScreen inherits Rectangle {
                                         root.drag-from = -1;
                                         root.row-focus = to;
                                         if to != from {
-                                            root.move-entry(from, to);
+                                            SettingsPage.move-entry(from, to);
                                         }
                                     }
                                     // The focus goes with the row.
                                     move-up => {
                                         root.row-focus = i - 1;
-                                        root.move-entry(i, i - 1);
+                                        SettingsPage.move-entry(i, i - 1);
                                     }
                                     move-down => {
                                         root.row-focus = i + 1;
-                                        root.move-entry(i, i + 1);
+                                        SettingsPage.move-entry(i, i + 1);
                                     }
                                 }
                             }
@@ -1250,14 +1298,14 @@ export component SettingsScreen inherits Rectangle {
                     padding-top: 4px;
                     restore := Button {
                         text: @tr("Restore original order");
-                        enabled: root.order-changed-from-original;
-                        clicked => { root.restore-order(); }
+                        enabled: SettingsPage.order-changed-from-original;
+                        clicked => { SettingsPage.restore-order(); }
                     }
                     save-order := Button {
                         text: @tr("Save to firmware…");
                         primary: true;
-                        enabled: root.order-dirty;
-                        clicked => { root.save-order(); }
+                        enabled: SettingsPage.order-dirty;
+                        clicked => { SettingsPage.confirm-save-visible = true; }
                     }
                 }
                 Rectangle { vertical-stretch: 1; }

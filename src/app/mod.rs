@@ -60,8 +60,7 @@ fn card_entry(card: &Card, images: &BTreeMap<String, slint::Image>) -> BootEntry
 
 /// The entry being started, for the passphrase screen (if it asks).
 fn show_unlock_entry(ui: &AppWindow, card: &Card, st: &State) {
-    ui.set_unlock_entry(card_entry(card, &st.images));
-    ui.set_unlock_title(card.title.as_str().into());
+    ui.global::<Passphrase>().set_entry(card_entry(card, &st.images));
 }
 
 fn option_entry(option: &BootOption) -> BootEntry {
@@ -133,10 +132,11 @@ fn show_language_choices(ui: &AppWindow, backend: &dyn Backend, config: &Config,
         .chain((0..crate::parse::keymap::LAYOUTS.len()).map(crate::parse::keymap::layout_name))
         .map(SharedString::from)
         .collect();
-    ui.set_language_names(ModelRc::new(VecModel::from(languages)));
-    ui.set_keyboard_names(ModelRc::new(VecModel::from(keyboards)));
-    ui.set_language_index(settings.language.into());
-    ui.set_keyboard_index(settings.keyboard.into());
+    let page = ui.global::<SettingsPage>();
+    page.set_language_names(ModelRc::new(VecModel::from(languages)));
+    page.set_keyboard_names(ModelRc::new(VecModel::from(keyboards)));
+    page.set_language_index(settings.language.into());
+    page.set_keyboard_index(settings.keyboard.into());
 }
 
 fn read_config(backend: &dyn Backend) -> Config {
@@ -183,8 +183,8 @@ fn load_picture(backend: &dyn Backend, images: &mut BTreeMap<String, slint::Imag
 fn show_picture_preview(ui: &AppWindow, st: &mut State, backend: &dyn Backend, picture: usize) {
     let file = picture.checked_sub(1).and_then(|i| st.pictures.get(i)).cloned();
     let image = file.and_then(|f| load_picture(backend, &mut st.images, &f));
-    ui.set_cust_has_picture_preview(image.is_some());
-    ui.set_cust_picture_preview(image.unwrap_or_default());
+    ui.global::<Customize>().set_has_picture_preview(image.is_some());
+    ui.global::<Customize>().set_picture_preview(image.unwrap_or_default());
 }
 
 /// Shows the wallpaper (or none: an empty image), with its blurred copy for
@@ -192,7 +192,7 @@ fn show_picture_preview(ui: &AppWindow, st: &mut State, backend: &dyn Backend, p
 fn show_wallpaper(ui: &AppWindow, image: slint::Image) {
     let theme = ui.global::<Theme>();
     let source = image.to_rgba8();
-    ui.set_wallpaper(image);
+    ui.global::<SettingsPage>().set_wallpaper(image);
     let Some(source) = source else {
         theme.set_backdrop(slint::Image::default());
         theme.set_has_wallpaper_accent(false);
@@ -246,15 +246,15 @@ impl ScreenPicture {
 
     fn show(self, ui: &AppWindow, image: slint::Image) {
         match self {
-            ScreenPicture::Splash => ui.set_splash_image(image),
+            ScreenPicture::Splash => ui.global::<SettingsPage>().set_splash_image(image),
             ScreenPicture::Wallpaper => show_wallpaper(ui, image),
         }
     }
 
     fn set_index(self, ui: &AppWindow, index: i32) {
         match self {
-            ScreenPicture::Splash => ui.set_splash_picture(index),
-            ScreenPicture::Wallpaper => ui.set_wallpaper_picture(index),
+            ScreenPicture::Splash => ui.global::<SettingsPage>().set_splash_picture(index),
+            ScreenPicture::Wallpaper => ui.global::<SettingsPage>().set_wallpaper_picture(index),
         }
     }
 }
@@ -418,7 +418,7 @@ fn open_browser(ui: &AppWindow, st: &mut State, backend: &dyn Backend, pick: Opt
     st.browse = Browse { pick, ..Default::default() };
     st.browse.reload_volumes(backend);
     show_browse(ui, &mut st.browse, backend, None);
-    ui.set_files_visible(true);
+    ui.global::<FileBrowser>().set_visible(true);
 }
 
 impl Browse {
@@ -491,8 +491,8 @@ fn show_browse(ui: &AppWindow, b: &mut Browse, backend: &dyn Backend, select: Op
     let row = |name: &str, detail: String, kind: &str, file: bool| FileRow { name: name.into(), detail: detail.into(), kind: kind.into(), file, dim: false };
     match b.volume {
         None => {
-            ui.set_files_location(tr("All disks").into());
-            ui.set_files_path("".into());
+            ui.global::<FileBrowser>().set_location(tr("All disks").into());
+            ui.global::<FileBrowser>().set_path("".into());
             for (i, v) in b.volumes.iter().enumerate() {
                 rows.push(BrowseRow::Volume(i));
                 shown.push(row(&v.name, v.detail.clone(), v.kind, false));
@@ -507,8 +507,8 @@ fn show_browse(ui: &AppWindow, b: &mut Browse, backend: &dyn Backend, select: Op
         }
         Some(v) => {
             let name = b.volumes.get(v).map(|v| v.name.as_str()).unwrap_or_default();
-            ui.set_files_location(name.into());
-            ui.set_files_path(b.path(None).into());
+            ui.global::<FileBrowser>().set_location(name.into());
+            ui.global::<FileBrowser>().set_path(b.path(None).into());
             rows.push(BrowseRow::Up);
             let up = if b.folders.is_empty() {
                 tr("All disks")
@@ -550,10 +550,11 @@ fn show_browse(ui: &AppWindow, b: &mut Browse, backend: &dyn Backend, select: Op
     let current = select
         .and_then(|s| rows.iter().position(|r| named(r).as_deref() == Some(s)))
         .unwrap_or(if b.volume.is_some() && rows.len() > 1 { 1 } else { 0 });
-    ui.set_files_picking(b.pick.is_some());
-    ui.set_files_rows(ModelRc::new(VecModel::from(shown)));
-    ui.set_files_current(current as i32);
-    ui.set_files_message(message.into());
+    let browser = ui.global::<FileBrowser>();
+    browser.set_picking(b.pick.is_some());
+    browser.set_rows(ModelRc::new(VecModel::from(shown)));
+    browser.set_current(current as i32);
+    browser.set_message(message.into());
     b.rows = rows;
 }
 
@@ -570,9 +571,10 @@ impl State {
             }
         }
         let names: Vec<SharedString> = core::iter::once(tr("None")).chain(pictures.iter().cloned()).map(SharedString::from).collect();
-        ui.set_picture_names(ModelRc::new(VecModel::from(names)));
-        ui.set_splash_picture(picture_index(&pictures, splash.as_deref()) as i32);
-        ui.set_wallpaper_picture(picture_index(&pictures, wallpaper.as_deref()) as i32);
+        let page = ui.global::<SettingsPage>();
+        page.set_picture_names(ModelRc::new(VecModel::from(names)));
+        page.set_splash_picture(picture_index(&pictures, splash.as_deref()) as i32);
+        page.set_wallpaper_picture(picture_index(&pictures, wallpaper.as_deref()) as i32);
         self.pictures = pictures;
     }
 
@@ -585,13 +587,14 @@ impl State {
 
 /// Shows `settings` in the theme and the Settings screen.
 fn show_settings(ui: &AppWindow, settings: &Settings) {
-    ui.global::<Theme>().set_theme_index(settings.theme.into());
-    ui.global::<Theme>().set_style(settings.style.into());
-    ui.global::<Theme>().set_accent_index(settings.accent.into());
-    ui.set_theme_index(settings.theme.into());
-    ui.set_startup_index(if settings.splash { 1 } else { 0 });
-    ui.set_default_index(settings.remember_last.into());
-    ui.set_timeout_seconds(settings.timeout.into());
+    let theme = ui.global::<Theme>();
+    theme.set_theme_index(settings.theme.into());
+    theme.set_style(settings.style.into());
+    theme.set_accent_index(settings.accent.into());
+    let page = ui.global::<SettingsPage>();
+    page.set_startup_index(if settings.splash { 1 } else { 0 });
+    page.set_default_index(settings.remember_last.into());
+    page.set_timeout_seconds(settings.timeout.into());
 }
 
 /// Rebuilds the boot picker's cards from the entries in `st`, and shows the
@@ -657,12 +660,12 @@ fn passphrase_first(ui: &AppWindow, st: &mut State, backend: &dyn Backend) -> bo
     }
     st.passphrase_asked = true;
     st.countdown_left = -1;
-    ui.set_countdown(-1);
+    ui.global::<BootMenu>().set_countdown(-1);
     ui.set_splash_visible(false);
     let ui_weak = ui.as_weak();
     Timer::single_shot(Duration::ZERO, move || {
         if let Some(ui) = ui_weak.upgrade() {
-            ui.invoke_boot(ui.get_default_entry());
+            ui.global::<BootMenu>().invoke_boot(ui.global::<BootMenu>().get_default_entry());
         }
     });
     true
@@ -699,8 +702,8 @@ fn options_editor(config: &Config, boot: &BootData) -> bool {
 /// The cards made again, on the same level and the same card if it's still
 /// there.
 fn show_cards_again(ui: &AppWindow, st: &mut State) {
-    let focused = st.cards.get(ui.get_focused_entry().max(0) as usize).map(|c| (c.title.clone(), c.subtitle.clone()));
-    let level = if ui.get_more_level() { Level::More } else { Level::Main };
+    let focused = st.cards.get(ui.global::<BootMenu>().get_focused_entry().max(0) as usize).map(|c| (c.title.clone(), c.subtitle.clone()));
+    let level = if ui.global::<BootMenu>().get_more_level() { Level::More } else { Level::Main };
     let before: Vec<(String, String)> = st.all_cards.iter().map(|c| (c.title.clone(), c.subtitle.clone())).collect();
     show_cards(ui, st);
     // The new cards come in animated, once, and the row slides while cards
@@ -719,7 +722,7 @@ fn show_cards_again(ui: &AppWindow, st: &mut State) {
     show_view(ui, st, level);
     st.arrived.clear();
     if let Some(i) = focused.and_then(|f| st.cards.iter().position(|c| (c.title.clone(), c.subtitle.clone()) == f)) {
-        ui.set_focused_entry(i as i32);
+        ui.global::<BootMenu>().set_focused_entry(i as i32);
     }
 }
 
@@ -735,11 +738,12 @@ fn show_view(ui: &AppWindow, st: &mut State, level: Level) {
         })
         .collect();
     st.cards = cards;
-    ui.set_entries(ModelRc::new(VecModel::from(entries)));
-    ui.set_more_level(more);
-    ui.set_default_entry(default.map_or(-1, |d| d as i32));
+    let menu = ui.global::<BootMenu>();
+    menu.set_entries(ModelRc::new(VecModel::from(entries)));
+    menu.set_more_level(more);
+    menu.set_default_entry(default.map_or(-1, |d| d as i32));
     // On the "More…" level, the first entry after "Back".
-    ui.set_focused_entry(default.unwrap_or(if more && st.cards.len() > 1 { 1 } else { 0 }) as i32);
+    menu.set_focused_entry(default.unwrap_or(if more && st.cards.len() > 1 { 1 } else { 0 }) as i32);
 }
 
 /// Fills the System screen.
@@ -756,7 +760,7 @@ fn update_system_info(ui: &AppWindow, backend: &dyn Backend, hub: &Hub) {
             good: c.good,
         })
         .collect();
-    ui.set_info_items(ModelRc::new(VecModel::from(items)));
+    ui.global::<System>().set_items(ModelRc::new(VecModel::from(items)));
 
     if let Some(u) = info.memory {
         // Usable, firmware runtime, ACPI, reserved.
@@ -771,7 +775,7 @@ fn update_system_info(ui: &AppWindow, backend: &dyn Backend, hub: &Hub) {
             .filter(|s| s.0 >= 1 << 20)
             .map(|&(bytes, color)| MemorySegment { weight: bytes as f32, color })
             .collect();
-        ui.set_memory(ModelRc::new(VecModel::from(model)));
+        ui.global::<System>().set_memory(ModelRc::new(VecModel::from(model)));
     }
     ui.set_firmware_line(info.firmware_line.into());
 }
@@ -794,7 +798,7 @@ fn update_battery(ui: &AppWindow, backend: &dyn Backend) {
             identity: v.identity.into(),
         },
     };
-    ui.set_battery(info);
+    ui.global::<System>().set_battery(info);
 }
 
 /// What each install step is called, in `Backend::install_step` order.
@@ -812,16 +816,17 @@ fn install_steps() -> [String; 6] {
 /// The Install screen: each step shows its commands (a dry run), then runs
 /// once confirmed.
 fn install_screen(ui: &AppWindow, backend: &Rc<dyn Backend>, show_status: impl Fn(&str) + 'static) {
-    ui.set_install_available(true);
+    ui.global::<Install>().set_available(true);
     let refresh = {
         let (ui_weak, backend) = (ui.as_weak(), backend.clone());
         Rc::new(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
-            ui.set_install_busy(true);
+            ui.global::<Install>().set_busy(true);
             let ui_weak = ui.as_weak();
             backend.install_status(Box::new(move |s| {
                 let Some(ui) = ui_weak.upgrade() else { return };
-                ui.set_install_info(InstallInfo {
+                let install = ui.global::<Install>();
+                install.set_info(InstallInfo {
                     known: true,
                     error: s.error.into(),
                     esp: s.esp.into(),
@@ -834,39 +839,36 @@ fn install_screen(ui: &AppWindow, backend: &Rc<dyn Backend>, show_status: impl F
                     secure_boot: s.secure_boot,
                     program: s.program.into(),
                 });
-                ui.set_install_busy(false);
+                install.set_busy(false);
             }));
         })
     };
     refresh();
-    {
-        let refresh = refresh.clone();
-        ui.on_install_refresh(move || refresh());
-    }
     let pending = Rc::new(core::cell::Cell::new(0usize));
     {
         let (ui_weak, backend, pending) = (ui.as_weak(), backend.clone(), pending.clone());
-        ui.on_install_act(move |action| {
+        ui.global::<Install>().on_act(move |action| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let action = action.clamp(0, 5) as usize;
             pending.set(action);
-            ui.set_install_busy(true);
+            ui.global::<Install>().set_busy(true);
             let ui_weak = ui.as_weak();
             backend.install_step(action, true, Box::new(move |result| {
                 let Some(ui) = ui_weak.upgrade() else { return };
-                ui.set_install_busy(false);
+                let install = ui.global::<Install>();
+                install.set_busy(false);
                 match result {
                     Ok(plan) => {
-                        ui.set_install_confirm_title(install_steps()[action].as_str().into());
-                        ui.set_install_confirm_text(plan.into());
-                        ui.set_install_confirm_destructive(action == 5);
-                        ui.invoke_show_install_confirm();
+                        install.set_confirm_title(install_steps()[action].as_str().into());
+                        install.set_confirm_text(plan.into());
+                        install.set_confirm_destructive(action == 5);
+                        install.set_confirm_visible(true);
                     }
                     Err(e) => {
-                        ui.set_install_result_ok(false);
-                        ui.set_install_result_text(e.into());
-                        ui.set_install_offer_restart(false);
-                        ui.invoke_show_install_result();
+                        install.set_result_ok(false);
+                        install.set_result_text(e.into());
+                        install.set_offer_restart(false);
+                        install.set_result_visible(true);
                     }
                 }
             }));
@@ -874,27 +876,28 @@ fn install_screen(ui: &AppWindow, backend: &Rc<dyn Backend>, show_status: impl F
     }
     {
         let (ui_weak, backend, refresh) = (ui.as_weak(), backend.clone(), refresh.clone());
-        ui.on_install_confirm(move || {
+        ui.global::<Install>().on_confirm(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let action = pending.get();
-            ui.set_install_busy(true);
+            ui.global::<Install>().set_busy(true);
             let (ui_weak, refresh) = (ui.as_weak(), refresh.clone());
             backend.install_step(action, false, Box::new(move |result| {
                 let Some(ui) = ui_weak.upgrade() else { return };
-                ui.set_install_busy(false);
-                ui.set_install_offer_restart(action == 1 && result.is_ok());
-                ui.set_install_result_ok(result.is_ok());
-                ui.set_install_result_text(match result {
+                let install = ui.global::<Install>();
+                install.set_busy(false);
+                install.set_offer_restart(action == 1 && result.is_ok());
+                install.set_result_ok(result.is_ok());
+                install.set_result_text(match result {
                     Ok(text) | Err(text) => text.into(),
                 });
-                ui.invoke_show_install_result();
+                install.set_result_visible(true);
                 refresh();
             }));
         });
     }
     {
         let (backend, refresh) = (backend.clone(), refresh.clone());
-        ui.on_install_choose(move || {
+        ui.global::<Install>().on_choose_program(move || {
             if backend.choose_install_program() {
                 refresh();
             }
@@ -902,7 +905,7 @@ fn install_screen(ui: &AppWindow, backend: &Rc<dyn Backend>, show_status: impl F
     }
     {
         let backend = backend.clone();
-        ui.on_install_restart(move || {
+        ui.global::<Install>().on_restart(move || {
             if let Err(e) = backend.restart() {
                 show_status(&trf("Could not restart: {}", &[&e]));
             }
@@ -917,7 +920,7 @@ fn show_clock(ui: &AppWindow, backend: &dyn Backend) {
     let zone = backend.time_zone();
     let short = t.map(|t| if zone.is_empty() { t.short_text() } else { format!("{} {zone}", t.short_text()) });
     ui.set_clock(short.unwrap_or_default().into());
-    ui.set_date_time_text(t.map(|t| t.long_text().replacen(" · ", "\n", 1)).unwrap_or_default().into());
+    ui.global::<System>().set_date_time_text(t.map(|t| t.long_text().replacen(" · ", "\n", 1)).unwrap_or_default().into());
 }
 
 /// Creates the UI and runs the event loop.
@@ -950,14 +953,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     let caps = backend.capabilities();
     ui.set_simulated(caps.simulation);
     ui.set_badge(backend.badge().into());
-    ui.set_settings_in_file(caps.configure);
-    ui.set_app_version(concat!("v", env!("CARGO_PKG_VERSION")).into());
+    ui.global::<SettingsPage>().set_in_file(caps.configure);
+    ui.global::<System>().set_app_version(concat!("v", env!("CARGO_PKG_VERSION")).into());
 
     // --- Boot entries -------------------------------------------------------
     let boot = backend.boot_data();
     let entries: Vec<BootEntry> = boot.options.iter().map(option_entry).collect();
     let order_model = Rc::new(VecModel::from(entries));
-    ui.set_order(order_model.clone().into());
+    ui.global::<SettingsPage>().set_order(order_model.clone().into());
 
     // --- Settings -----------------------------------------------------------
     let firmware_timeout = match boot.firmware_timeout {
@@ -990,13 +993,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     }
 
     // Splash screen text, hint and image, from slingshot.toml.
-    ui.set_splash_text(config.splash_text.as_str().into());
-    ui.set_splash_name(config.splash_name);
-    ui.set_splash_picture_shown(config.splash_picture);
-    ui.set_splash_hint(config.splash_hint);
+    let page = ui.global::<SettingsPage>();
+    page.set_splash_text(config.splash_text.as_str().into());
+    page.set_splash_name(config.splash_name);
+    page.set_splash_picture_shown(config.splash_picture);
+    page.set_splash_hint(config.splash_hint);
     if !config.splash_image.is_empty() {
         match backend.read_file(&config.splash_image).as_deref().and_then(decode_picture) {
-            Some(image) => ui.set_splash_image(image),
+            Some(image) => ui.global::<SettingsPage>().set_splash_image(image),
             None => log::warn!("cannot read the splash image {}", config.splash_image),
         }
     }
@@ -1040,7 +1044,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     show_cards(&ui, &mut state.borrow_mut());
 
     // --- Countdown and clock -------------------------------------------------
-    ui.set_clock_settable(backend.date_time().is_some() && !caps.configure);
+    ui.global::<System>().set_clock_settable(backend.date_time().is_some() && !caps.configure);
     show_clock(&ui, &*backend);
 
     // Ticks every second: the clock, the countdown, the resolution revert,
@@ -1060,14 +1064,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
             // A USB stick plugged in or out: its card comes or goes (not
             // under a dialog that works on a card).
-            let dialog = ui.get_cust_visible() || ui.get_options_visible() || ui.get_unlock_visible();
+            let dialog = ui.global::<Customize>().get_visible() || ui.global::<BootMenu>().get_options_visible() || ui.global::<Passphrase>().get_visible();
             if !dialog && backend.media_changed() {
                 let mut st = state.borrow_mut();
                 refresh_found(&ui, &mut st, &*backend);
                 // The file browser's list of disks too (inside a disk, the
                 // list is that disk's).
-                if ui.get_files_visible() && st.browse.volume.is_none() {
-                    let selected = st.browse.rows.get(ui.get_files_current().max(0) as usize).and_then(|r| match r {
+                if ui.global::<FileBrowser>().get_visible() && st.browse.volume.is_none() {
+                    let selected = st.browse.rows.get(ui.global::<FileBrowser>().get_current().max(0) as usize).and_then(|r| match r {
                         BrowseRow::Volume(v) => st.browse.volumes.get(*v).map(|v| v.name.clone()),
                         _ => None,
                     });
@@ -1078,24 +1082,24 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let mut st = state.borrow_mut();
             if st.countdown_left > 0 {
                 st.countdown_left -= 1;
-                ui.set_countdown(st.countdown_left);
+                ui.global::<BootMenu>().set_countdown(st.countdown_left);
                 if st.countdown_left == 0 {
                     st.countdown_left = -1;
                     drop(st);
                     // Not "starts in 0 s" any more if it doesn't start (a
                     // passphrase asked first, then cancelled; an error).
-                    ui.set_countdown(-1);
-                    let index = ui.get_default_entry();
-                    ui.invoke_boot(index);
+                    ui.global::<BootMenu>().set_countdown(-1);
+                    let index = ui.global::<BootMenu>().get_default_entry();
+                    ui.global::<BootMenu>().invoke_boot(index);
                     return;
                 }
             }
             if st.revert_left > 0 {
                 st.revert_left -= 1;
-                ui.set_revert_countdown(st.revert_left);
+                ui.global::<SettingsPage>().set_revert_countdown(st.revert_left);
                 if st.revert_left == 0 {
                     drop(st);
-                    ui.invoke_revert_mode();
+                    ui.global::<SettingsPage>().invoke_revert_mode();
                 }
             }
         });
@@ -1122,7 +1126,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             if st.countdown_left >= 0 {
                 st.countdown_left = -1;
                 if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_countdown(-1);
+                    ui.global::<BootMenu>().set_countdown(-1);
                 }
             }
         }
@@ -1162,21 +1166,21 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     {
         let edit: Rc<core::cell::Cell<Option<DateTime>>> = Rc::default();
         let show_fields = |ui: &AppWindow, t: &DateTime| {
-            ui.set_time_fields(ModelRc::new(VecModel::from(t.fields().to_vec())));
+            ui.global::<System>().set_time_fields(ModelRc::new(VecModel::from(t.fields().to_vec())));
         };
         {
             let (ui_weak, backend, edit) = (ui.as_weak(), backend.clone(), edit.clone());
-            ui.on_open_time_dialog(move || {
+            ui.global::<System>().on_open_time_dialog(move || {
                 let Some(ui) = ui_weak.upgrade() else { return };
                 let Some(now) = backend.date_time() else { return };
                 edit.set(Some(now));
                 show_fields(&ui, &now);
-                ui.set_time_dialog_visible(true);
+                ui.global::<System>().set_time_dialog_visible(true);
             });
         }
         {
             let (ui_weak, edit) = (ui.as_weak(), edit.clone());
-            ui.on_time_step(move |field, delta| {
+            ui.global::<System>().on_time_step(move |field, delta| {
                 let Some(ui) = ui_weak.upgrade() else { return };
                 let Some(t) = edit.get() else { return };
                 let t = t.step(field as usize, delta);
@@ -1186,7 +1190,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         }
         {
             let (ui_weak, edit) = (ui.as_weak(), edit.clone());
-            ui.on_time_set(move |field, value| {
+            ui.global::<System>().on_time_set(move |field, value| {
                 let Some(ui) = ui_weak.upgrade() else { return };
                 let Some(t) = edit.get() else { return };
                 let t = t.set(field as usize, value);
@@ -1196,10 +1200,10 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         }
         {
             let (ui_weak, backend, show_status) = (ui.as_weak(), backend.clone(), show_status.clone());
-            ui.on_apply_time(move || {
+            ui.global::<System>().on_apply_time(move || {
                 let Some(ui) = ui_weak.upgrade() else { return };
                 let Some(t) = edit.take() else { return };
-                ui.set_time_dialog_visible(false);
+                ui.global::<System>().set_time_dialog_visible(false);
                 match backend.set_date_time(t) {
                     Ok(()) => {
                         show_clock(&ui, &*backend);
@@ -1238,18 +1242,20 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 st.default_card = i;
             }
             show_view(&ui, &mut st, Level::Main);
-            ui.set_focused_entry(ui.get_default_entry());
-            ui.set_hibernated(st.hibernated.is_some());
-            ui.set_resume_known(resume.is_some_and(|(_, sure)| sure));
+            let menu = ui.global::<BootMenu>();
+            menu.set_focused_entry(menu.get_default_entry());
+            menu.set_hibernated(st.hibernated.is_some());
+            menu.set_resume_known(resume.is_some_and(|(_, sure)| sure));
             if let Some((_, sure)) = resume {
                 log::info!("a system hibernated: {}", if sure { "resuming it" } else { "not sure which" });
                 ui.set_splash_visible(false);
                 // Unless the timeout is "never": then it's chosen too.
                 st.countdown_left = if sure && settings.timeout != 0 { 3 } else { -1 };
                 tick.restart();
-                ui.set_countdown(-1);
-                ui.set_countdown_total(3);
-                ui.set_countdown(st.countdown_left);
+                let menu = ui.global::<BootMenu>();
+                menu.set_countdown(-1);
+                menu.set_countdown_total(3);
+                menu.set_countdown(st.countdown_left);
                 return;
             }
             // Never count down into the firmware setup.
@@ -1261,13 +1267,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 st.countdown_left = settings.timeout as i32;
                 // Count whole seconds from now, in step with the animation.
                 tick.restart();
-                ui.set_countdown(-1);
-                ui.set_countdown_total(settings.timeout as i32);
-                ui.set_countdown(settings.timeout as i32);
+                let menu = ui.global::<BootMenu>();
+                menu.set_countdown(-1);
+                menu.set_countdown_total(settings.timeout as i32);
+                menu.set_countdown(settings.timeout as i32);
                 ui.set_splash_visible(settings.splash);
             } else {
                 st.countdown_left = -1;
-                ui.set_countdown(-1);
+                ui.global::<BootMenu>().set_countdown(-1);
                 ui.set_splash_visible(false);
             }
         }
@@ -1287,7 +1294,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         move |title: String, overlay: String, action: Box<dyn Fn() -> StartResult>| {
             let Some(ui) = ui_weak.upgrade() else { return };
             state.borrow_mut().countdown_left = -1;
-            ui.set_countdown(-1);
+            ui.global::<BootMenu>().set_countdown(-1);
             ui.set_starting_title(overlay.as_str().into());
             let ui_weak = ui.as_weak();
             let show_status = show_status.clone();
@@ -1345,10 +1352,10 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         });
     }
     // The Boot screen's Restart and Shut down buttons.
-    ui.set_power_buttons(!caps.configure);
+    ui.global::<BootMenu>().set_power_buttons(!caps.configure);
     {
         let (run, backend) = (run_with_transition.clone(), backend.clone());
-        ui.on_power_off(move |shut_down| {
+        ui.global::<BootMenu>().on_power_off(move |shut_down| {
             let backend = backend.clone();
             let (title, overlay) = if shut_down { (tr("shut down"), tr("Shutting down…")) } else { (tr("restart"), tr("Restarting…")) };
             run(title, overlay, Box::new(move || backend.power_off(shut_down)));
@@ -1395,7 +1402,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let firmware_setup = firmware_setup.clone();
         let ui_weak = ui.as_weak();
         let remember_started = remember_started.clone();
-        ui.on_boot(move |index| {
+        ui.global::<BootMenu>().on_boot(move |index| {
             let Some(card) = state.borrow().cards.get(index as usize).cloned() else { return };
             if matches!(card.action, Action::Start(_)) {
                 remember_started(&card);
@@ -1422,7 +1429,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // C: customize an entry, saved in slingshot.toml.
     {
         let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
-        ui.on_customize(move |index| {
+        ui.global::<Customize>().on_open(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let Some(card) = st.cards.get(index as usize).cloned() else { return };
@@ -1437,39 +1444,41 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let image = rule.and_then(|r| r.image.as_deref());
             st.refresh_pictures(&ui, &*backend, image);
             let picture = picture_index(&st.pictures, image);
-            ui.set_cust_icon(rule.and_then(|r| r.icon).and_then(|i| ICONS.iter().position(|x| *x == i)).map_or(0, |p| p as i32 + 1));
-            ui.set_cust_picture(picture as i32);
+            let customize = ui.global::<Customize>();
+            customize.set_icon(rule.and_then(|r| r.icon).and_then(|i| ICONS.iter().position(|x| *x == i)).map_or(0, |p| p as i32 + 1));
+            customize.set_picture(picture as i32);
             show_picture_preview(&ui, &mut st, &*backend, picture);
-            ui.set_cust_entry(index);
-            ui.set_cust_title(rule.and_then(|r| r.title.clone()).filter(|_| card.custom.is_none()).unwrap_or_default().into());
-            ui.set_cust_more(card.more);
-            ui.set_cust_default(ui.get_default_entry() == index);
-            ui.set_cust_options(rule.and_then(|r| r.options.clone()).unwrap_or_default().into());
-            ui.set_cust_options_placeholder(card.kernel_options().unwrap_or_default().into());
-            ui.set_cust_visible(true);
+            customize.set_entry(index);
+            customize.set_title(rule.and_then(|r| r.title.clone()).filter(|_| card.custom.is_none()).unwrap_or_default().into());
+            customize.set_more(card.more);
+            customize.set_is_default(ui.global::<BootMenu>().get_default_entry() == index);
+            customize.set_options(rule.and_then(|r| r.options.clone()).unwrap_or_default().into());
+            customize.set_options_placeholder(card.kernel_options().unwrap_or_default().into());
+            customize.set_visible(true);
         });
     }
     {
         let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
-        ui.on_cust_picture_changed(move |picture| {
+        ui.global::<Customize>().on_picture_changed(move |picture| {
             let Some(ui) = ui_weak.upgrade() else { return };
             show_picture_preview(&ui, &mut state.borrow_mut(), &*backend, picture as usize);
         });
     }
     {
         let (state, ui_weak, backend, show_status) = (state.clone(), ui.as_weak(), backend.clone(), show_status.clone());
-        ui.on_save_customize(move |index| {
+        ui.global::<Customize>().on_save(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let Some(card) = st.cards.get(index as usize).cloned() else { return };
-            let more = ui.get_cust_more();
+            let customize = ui.global::<Customize>();
+            let more = customize.get_more();
             let change = config::EntryChange {
-                title: ui.get_cust_title().trim().into(),
+                title: customize.get_title().trim().into(),
                 more: (more != card.more_by_default() || card.custom.is_some()).then_some(more),
-                default: ui.get_cust_default(),
-                options: card.options().filter(|_| ui.get_can_edit_options()).map(|_| ui.get_cust_options().trim().into()),
-                icon: (ui.get_cust_icon() as usize).checked_sub(1).and_then(|i| ICONS.get(i)).copied(),
-                image: (ui.get_cust_picture() as usize).checked_sub(1).and_then(|i| st.pictures.get(i)).cloned(),
+                default: customize.get_is_default(),
+                options: card.options().filter(|_| ui.get_can_edit_options()).map(|_| customize.get_options().trim().into()),
+                icon: (customize.get_icon() as usize).checked_sub(1).and_then(|i| ICONS.get(i)).copied(),
+                image: (customize.get_picture() as usize).checked_sub(1).and_then(|i| st.pictures.get(i)).cloned(),
             };
             let new = config::change_entry(&st.config, &card.match_title, card.id(), card.custom, &change);
             let saved = commit_config(&mut st, &*backend, new, false);
@@ -1483,13 +1492,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // E: start a Linux entry once with other kernel options.
     {
         let (state, ui_weak) = (state.clone(), ui.as_weak());
-        ui.on_edit_options(move |index| {
+        ui.global::<BootMenu>().on_open_options(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let st = state.borrow();
             let Some(options) = st.cards.get(index as usize).and_then(Card::options) else { return };
-            ui.set_options_text(options.into());
-            ui.set_options_entry(index);
-            ui.set_options_visible(true);
+            let menu = ui.global::<BootMenu>();
+            menu.set_options_text(options.into());
+            menu.set_options_entry(index);
+            menu.set_options_visible(true);
         });
     }
     {
@@ -1497,7 +1507,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let start = start_target.clone();
         let remember_started = remember_started.clone();
         let ui_weak = ui.as_weak();
-        ui.on_boot_with_options(move |index, text| {
+        ui.global::<BootMenu>().on_boot_with_options(move |index, text| {
             let Some(mut card) = state.borrow().cards.get(index as usize).cloned() else { return };
             if let Action::Start(Target::LoaderEntry { options, .. } | Target::Program { options, .. } | Target::Found { options, .. }) = &mut card.action {
                 *options = text.trim().into();
@@ -1553,14 +1563,15 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             st.settings_dirty = true;
         }
     };
-    ui.on_theme_selected(on_setting(|s, i| s.theme = i as u8));
-    ui.on_accent_selected(on_setting(|s, i| s.accent = i as u8));
-    ui.on_startup_selected(on_setting(|s, i| s.splash = i == 1));
-    ui.on_timeout_changed(on_setting(|s, seconds| s.timeout = seconds.min(255) as u16));
+    let page = ui.global::<SettingsPage>();
+    page.on_theme_selected(on_setting(|s, i| s.theme = i as u8));
+    page.on_accent_selected(on_setting(|s, i| s.accent = i as u8));
+    page.on_startup_selected(on_setting(|s, i| s.splash = i == 1));
+    page.on_timeout_changed(on_setting(|s, seconds| s.timeout = seconds.min(255) as u16));
     {
         // The default entry: the boot screen shows the new one.
         let (state, ui_weak) = (state.clone(), ui.as_weak());
-        ui.on_default_selected(move |i| {
+        ui.global::<SettingsPage>().on_default_selected(move |i| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.settings.remember_last = i == 1;
@@ -1571,7 +1582,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // The splash screen's text and hint are in slingshot.toml too.
     {
         let (state, ui_weak, backend, show_status) = (state.clone(), ui.as_weak(), backend.clone(), show_status.clone());
-        ui.on_splash_text_entered(move |text| {
+        ui.global::<SettingsPage>().on_splash_text_entered(move |text| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let text = text.trim();
@@ -1580,14 +1591,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
             let new = Config { splash_text: text.into(), ..(*st.config).clone() };
             let saved = commit_config(&mut st, &*backend, new, false);
-            ui.set_splash_text(st.config.splash_text.as_str().into());
+            ui.global::<SettingsPage>().set_splash_text(st.config.splash_text.as_str().into());
             drop(st);
             show_status(&saved.map_or_else(|e| e, |()| tr("Saved in slingshot.toml")));
         });
     }
     {
         let (state, ui_weak, backend, show_status) = (state.clone(), ui.as_weak(), backend.clone(), show_status.clone());
-        ui.on_splash_shown(move |which, shown| {
+        ui.global::<SettingsPage>().on_splash_shown(move |which, shown| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let mut new = (*st.config).clone();
@@ -1597,9 +1608,10 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 _ => new.splash_hint = shown,
             }
             let saved = commit_config(&mut st, &*backend, new, false);
-            ui.set_splash_name(st.config.splash_name);
-            ui.set_splash_picture_shown(st.config.splash_picture);
-            ui.set_splash_hint(st.config.splash_hint);
+            let page = ui.global::<SettingsPage>();
+            page.set_splash_name(st.config.splash_name);
+            page.set_splash_picture_shown(st.config.splash_picture);
+            page.set_splash_hint(st.config.splash_hint);
             drop(st);
             show_status(&saved.map_or_else(|e| e, |()| tr("Saved in slingshot.toml")));
         });
@@ -1629,8 +1641,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
         };
         match which {
-            ScreenPicture::Splash => ui.on_splash_picture_selected(selected),
-            ScreenPicture::Wallpaper => ui.on_wallpaper_picture_selected(selected),
+            ScreenPicture::Splash => ui.global::<SettingsPage>().on_splash_picture_selected(selected),
+            ScreenPicture::Wallpaper => ui.global::<SettingsPage>().on_wallpaper_picture_selected(selected),
         }
     }
     {
@@ -1638,7 +1650,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let state = state.clone();
         let backend = backend.clone();
         let show_status = show_status.clone();
-        ui.on_reset_settings(move || {
+        ui.global::<SettingsPage>().on_reset_settings(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let reset = reset_settings(caps.configure, &mut state.borrow_mut(), &*backend);
             if let Err(e) = reset {
@@ -1648,8 +1660,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let defaults = state.borrow().defaults;
             show_settings(&ui, &defaults);
             // Applied as if chosen (the texts, the keys).
-            ui.invoke_language_selected(defaults.language.into());
-            ui.invoke_keyboard_selected(defaults.keyboard.into());
+            ui.global::<SettingsPage>().invoke_language_selected(defaults.language.into());
+            ui.global::<SettingsPage>().invoke_keyboard_selected(defaults.keyboard.into());
             let mut st = state.borrow_mut();
             st.settings = defaults;
             st.settings_dirty = false;
@@ -1668,12 +1680,12 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let modes = hub.modes.borrow();
             let st = state.borrow();
             if let Some(&(w, h)) = modes.get(st.mode_candidate) {
-                ui.set_mode_label(mode_label(w, h));
-                ui.set_mode_is_current((w, h) == hub.current_size.get());
+                ui.global::<SettingsPage>().set_mode_label(mode_label(w, h));
+                ui.global::<SettingsPage>().set_mode_is_current((w, h) == hub.current_size.get());
             }
-            ui.set_mode_count(modes.len() as i32);
+            ui.global::<SettingsPage>().set_mode_count(modes.len() as i32);
             if let Some(&(w, h)) = modes.last() {
-                ui.set_mode_max(mode_label(w, h));
+                ui.global::<SettingsPage>().set_mode_max(mode_label(w, h));
             }
         }
     };
@@ -1731,15 +1743,15 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     };
     {
         let step_mode = step_mode.clone();
-        ui.on_previous_mode(move || step_mode(false));
+        ui.global::<SettingsPage>().on_previous_mode(move || step_mode(false));
     }
-    ui.on_next_mode(move || step_mode(true));
+    ui.global::<SettingsPage>().on_next_mode(move || step_mode(true));
     {
         let ui_weak = ui.as_weak();
         let state = state.clone();
         let hub = hub.clone();
         let backend = backend.clone();
-        ui.on_apply_mode(move || {
+        ui.global::<SettingsPage>().on_apply_mode(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let candidate = hub.modes.borrow().get(state.borrow().mode_candidate).copied();
             let Some((w, h)) = candidate else { return };
@@ -1750,7 +1762,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             st.revert_to = Some(hub.current_size.get());
             st.revert_left = 10;
             drop(st);
-            ui.set_revert_countdown(10);
+            ui.global::<SettingsPage>().set_revert_countdown(10);
             backend.request_mode(&hub, ui.window(), w, h);
         });
     }
@@ -1758,7 +1770,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let ui_weak = ui.as_weak();
         let state = state.clone();
         let hub = hub.clone();
-        ui.on_keep_mode(move || {
+        ui.global::<SettingsPage>().on_keep_mode(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.revert_to = None;
@@ -1766,7 +1778,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let (w, h) = hub.current_size.get();
             st.settings.mode = (w as u16, h as u16);
             st.settings_dirty = true;
-            ui.set_revert_countdown(-1);
+            ui.global::<SettingsPage>().set_revert_countdown(-1);
         });
     }
     {
@@ -1774,13 +1786,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let state = state.clone();
         let hub = hub.clone();
         let backend = backend.clone();
-        ui.on_revert_mode(move || {
+        ui.global::<SettingsPage>().on_revert_mode(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.revert_left = -1;
             let revert_to = st.revert_to.take();
             drop(st);
-            ui.set_revert_countdown(-1);
+            ui.global::<SettingsPage>().set_revert_countdown(-1);
             if let Some((w, h)) = revert_to {
                 backend.request_mode(&hub, ui.window(), w, h);
             }
@@ -1797,14 +1809,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let st = state.borrow();
             let entries: Vec<BootEntry> = st.edited.iter().map(|i| option_entry(&st.options[*i])).collect();
             order_model.set_vec(entries);
-            ui.set_order_dirty(st.edited_order(&st.firmware_order) != st.firmware_order);
-            ui.set_order_changed_from_original(st.edited_order(&st.original_order) != st.original_order);
+            ui.global::<SettingsPage>().set_order_dirty(st.edited_order(&st.firmware_order) != st.firmware_order);
+            ui.global::<SettingsPage>().set_order_changed_from_original(st.edited_order(&st.original_order) != st.original_order);
         }
     };
     // The language: right away, the .slint texts and the Rust ones.
     {
         let (state, ui_weak, backend, hub, refresh_order) = (state.clone(), ui.as_weak(), backend.clone(), hub.clone(), refresh_order.clone());
-        ui.on_language_selected(move |index| {
+        ui.global::<SettingsPage>().on_language_selected(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.settings.language = index.max(0) as u8;
@@ -1828,13 +1840,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     }
     {
         let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
-        ui.on_keyboard_selected(move |index| {
+        ui.global::<SettingsPage>().on_keyboard_selected(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.settings.keyboard = index.max(0) as u8;
             st.settings_dirty = true;
             use_keymap(&*backend, &st.config, st.settings.keyboard);
-            ui.set_keyboard_index(index);
+            ui.global::<SettingsPage>().set_keyboard_index(index);
         });
     }
     // "Add…" in the picture choosers: the desktop's file dialog, or
@@ -1851,14 +1863,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             };
             match which {
                 PictureFor::Entry => {
-                    ui.set_cust_picture(picture as i32);
+                    ui.global::<Customize>().set_picture(picture as i32);
                     show_picture_preview(&ui, &mut state.borrow_mut(), &*backend, picture);
                 }
                 PictureFor::Screen(screen) => {
                     screen.set_index(&ui, picture as i32);
                     match screen {
-                        ScreenPicture::Splash => ui.invoke_splash_picture_selected(picture as i32),
-                        ScreenPicture::Wallpaper => ui.invoke_wallpaper_picture_selected(picture as i32),
+                        ScreenPicture::Splash => ui.global::<SettingsPage>().invoke_splash_picture_selected(picture as i32),
+                        ScreenPicture::Wallpaper => ui.global::<SettingsPage>().invoke_wallpaper_picture_selected(picture as i32),
                     }
                 }
             }
@@ -1881,15 +1893,15 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     };
     {
         let add = add_picture.clone();
-        ui.on_cust_add_picture(move || add(PictureFor::Entry));
+        ui.global::<Customize>().on_add_picture(move || add(PictureFor::Entry));
     }
     {
         let add = add_picture.clone();
-        ui.on_add_splash_picture(move || add(PictureFor::Screen(ScreenPicture::Splash)));
+        ui.global::<SettingsPage>().on_add_splash_picture(move || add(PictureFor::Screen(ScreenPicture::Splash)));
     }
     {
         let add = add_picture.clone();
-        ui.on_add_wallpaper_picture(move || add(PictureFor::Screen(ScreenPicture::Wallpaper)));
+        ui.global::<SettingsPage>().on_add_wallpaper_picture(move || add(PictureFor::Screen(ScreenPicture::Wallpaper)));
     }
 
     // The Install screen (`slingshot config` on the desktop).
@@ -1900,7 +1912,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // "Start a file…": the file browser.
     {
         let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
-        ui.on_open_browser(move || {
+        ui.global::<FileBrowser>().on_show(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             open_browser(&ui, &mut state.borrow_mut(), &*backend, None);
         });
@@ -1910,7 +1922,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let start = start_with_transition.clone();
         let (picture_added, show_status) = (picture_added.clone(), show_status.clone());
         let unlock_disk = unlock_disk.clone();
-        ui.on_files_open(move |index| {
+        ui.global::<FileBrowser>().on_open(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let b = &mut st.browse;
@@ -1956,13 +1968,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                                     }
                                     (Ok(()), None) => {
                                         show_browse(&ui, b, &*backend, Some(&name));
-                                        ui.set_files_message(
+                                        ui.global::<FileBrowser>().set_message(
                                             tr("Unlocked, but its files can't be shown: this computer has no driver for what's inside.").into(),
                                         );
                                     }
                                     (Err(e), _) => {
                                         show_browse(&ui, b, &*backend, Some(&name));
-                                        ui.set_files_message(e.into());
+                                        ui.global::<FileBrowser>().set_message(e.into());
                                     }
                                 }
                             }),
@@ -1974,7 +1986,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                     } else {
                         trf("Slingshot can't read {} disks: this computer has no driver for them.", &[&v.format])
                     };
-                    ui.set_files_message(why.into());
+                    ui.global::<FileBrowser>().set_message(why.into());
                     return;
                 }
                 BrowseRow::Up if b.folders.is_empty() => b.volume.take().and_then(|v| b.volumes.get(v)).map(|v| v.name.clone()),
@@ -1988,7 +2000,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                     let (Some(volume), Some(which)) = (b.volume, b.pick) else { return };
                     let copied = backend.read_volume_file(volume, &b.path(Some(&name))).and_then(|data| backend.write_file(&name, &data));
                     drop(st);
-                    ui.set_files_visible(false);
+                    ui.global::<FileBrowser>().set_visible(false);
                     match copied {
                         Ok(()) => picture_added(which, name),
                         Err(e) => show_status(&trf("Could not add the picture: {}", &[&e])),
@@ -1999,7 +2011,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                     let Some(volume) = b.volume else { return };
                     let target = Target::File { volume, path: b.path(Some(&name)) };
                     drop(st);
-                    ui.set_files_visible(false);
+                    ui.global::<FileBrowser>().set_visible(false);
                     let backend = backend.clone();
                     start(name, Box::new(move || backend.start(&target)));
                     return;
@@ -2011,25 +2023,25 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     {
         // Typing in the list: the first row whose name starts with it.
         let ui_weak = ui.as_weak();
-        ui.on_files_find(move |typed| {
+        ui.global::<FileBrowser>().on_find(move |typed| {
             // Function keys and the like come as private-use characters.
             if typed.chars().any(|c| c.is_control() || ('\u{e000}'..='\u{f8ff}').contains(&c)) {
                 return -2;
             }
             let Some(ui) = ui_weak.upgrade() else { return -1 };
-            let rows = ui.get_files_rows();
+            let rows = ui.global::<FileBrowser>().get_rows();
             let names: Vec<String> = (0..slint::Model::row_count(&rows))
                 .filter_map(|i| slint::Model::row_data(&rows, i))
                 .map(|r| String::from(r.name.as_str()))
                 .collect();
-            find_row(&names, &typed, ui.get_files_current().max(0) as usize).map_or(-1, |i| i as i32)
+            find_row(&names, &typed, ui.global::<FileBrowser>().get_current().max(0) as usize).map_or(-1, |i| i as i32)
         });
     }
     {
         // A path typed in the location field: `\EFI\BOOT` or `/EFI/BOOT/x.efi`,
         // on the disk being browsed (or the one selected in the list).
         let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
-        ui.on_files_go(move |path| {
+        ui.global::<FileBrowser>().on_go(move |path| {
             let Some(ui) = ui_weak.upgrade() else { return false };
             let mut st = state.borrow_mut();
             let b = &mut st.browse;
@@ -2038,7 +2050,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let candidates: Vec<(usize, Vec<String>)> = match b.volume {
                 Some(v) => alloc::vec![(v, if absolute { Vec::new() } else { b.folders.clone() })],
                 None => {
-                    let selected = match b.rows.get(ui.get_files_current().max(0) as usize) {
+                    let selected = match b.rows.get(ui.global::<FileBrowser>().get_current().max(0) as usize) {
                         Some(BrowseRow::Volume(v)) => Some(*v),
                         _ => None,
                     };
@@ -2061,23 +2073,23 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                     }
                 }
             }
-            ui.set_files_message(trf("Not found: {}", &[&missing]).into());
+            ui.global::<FileBrowser>().set_message(trf("Not found: {}", &[&missing]).into());
             false
         });
     }
     {
         let (state, ui_weak) = (state.clone(), ui.as_weak());
-        ui.on_files_up(move || {
+        ui.global::<FileBrowser>().on_up(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             // Row 0 is "..", on a disk.
             if state.borrow().browse.volume.is_some() {
-                ui.invoke_files_open(0);
+                ui.global::<FileBrowser>().invoke_open(0);
             }
         });
     }
     {
         let (state, ui_weak, backend, show_status, refresh) = (state.clone(), ui.as_weak(), backend.clone(), show_status.clone(), refresh_order.clone());
-        ui.on_files_add(move |index| {
+        ui.global::<FileBrowser>().on_add(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             let b = &st.browse;
@@ -2085,7 +2097,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let title = b.entry_title(name);
             match backend.add_boot_entry(volume, &b.path(Some(name)), &title) {
                 Ok(number) => {
-                    ui.set_files_visible(false);
+                    ui.global::<FileBrowser>().set_visible(false);
                     let boot = backend.boot_data();
                     st.edited = (0..boot.options.len()).collect();
                     st.options = boot.options;
@@ -2108,7 +2120,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     {
         let state = state.clone();
         let refresh = refresh_order.clone();
-        ui.on_move_entry(move |from, to| {
+        ui.global::<SettingsPage>().on_move_entry(move |from, to| {
             let mut st = state.borrow_mut();
             let n = st.edited.len() as i32;
             if from < 0 || to < 0 || from >= n || to >= n {
@@ -2123,7 +2135,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     {
         let state = state.clone();
         let refresh = refresh_order.clone();
-        ui.on_restore_order(move || {
+        ui.global::<SettingsPage>().on_restore_order(move || {
             let mut st = state.borrow_mut();
             // Put the visible entries back in their original relative order.
             let original = st.original_order.clone();
@@ -2139,7 +2151,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let backend = backend.clone();
         let refresh = refresh_order.clone();
         let show_status = show_status.clone();
-        ui.on_save_order(move || {
+        ui.global::<SettingsPage>().on_save_order(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let st = state.borrow();
             let new_order = st.edited_order(&st.firmware_order);
