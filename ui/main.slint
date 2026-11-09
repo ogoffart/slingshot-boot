@@ -71,7 +71,8 @@ export component AppWindow inherits Window {
     // slingshot.toml `settings.access`: 0 = shown, 1 = hidden, 2 = password.
     in property <int> settings-access: 0;
     property <bool> settings-unlocked: settings-access == 0;
-    property <bool> password-visible;
+    // Rust doesn't rescan the disks under it: `password-entry` is a card's index.
+    out property <bool> password-visible;
     property <bool> password-wrong;
     property <bool> password-accepted;
     pure callback check-password(string) -> bool;

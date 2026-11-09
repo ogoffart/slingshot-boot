@@ -1064,7 +1064,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
             // A USB stick plugged in or out: its card comes or goes (not
             // under a dialog that works on a card).
-            let dialog = ui.global::<Customize>().get_visible() || ui.global::<BootMenu>().get_options_visible() || ui.global::<Passphrase>().get_visible();
+            let dialog = ui.global::<Customize>().get_visible() || ui.global::<BootMenu>().get_options_visible() || ui.global::<Passphrase>().get_visible() || ui.get_password_visible();
             if !dialog && backend.media_changed() {
                 let mut st = state.borrow_mut();
                 refresh_found(&ui, &mut st, &*backend);
