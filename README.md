@@ -7,7 +7,7 @@ pick with the keyboard, a mouse, a touchpad or a touch screen. It's written in
 [Rust](https://www.rust-lang.org) with [Slint](https://slint.dev), and runs
 right on the firmware.
 
-[![Slingshot at boot: the boot menu over a wallpaper, More…, the System screen, the theme, accent and wallpaper settings, and an entry's options](docs/screenshots/demo.gif)](docs/screenshots/demo.mp4)
+https://github.com/user-attachments/assets/e7206b0e-a50d-4cc1-a8d7-2d55f78f3529
 
 - Unlocks LUKS2 encrypted disks before Linux starts, deriving the key from the passphrase only once
   ([setup](docs/encrypted-disks.md))
