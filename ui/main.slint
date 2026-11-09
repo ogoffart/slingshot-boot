@@ -83,13 +83,14 @@ export component AppWindow inherits Window {
     // Customizing entry `cust-entry` of the boot menu.
     in-out property <bool> cust-visible;
     in-out property <string> cust-title;
-    in property <string> cust-entry-title;
-    in property <bool> cust-linux;
+    property <string> cust-entry-title: root.entries[root.cust-entry].title;
+    // Like E: kernel options saved for every start, when they can be edited.
+    property <bool> cust-linux: root.entries[root.cust-entry].editable && root.can-edit-options;
     in property <string> cust-options-placeholder;
     in-out property <string> cust-options;
     in-out property <bool> cust-more;
     in-out property <bool> cust-default;
-    in property <int> cust-entry;
+    in-out property <int> cust-entry;
     // 0 = the entry's own, else 1 + an index in `config::ICONS`.
     in-out property <int> cust-icon;
     // An index in `picture-names`.
@@ -101,7 +102,7 @@ export component AppWindow inherits Window {
     callback cust-add-picture();
     callback add-splash-picture();
     // "None", then the pictures (PNG, JPEG) next to Slingshot.
-    in property <[string]> picture-names: ["None"];
+    in property <[string]> picture-names: Platform.uses-mock-data ? Mock.picture-names : ["None"];
     callback customize(int);
     callback save-customize(int);
 
@@ -138,10 +139,10 @@ export component AppWindow inherits Window {
     in property <string> error-text;
 
     // The Install screen (screen 3): only in `slingshot config`.
-    in property <bool> install-available;
+    in property <bool> install-available: Platform.uses-mock-data;
     // The Settings screen saves to slingshot.toml (on the desktop).
     in property <bool> settings-in-file;
-    in property <InstallInfo> install-info;
+    in property <InstallInfo> install-info: Platform.uses-mock-data ? Mock.install : {};
     in property <bool> install-busy;
     in property <string> install-confirm-title;
     in property <string> install-confirm-text;
@@ -162,8 +163,8 @@ export component AppWindow inherits Window {
     show-install-result => { root.install-result-visible = true; }
     // "Start a file…": the file browser, filled by the Rust code.
     in-out property <bool> files-visible;
-    in property <string> files-location;
-    in property <[FileRow]> files-rows;
+    in property <string> files-location: Platform.uses-mock-data ? "Sample disks" : "";
+    in property <[FileRow]> files-rows: Platform.uses-mock-data ? Mock.files : [];
     in-out property <int> files-current;
     in property <string> files-message;
     in property <string> files-path;
@@ -194,15 +195,15 @@ export component AppWindow inherits Window {
     in property <bool> more-level;
     // Editing the kernel options of entry `options-entry` (E).
     in-out property <bool> options-visible;
-    in property <string> options-text;
-    in property <string> options-title;
-    in property <int> options-entry;
+    in property <string> options-text: Platform.uses-mock-data ? "root=UUID=sample rw quiet splash" : "";
+    property <string> options-title: root.entries[root.options-entry].title;
+    in-out property <int> options-entry;
     callback edit-options(int);
     callback boot-with-options(int, string);
 
     // The firmware clock, on the System screen.
-    in property <string> date-time-text;
-    in property <bool> clock-settable;
+    in property <string> date-time-text: Platform.uses-mock-data ? "Sample date\n12:00" : "";
+    in property <bool> clock-settable: Platform.uses-mock-data;
     property <bool> can-change-time: clock-settable && settings-access != 1;
     in-out property <bool> time-dialog-visible;
     in property <[int]> time-fields: [1, 1, 2026, 0, 0];
@@ -284,8 +285,8 @@ export component AppWindow inherits Window {
     in property <string> mode-label: Platform.uses-mock-data ? "Sample resolution" : "";
     in property <bool> mode-is-current: Platform.uses-mock-data;
     // How many modes the display has, and the largest.
-    in property <int> mode-count;
-    in property <string> mode-max;
+    in property <int> mode-count: Platform.uses-mock-data ? 4 : 0;
+    in property <string> mode-max: Platform.uses-mock-data ? root.mode-label : "";
     in property <[BootEntry]> order: Platform.uses-mock-data ? Mock.order : [];
     in property <bool> order-dirty;
     in property <bool> order-changed-from-original;
@@ -409,7 +410,7 @@ export component AppWindow inherits Window {
 
     // Customizing an entry is a setting: locked like the Settings screen.
     function ask-customize(i: int) {
-        if root.settings-access == 1 || i < 0 || i >= root.entries.length {
+        if root.settings-access == 1 || i < 0 || i >= root.entries.length || !root.entries[i].customizable {
             return;
         }
         if !root.settings-unlocked {
@@ -423,10 +424,10 @@ export component AppWindow inherits Window {
 
     // Editing the kernel options (E) is a setting too, and can be off
     // (`options-editor`: slingshot.toml, Secure Boot, loader.conf).
-    in property <bool> options-editor;
+    in property <bool> options-editor: Platform.uses-mock-data;
     out property <bool> can-edit-options: options-editor && settings-access != 1;
     function ask-edit-options(i: int) {
-        if !root.can-edit-options || i < 0 || i >= root.entries.length {
+        if !root.can-edit-options || i < 0 || i >= root.entries.length || !root.entries[i].editable {
             return;
         }
         if !root.settings-unlocked {
@@ -451,10 +452,40 @@ export component AppWindow inherits Window {
     }
 
 
+    // In slint-viewer, the dialogs the Rust code opens open too (the Rust
+    // code replaces these handlers).
+    customize(i) => {
+        if Platform.uses-mock-data {
+            root.cust-entry = i;
+            root.cust-visible = true;
+        }
+    }
+    edit-options(i) => {
+        if Platform.uses-mock-data {
+            root.options-entry = i;
+            root.options-visible = true;
+        }
+    }
+    open-browser => {
+        if Platform.uses-mock-data {
+            root.files-visible = true;
+        }
+    }
+    open-time-dialog => {
+        if Platform.uses-mock-data {
+            root.time-dialog-visible = true;
+        }
+    }
+    apply-time => {
+        if Platform.uses-mock-data {
+            root.time-dialog-visible = false;
+        }
+    }
+
     // Language and keyboard layout: "Automatic (…)" first.
-    in property <[string]> language-names;
+    in property <[string]> language-names: Platform.uses-mock-data ? Mock.language-names : [];
     in-out property <int> language-index;
-    in property <[string]> keyboard-names;
+    in property <[string]> keyboard-names: Platform.uses-mock-data ? Mock.keyboard-names : [];
     in-out property <int> keyboard-index;
     callback language-selected(int);
     callback keyboard-selected(int);
@@ -741,7 +772,6 @@ export component AppWindow inherits Window {
         Dialog {
             title: root.error-title;
             message: root.error-text;
-            cancel-text: "";
             accept-text: @tr("OK");
             cancel => { root.error-visible = false; }
             accept => { root.error-visible = false; }
@@ -976,7 +1006,6 @@ export component AppWindow inherits Window {
                         spacing: 18px;
                         Spinner {
                             size: 30px;
-                            thickness: 2.5px;
                             y: (parent.height - self.height) / 2;
                         }
                         Text {

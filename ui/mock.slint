@@ -2,18 +2,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { BootEntry, InfoItem, MemorySegment, BatteryInfo } from "widgets.slint";
+import { FileRow } from "dialogs.slint";
+import { InstallInfo } from "install-screen.slint";
 
 // Sample data for slint-viewer and the live preview (Platform.uses-mock-data
 // is false in the compiled application, which sets the real data).
 export global Mock {
     out property <[BootEntry]> entries: [
-        { title: "Example OS", subtitle: "Sample entry", kind: "linux" },
-        { title: "Example OS (recovery)", subtitle: "Sample entry", kind: "linux" },
-        { title: "Other example OS", subtitle: "Sample entry", kind: "windows" },
-        { title: "Sample USB drive", subtitle: "Sample entry", kind: "usb" },
+        { title: "Example OS", subtitle: "Sample entry", kind: "linux", editable: true, customizable: true },
+        { title: "Example OS (recovery)", subtitle: "Sample entry", kind: "linux", editable: true, customizable: true },
+        { title: "Other example OS", subtitle: "Sample entry", kind: "windows", customizable: true },
+        { title: "Sample USB drive", subtitle: "Sample entry", kind: "usb", arrived: true },
         { title: "Sample network boot", subtitle: "Sample entry", kind: "network" },
         { title: "Sample shell", subtitle: "Sample entry", kind: "shell" },
     ];
+    out property <[string]> picture-names: ["None", "sample-picture.jpg", "other-sample-picture.png"];
+    out property <[string]> language-names: ["Automatic (English)", "English", "Deutsch", "Français"];
+    out property <[string]> keyboard-names: ["Automatic (Sample)", "Sample layout", "Other sample layout"];
+    out property <[FileRow]> files: [
+        { name: "Sample disk", detail: "Sample data", kind: "disk" },
+        { name: "Other sample disk", detail: "Sample data", kind: "usb" },
+        { name: "Unreadable sample disk", detail: "Sample data", kind: "disk", dim: true },
+    ];
+    out property <InstallInfo> install: {
+        known: true,
+        esp: "/sample/esp",
+        installed: true,
+        file: "/sample/esp/EFI/slingshot/slingshot.efi",
+        entry: "0001",
+        order: "later",
+        systemd-boot: true,
+        program: "/sample/slingshot.efi",
+    };
     out property <[BootEntry]> order: [
         { title: "Sample boot loader", subtitle: "Sample entry", kind: "linux" },
         { title: "Other example OS", subtitle: "Sample entry", kind: "windows" },

@@ -159,8 +159,6 @@ export component Button inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         enabled: root.enabled;
         key-pressed(event) => {
@@ -242,8 +240,6 @@ export component SegmentedControl inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.LeftArrow {
@@ -303,8 +299,6 @@ export component Spinner inherits Rectangle {
     property <angle> sweep: 50deg + 220deg * (0.5 - 0.5 * cos(mod(t, 1800) / 1800 * 360deg));
 
     Path {
-        width: 100%;
-        height: 100%;
         viewbox-width: 24;
         viewbox-height: 24;
         stroke: Theme.accent.transparentize(80%);
@@ -312,8 +306,6 @@ export component Spinner inherits Rectangle {
         commands: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0";
     }
     Path {
-        width: 100%;
-        height: 100%;
         viewbox-width: 24;
         viewbox-height: 24;
         stroke: Theme.accent;
@@ -422,7 +414,6 @@ export component Toggle inherits Rectangle {
                 stroke: Theme.on-accent;
                 stroke-width: 2.2px;
                 stroke-line-cap: round;
-                fill: transparent;
             }
         }
         Text {
@@ -441,8 +432,6 @@ export component Toggle inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.Return || event.text == " " {
@@ -537,8 +526,6 @@ export component IconPicker inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.LeftArrow && root.current > 0 {
@@ -649,8 +636,6 @@ export component PicturePicker inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.LeftArrow || event.text == Key.RightArrow {
@@ -719,7 +704,6 @@ export component TextField inherits Rectangle {
             selection-background-color: Theme.accent;
             selection-foreground-color: Theme.on-accent;
             vertical-alignment: center;
-            single-line: true;
             cursor-position-changed(pos) => {
                 if pos.x + self.scroll < 0 {
                     self.scroll = -pos.x;
@@ -775,8 +759,6 @@ export component Panel inherits Rectangle {
     }
     @children
     Rectangle {
-        width: 100%;
-        height: 100%;
         border-radius: root.border-radius;
         border-width: 1px;
         border-color: root.stroke;

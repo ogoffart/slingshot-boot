@@ -692,7 +692,6 @@ export component UnlockDialog inherits DialogFrame {
         layout := VerticalLayout {
             padding: 32px;
             padding-top: 28px;
-            spacing: 0px;
             // Starting an entry: its logo and name, then what to unlock.
             if root.full: HorizontalLayout {
                 alignment: center;
@@ -745,7 +744,6 @@ export component UnlockDialog inherits DialogFrame {
                     background: Theme.focus-well;
                     Icon {
                         kind: "lock";
-                        size: 24px;
                         color: Theme.accent;
                     }
                 }

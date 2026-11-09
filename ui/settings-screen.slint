@@ -158,8 +158,6 @@ component OrderRow inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.modifiers.alt && event.text == Key.UpArrow {
@@ -239,8 +237,6 @@ component AccentPicker inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.LeftArrow || event.text == Key.RightArrow {
@@ -312,8 +308,6 @@ component StepPicker inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.LeftArrow || event.text == Key.RightArrow {
@@ -386,8 +380,6 @@ component SecondsField inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         focus-changed-event => { root.typed = ""; }
         key-pressed(event) => {
@@ -469,8 +461,6 @@ component SectionTab inherits Rectangle {
     fs := FocusScope {
         x: 0;
         y: 0;
-        width: 100%;
-        height: 100%;
         focus-on-click: false;
         key-pressed(event) => {
             if event.text == Key.Return || event.text == " " {
@@ -788,7 +778,6 @@ export component SettingsScreen inherits Rectangle {
             }
 
             if root.section == 0: Section {
-                index: 0;
                 at-end: root.enter-at-end;
                 leave(d) => { root.leave-section(d) }
                 // The focus on the first element when asked.

@@ -1443,12 +1443,9 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             ui.set_cust_picture(picture as i32);
             show_picture_preview(&ui, &mut st, &*backend, picture);
             ui.set_cust_entry(index);
-            ui.set_cust_entry_title(card.title.as_str().into());
             ui.set_cust_title(rule.and_then(|r| r.title.clone()).filter(|_| card.custom.is_none()).unwrap_or_default().into());
             ui.set_cust_more(card.more);
             ui.set_cust_default(ui.get_default_entry() == index);
-            // Like E: kernel options saved for every start, when they can be edited.
-            ui.set_cust_linux(card.options().is_some() && ui.get_can_edit_options());
             ui.set_cust_options(rule.and_then(|r| r.options.clone()).unwrap_or_default().into());
             ui.set_cust_options_placeholder(card.kernel_options().unwrap_or_default().into());
             ui.set_cust_visible(true);
@@ -1493,7 +1490,6 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let st = state.borrow();
             let Some(options) = st.cards.get(index as usize).and_then(Card::options) else { return };
             ui.set_options_text(options.into());
-            ui.set_options_title(st.cards[index as usize].title.as_str().into());
             ui.set_options_entry(index);
             ui.set_options_visible(true);
         });
