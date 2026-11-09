@@ -28,14 +28,18 @@ component Tab inherits Rectangle {
     accessible-item-selected: active;
     accessible-action-default => { clicked(); }
     border-radius: 9px;
-    background: active ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised : transparent;
-    animate background { duration: Theme.restyling ? 0ms : 150ms; }
+    // Only these animate, a new theme's colors show at once.
+    property <float> active-fade: active ? 1 : 0;
+    property <float> hover-fade: touch.has-hover ? 1 : 0;
+    animate active-fade, hover-fade { duration: 150ms; }
+    property <float> focus-fade: fs.has-focus ? 1 : 0;
+    animate focus-fade { duration: 120ms; }
+    background: Theme.surface-strong.mix(Theme.surface-raised.mix(transparent, hover-fade), active-fade);
 
     Rectangle {
         border-radius: parent.border-radius;
         border-width: 2px;
-        border-color: fs.has-focus ? Theme.accent : transparent;
-        animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+        border-color: Theme.accent.mix(transparent, root.focus-fade);
     }
 
     row := HorizontalLayout {

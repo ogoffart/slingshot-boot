@@ -772,9 +772,11 @@ export component UnlockDialog inherits DialogFrame {
                 border-radius: Theme.radius;
                 background: Theme.surface-raised;
                 border-width: 2px;
-                border-color: root.wrong || root.error != "" ? Theme.danger
-                    : input.has-focus ? Theme.accent : Theme.border-strong;
-                animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+                // Only these animate, a new theme's colors show at once.
+                property <float> wrong-fade: root.wrong || root.error != "" ? 1 : 0;
+                property <float> focus-fade: input.has-focus ? 1 : 0;
+                animate wrong-fade, focus-fade { duration: 120ms; }
+                border-color: Theme.danger.mix(Theme.accent.mix(Theme.border-strong, focus-fade), wrong-fade);
                 input := TextField {
                     x: 14px;
                     width: parent.width - 14px - eye.width - 8px;

@@ -585,8 +585,6 @@ impl State {
 
 /// Shows `settings` in the theme and the Settings screen.
 fn show_settings(ui: &AppWindow, settings: &Settings) {
-    // At once, not each element fading at its own pace (Theme.restyling).
-    ui.global::<Theme>().set_restyling(true);
     ui.global::<Theme>().set_theme_index(settings.theme.into());
     ui.global::<Theme>().set_style(settings.style.into());
     ui.global::<Theme>().set_accent_index(settings.accent.into());

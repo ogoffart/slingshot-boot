@@ -109,12 +109,18 @@ export component Button inherits Rectangle {
     border-radius: 10px;
     border-width: primary || danger ? 0px : 1px;
     border-color: Theme.border-strong;
+    // Hovering, pressing and focus fade in and out, from 0 to 1. Only they
+    // animate: a new theme's colors show at once.
+    property <float> hover-fade: touch.has-hover ? 1 : 0;
+    property <float> press-fade: touch.pressed ? 1 : 0;
+    property <float> focus-fade: fs.has-focus ? 1 : 0;
+    animate hover-fade, press-fade, focus-fade { duration: 120ms; }
+    // Over the wallpaper (the boot screen's), readable.
+    property <color> rest: primary ? Theme.accent : Theme.frosted ? Theme.surface.with-alpha(0.7) : transparent;
+    property <color> hovered: primary ? Theme.accent.brighter(0.1) : Theme.surface-raised;
+    property <color> pressed: primary ? Theme.accent.darker(0.15) : Theme.surface-strong;
     background: !enabled ? (primary ? Theme.accent.with-alpha(0.35) : transparent)
-        : primary ? (touch.pressed ? Theme.accent.darker(0.15) : touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent)
-        : (touch.pressed ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised
-            // Over the wallpaper (the boot screen's), readable.
-            : Theme.frosted ? Theme.surface.with-alpha(0.7) : transparent);
-    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+        : pressed.mix(hovered.mix(rest, hover-fade), press-fade);
 
     focus-ring := Rectangle {
         x: -4px;
@@ -123,8 +129,7 @@ export component Button inherits Rectangle {
         height: parent.height + 8px;
         border-radius: parent.border-radius + 4px;
         border-width: 2px;
-        border-color: fs.has-focus ? Theme.accent : transparent;
-        animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+        border-color: Theme.accent.mix(transparent, root.focus-fade);
     }
 
     HorizontalLayout {
@@ -179,8 +184,11 @@ export component Segment inherits Rectangle {
 
     height: 44px;
     border-radius: 9px;
-    background: selected ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised : transparent;
-    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+    // Only selecting and hovering animate, a new theme's colors show at once.
+    property <float> select-fade: selected ? 1 : 0;
+    property <float> hover-fade: touch.has-hover ? 1 : 0;
+    animate select-fade, hover-fade { duration: 120ms; }
+    background: Theme.surface-strong.mix(Theme.surface-raised.mix(transparent, hover-fade), select-fade);
     accessible-role: radio-button;
     accessible-label: text;
     accessible-checkable: true;
@@ -740,7 +748,6 @@ export component Frost inherits Rectangle {
     Rectangle {
         border-radius: root.border-radius;
         background: Theme.frosted ? root.tint.with-alpha(Theme.dark ? 0.45 : 0.4) : root.tint;
-        animate background { duration: Theme.restyling ? 0ms : 160ms; }
     }
 }
 

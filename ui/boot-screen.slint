@@ -120,6 +120,10 @@ component BootCard inherits BootItem {
     property <length> rise: root.shown ? 0px : 24px;
     animate rise { duration: 320ms; easing: ease-out; }
     property <length> lift: root.focus-lift + root.rise;
+    // The focus colors fade in and out: from 0 to 1. Only focusing animates,
+    // a new theme's colors show at once.
+    property <float> focus-fade: root.focused ? 1 : 0;
+    animate focus-fade { duration: 160ms; }
 
     height: 288px;
 
@@ -130,8 +134,7 @@ component BootCard inherits BootItem {
         height: parent.height + 12px;
         border-radius: Theme.radius-card + 6px;
         border-width: 6px;
-        border-color: root.focused && !root.flat ? Theme.accent.with-alpha(0.18) : transparent;
-        animate border-color { duration: Theme.restyling ? 0ms : 160ms; }
+        border-color: root.flat ? transparent : Theme.accent.with-alpha(0.18).mix(transparent, root.focus-fade);
     }
 
     Rectangle {
@@ -139,12 +142,11 @@ component BootCard inherits BootItem {
 
         if !root.flat: Frost {
             border-radius: Theme.radius-card;
-            tint: root.focused ? Theme.focus-fill : Theme.surface;
+            tint: Theme.focus-fill.mix(Theme.surface, root.focus-fade);
         }
         if root.flat: Rectangle {
             border-radius: Theme.radius-card;
-            background: root.focused ? Theme.accent.with-alpha(0.16) : transparent;
-            animate background { duration: Theme.restyling ? 0ms : 160ms; }
+            background: Theme.accent.with-alpha(0.16).mix(transparent, root.focus-fade);
         }
 
         if root.is-default: DefaultBadge {
@@ -186,8 +188,7 @@ component BootCard inherits BootItem {
                         width: 84px;
                         height: 84px;
                         border-radius: 42px;
-                        background: root.focused ? Theme.focus-well : root.flat ? Theme.icon-well.with-alpha(0.7) : Theme.icon-well;
-                        animate background { duration: Theme.restyling ? 0ms : 160ms; }
+                        background: Theme.focus-well.mix(root.flat ? Theme.icon-well.with-alpha(0.7) : Theme.icon-well, root.focus-fade);
                         EntryGlyph {
                             entry: root.entry;
                             icon-size: 40px;
@@ -240,8 +241,7 @@ component BootCard inherits BootItem {
         if !root.flat: Rectangle {
             border-radius: Theme.radius-card;
             border-width: root.focused ? 2px : 1px;
-            border-color: root.focused ? Theme.accent : Theme.border;
-            animate border-color { duration: Theme.restyling ? 0ms : 160ms; }
+            border-color: Theme.accent.mix(Theme.border, root.focus-fade);
         }
     }
 }
@@ -250,8 +250,10 @@ component BootCard inherits BootItem {
 component BootRow inherits BootItem {
     height: 56px;
     border-radius: Theme.radius;
-    background: root.focused ? Theme.accent : transparent;
-    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+    // Only focusing animates, a new theme's colors show at once.
+    property <float> focus-fade: root.focused ? 1 : 0;
+    animate focus-fade { duration: 120ms; }
+    background: Theme.accent.mix(transparent, root.focus-fade);
 
     HorizontalLayout {
         padding-left: 12px;

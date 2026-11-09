@@ -7,10 +7,6 @@ export global Theme {
     // The themes offered in Settings (`THEMES` in settings.rs).
     out property <[string]> theme-names: [@tr("Dark"), @tr("Light")];
     in-out property <int> theme-index: 0;
-    // Set just before the theme or the accent changes (AppWindow clears it):
-    // the colors then change at once, rather than each element fading at
-    // its own pace. The color animations are for hovering and focus.
-    in-out property <bool> restyling;
     // Whether full redraws are fast enough for motion (cards coming in,
     // the row sliding); set from the measured redraw time.
     in-out property <bool> motion: true;

@@ -95,13 +95,16 @@ component OrderRow inherits Rectangle {
             easing: ease-out;
         }
         border-radius: Theme.radius;
-        background: root.dragging ? Theme.surface-strong : fs.has-focus ? Theme.focus-fill : Theme.surface-raised;
+        // Only these animate, a new theme's colors show at once.
+        property <float> drag-fade: root.dragging ? 1 : 0;
+        property <float> focus-fade: fs.has-focus || root.dragging ? 1 : 0;
+        animate drag-fade, focus-fade { duration: 120ms; }
+        background: Theme.surface-strong.mix(Theme.focus-fill.mix(Theme.surface-raised, focus-fade), drag-fade);
         border-width: fs.has-focus || root.dragging ? 2px : 1px;
-        border-color: fs.has-focus || root.dragging ? Theme.accent : Theme.border;
+        border-color: Theme.accent.mix(Theme.border, focus-fade);
         drop-shadow-blur: 16px;
         // Transparent: not drawn (a blur of 0 still is).
         drop-shadow-color: root.dragging ? #0006 : transparent;
-        animate background, border-color { duration: Theme.restyling ? 0ms : 120ms; }
 
         HorizontalLayout {
             padding-left: 14px;

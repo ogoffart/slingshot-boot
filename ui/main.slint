@@ -503,14 +503,12 @@ export component AppWindow inherits Window {
     }
 
     function select-theme(i: int) {
-        Theme.restyling = true;
         root.theme-index = i;
         Theme.theme-index = i;
         root.theme-selected(i);
     }
 
     function select-accent(i: int) {
-        Theme.restyling = true;
         Theme.accent-index = i;
         root.accent-selected(i);
     }
@@ -1029,14 +1027,6 @@ export component AppWindow inherits Window {
         visible: false;
         text: "`•×·–—°©®™ÄÖÜäöüßÀÂÇÈÉÊËÎÏÔÙÛàâçèéêëîïôùûÿñÑ“”‘’«»";
         font-weight: 500;
-    }
-
-    // The colors repainted at once after a theme or accent change: the
-    // animations back after it (Theme.restyling).
-    Timer {
-        interval: 300ms;
-        running: Theme.restyling;
-        triggered => { Theme.restyling = false; }
     }
 
     // Keep the std-widgets palette (used by AboutSlint) in sync with the theme.
