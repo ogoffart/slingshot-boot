@@ -516,73 +516,7 @@ export component CustomizeDialog inherits DialogFrame {
     }
 }
 
-// Asks for the Settings password (`settings.password` in slingshot.toml).
-export component PasswordDialog inherits DialogFrame {
-    in property <bool> wrong;
-    callback cancel();
-    callback submit(string);
-    callback typing();
-
-    card-width: 440px;
-    card-height: layout.preferred-height;
-    escape => { root.cancel(); }
-
-    layout := VerticalLayout {
-        padding: 28px;
-        spacing: 14px;
-        Text {
-            text: @tr("Settings are locked");
-            font-size: 20px;
-            font-weight: 600;
-            color: Theme.text;
-        }
-        Rectangle {
-            height: 46px;
-            border-radius: Theme.radius;
-            background: Theme.surface-raised;
-            border-width: 2px;
-            border-color: root.wrong ? Theme.danger : Theme.accent;
-            input := TextField {
-                x: 14px;
-                width: parent.width - 28px;
-                input-type: password;
-                placeholder: @tr("Password");
-                font-size: 16px;
-                accepted(text) => { root.submit(text); }
-                edited => { root.typing(); }
-            }
-        }
-        Text {
-            text: root.wrong ? @tr("Wrong password.") : @tr("Enter the password to change the settings.");
-            font-size: 14px;
-            color: root.wrong ? Theme.danger : Theme.text-muted;
-        }
-        HorizontalLayout {
-            alignment: end;
-            spacing: 12px;
-            padding-top: 6px;
-            Button {
-                text: @tr("Cancel");
-                clicked => { root.cancel(); }
-            }
-            Button {
-                text: @tr("Unlock");
-                primary: true;
-                clicked => { root.submit(input.text); }
-            }
-        }
-    }
-
-    // Again after a wrong password.
-    public function open() {
-        input.text = "";
-        input.focus();
-    }
-    init => { root.open(); }
-}
-
-
-// An icon button inside a text field (show the passphrase, the layout).
+// An icon button inside a text field: show the passphrase or the password.
 component FieldButton inherits Rectangle {
     in property <string> icon;
     in property <string> label;
@@ -615,6 +549,83 @@ component FieldButton inherits Rectangle {
         }
     }
 }
+
+// Asks for the Settings password (`settings.password` in slingshot.toml).
+export component PasswordDialog inherits DialogFrame {
+    in property <bool> wrong;
+    callback cancel();
+    callback submit(string);
+    callback typing();
+    property <bool> show;
+
+    card-width: 440px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text {
+            text: @tr("Settings are locked");
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: Theme.radius;
+            background: Theme.surface-raised;
+            border-width: 2px;
+            border-color: root.wrong ? Theme.danger : Theme.accent;
+            input := TextField {
+                x: 14px;
+                width: parent.width - 14px - eye.width - 8px;
+                input-type: root.show ? text : password;
+                placeholder: @tr("Password");
+                font-size: 16px;
+                accepted(text) => { root.submit(text); }
+                edited => { root.typing(); }
+            }
+            eye := FieldButton {
+                x: parent.width - self.width - 6px;
+                y: (parent.height - self.height) / 2;
+                icon: root.show ? "eye-off" : "eye";
+                label: root.show ? @tr("Hide the password") : @tr("Show the password");
+                clicked => {
+                    root.show = !root.show;
+                    input.focus();
+                }
+            }
+        }
+        Text {
+            text: root.wrong ? @tr("Wrong password.") : @tr("Enter the password to change the settings.");
+            font-size: 14px;
+            color: root.wrong ? Theme.danger : Theme.text-muted;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            padding-top: 6px;
+            Button {
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
+            }
+            Button {
+                text: @tr("Unlock");
+                primary: true;
+                clicked => { root.submit(input.text); }
+            }
+        }
+    }
+
+    // Again after a wrong password.
+    public function open() {
+        input.text = "";
+        input.focus();
+    }
+    init => { root.open(); }
+}
+
 
 // Asks for the passphrase of an encrypted disk the entry being started
 // needs. Slingshot checks it (`checking`: a second or two, with a spinner),
@@ -768,7 +779,7 @@ export component UnlockDialog inherits DialogFrame {
                 animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
                 input := TextField {
                     x: 14px;
-                    width: parent.width - 14px - buttons.width - 8px;
+                    width: parent.width - 14px - eye.width - 8px;
                     input-type: root.show ? text : password;
                     placeholder: @tr("Passphrase");
                     font-size: 16px;
@@ -780,19 +791,14 @@ export component UnlockDialog inherits DialogFrame {
                     }
                     edited => { root.typing(); }
                 }
-                buttons := HorizontalLayout {
+                eye := FieldButton {
                     x: parent.width - self.width - 6px;
-                    width: self.preferred-width;
-                    height: 36px;
                     y: (parent.height - self.height) / 2;
-                    spacing: 2px;
-                    FieldButton {
-                        icon: root.show ? "eye-off" : "eye";
-                        label: root.show ? @tr("Hide the passphrase") : @tr("Show the passphrase");
-                        clicked => {
-                            root.show = !root.show;
-                            input.focus();
-                        }
+                    icon: root.show ? "eye-off" : "eye";
+                    label: root.show ? @tr("Hide the passphrase") : @tr("Show the passphrase");
+                    clicked => {
+                        root.show = !root.show;
+                        input.focus();
                     }
                 }
             }

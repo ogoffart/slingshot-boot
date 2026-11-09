@@ -185,8 +185,11 @@ export component TopBar inherits Rectangle {
                         if d == 0 {
                             root.enter();
                         } else {
-                            root.follow = true;
+                            // The new tab takes the focus, unless Settings
+                            // opened its password dialog instead.
+                            let before = root.screen;
                             root.step(d < 0);
+                            root.follow = root.screen != before;
                         }
                     }
                 }

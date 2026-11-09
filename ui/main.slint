@@ -26,11 +26,24 @@ export { Theme, Logos, BootEntry, InfoItem, MemorySegment, FileRow, InstallInfo,
 // over another (the passphrase over the file browser).
 component ModalPopup inherits Rectangle {
     in property <bool> shown;
+    // Once it's closed and gave the keyboard focus back.
+    callback closed();
+    property <bool> open;
     changed shown => {
-        if root.shown {
-            popup.show();
-        } else {
+        if !root.shown && root.open {
+            root.open = false;
             popup.close();
+            root.closed();
+        }
+    }
+    // Shown one turn of the event loop later: a popup closed in the same
+    // step gives the keyboard focus back afterwards, and would take it.
+    Timer {
+        interval: 0ms;
+        running: root.shown && !root.open;
+        triggered => {
+            root.open = true;
+            popup.show();
         }
     }
     // In a child of its own: Slint's generated code gives a popup of a
@@ -61,6 +74,7 @@ export component AppWindow inherits Window {
     property <bool> settings-unlocked: settings-access == 0;
     property <bool> password-visible;
     property <bool> password-wrong;
+    property <bool> password-accepted;
     pure callback check-password(string) -> bool;
     // What the password unlocks: 0 = the Settings screen, 1 = the clock,
     // 2 = customizing an entry, 3 = the file browser, 4 = the kernel options.
@@ -840,6 +854,25 @@ export component AppWindow inherits Window {
 
     ModalPopup {
         shown: root.password-visible;
+        // What the password unlocks opens once its dialog is gone: before,
+        // the closing dialog would take the focus back from it.
+        closed => {
+            if !root.password-accepted {
+                return;
+            }
+            root.password-accepted = false;
+            if root.password-for == 1 {
+                root.ask-change-time();
+            } else if root.password-for == 2 {
+                root.ask-customize(root.password-entry);
+            } else if root.password-for == 3 {
+                root.ask-browse();
+            } else if root.password-for == 4 {
+                root.ask-edit-options(root.password-entry);
+            } else {
+                root.show-screen(2);
+            }
+        }
         PasswordDialog {
             wrong: root.password-wrong;
             typing => { root.password-wrong = false; }
@@ -848,17 +881,7 @@ export component AppWindow inherits Window {
                 if root.check-password(text) {
                     root.password-visible = false;
                     root.settings-unlocked = true;
-                    if root.password-for == 1 {
-                        root.ask-change-time();
-                    } else if root.password-for == 2 {
-                        root.ask-customize(root.password-entry);
-                    } else if root.password-for == 3 {
-                        root.ask-browse();
-                    } else if root.password-for == 4 {
-                        root.ask-edit-options(root.password-entry);
-                    } else {
-                        root.show-screen(2);
-                    }
+                    root.password-accepted = true;
                 } else {
                     self.open();
                     root.password-wrong = true;
