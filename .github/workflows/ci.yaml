@@ -1,0 +1,81 @@
+name: CI
+
+on:
+    push:
+        branches: [master]
+        # Words and pictures only: nothing to build or test.
+        paths-ignore: ["**.md", "docs/**", "assets/wallpapers/**"]
+    pull_request:
+        branches: [master]
+        paths-ignore: ["**.md", "docs/**", "assets/wallpapers/**"]
+    workflow_dispatch:
+
+# A run that a newer push makes stale is cancelled.
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+# Actions are pinned by commit, not by a tag that can be moved.
+permissions: {}
+
+jobs:
+    test:
+        runs-on: ubuntu-26.04
+        permissions:
+            contents: read
+            # Lets slint-ui/ui-testing-auth exchange the job's OIDC token for a Slint UI Testing token.
+            id-token: write
+        env:
+            # The UI tests build with this (ui-tests/conftest.py); the unit
+            # tests use it too, so that the host build of Slint is shared.
+            SLINT_EMIT_DEBUG_INFO: "1"
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+            # The same Rust as Cargo.toml's rust-version: new releases bring new
+            # Clippy lints; moving on is a commit that bumps both (AGENTS.md).
+            - uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97
+              with:
+                  toolchain: "1.97"
+                  targets: x86_64-unknown-uefi, aarch64-unknown-uefi
+                  # rust-src: the x86 build with hardware floating point builds core.
+                  components: clippy, rust-src
+            # Slint (a git dependency) is most of the build. Saved even when a
+            # later step fails, so a failing run still fills the cache.
+            - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+              with:
+                  workspaces: |
+                      . -> target
+                      . -> target/ui-tests
+                  cache-on-failure: true
+            - name: Install Linux dependencies
+              run: |
+                  sudo apt-get update
+                  # weston: the headless compositor conftest.py starts for the simulator.
+                  sudo apt-get install libfontconfig-dev libxkbcommon-dev weston
+            # Same target directory and features as the UI tests' build of the
+            # simulator: the host build happens once.
+            - name: Unit tests
+              run: cargo test --features system-testing --target-dir target/ui-tests
+            - name: Lint
+              run: |
+                  cargo clippy --tests --features system-testing --target-dir target/ui-tests -- -D warnings
+                  cargo clippy --release --target x86_64-unknown-uefi -- -D warnings
+                  cargo clippy --release --target aarch64-unknown-uefi -- -D warnings
+            - name: Setup script
+              run: scripts/test-setup.sh
+            # Not for pull requests from forks: they get no OIDC token.
+            - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+              with:
+                  enable-cache: true
+            - name: Get a testing.slint.dev token
+              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+              uses: slint-ui/ui-testing-auth@88dcdb426e53359f1df129ee191b7a41ae3c2f32 # v1
+              with:
+                  account-url: https://account-staging.slint.dev
+            - name: UI tests
+              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+              working-directory: ui-tests
+              run: uv run pytest -v

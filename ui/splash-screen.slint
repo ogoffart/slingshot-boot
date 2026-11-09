@@ -1,0 +1,182 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { BootEntry, CountdownRing, EntryGlyph, Panel } from "widgets.slint";
+
+// A quiet startup screen: a picture (the logo of the entry about to start,
+// in a ring that counts down, on the wallpaper if there is one; or a custom
+// image above a progress bar), a title (the custom text, else the entry's
+// name) and the countdown. Each can be left out (slingshot.toml's
+// `[splash]`, Settings → Startup). Enter starts the entry, another key or a
+// click opens the boot menu (handled by AppWindow).
+export component SplashScreen inherits Rectangle {
+    in property <image> image;
+    property <bool> has-image: image.width > 0;
+    // Replaces the entry's name.
+    in property <string> text;
+    // The entry's name, when there's no text.
+    in property <bool> show-name: true;
+    // The picture: the custom image, else the logo in its ring.
+    in property <bool> show-picture: true;
+    // The "Press any key for the boot menu" line (slingshot.toml's
+    // `[splash] hint`).
+    in property <bool> show-hint: true;
+    in property <string> target-title;
+    in property <BootEntry> entry;
+    in property <int> countdown;
+    // From 1 to 0 over the countdown (computed by AppWindow).
+    in property <float> progress: 1;
+    callback dismissed();
+
+    property <string> title: root.text != "" ? root.text : root.show-name ? root.target-title : "";
+    // The countdown is a ring around the logo, else a progress bar.
+    property <bool> ring: root.show-picture && !root.has-image;
+    // On the wallpaper (glass), unless a custom image is shown.
+    property <bool> on-wallpaper: Theme.frosted && !(root.show-picture && root.has-image);
+
+    background: Theme.background;
+    if root.on-wallpaper: Image {
+        width: 100%;
+        height: 100%;
+        source: Theme.backdrop;
+        image-fit: cover;
+    }
+
+    VerticalLayout {
+        // Positioned explicitly so the image size can depend on our size.
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        alignment: center;
+        spacing: 28px;
+
+        if root.show-picture && root.has-image: HorizontalLayout {
+            alignment: center;
+            Image {
+                source: root.image;
+                width: min(root.width * 0.5, 560px);
+                height: min(root.height * 0.45, 360px);
+                image-fit: contain;
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            Panel {
+                // Glass on the wallpaper; nothing on a plain background.
+                on-backdrop: true;
+                tint: root.on-wallpaper ? Theme.surface : transparent;
+                stroke: root.on-wallpaper ? Theme.border : transparent;
+                border-radius: 28px;
+                VerticalLayout {
+                    padding: root.on-wallpaper ? 40px : 0px;
+                    padding-left: root.on-wallpaper ? 64px : 0px;
+                    padding-right: self.padding-left;
+                    spacing: 22px;
+                    if root.ring: HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 168px;
+                            height: 168px;
+                            // The track…
+                            Rectangle {
+                                x: 4px;
+                                y: 4px;
+                                width: parent.width - 8px;
+                                height: parent.height - 8px;
+                                border-radius: self.width / 2;
+                                border-width: 6px;
+                                border-color: Theme.focus-track;
+                            }
+                            // … what is left of the countdown…
+                            if root.countdown >= 0: CountdownRing {
+                                width: parent.width;
+                                height: parent.height;
+                                progress: root.progress;
+                                ring-color: Theme.accent;
+                                thickness: 6px;
+                            }
+                            // … around the logo of what starts.
+                            Rectangle {
+                                width: 128px;
+                                height: 128px;
+                                border-radius: self.width / 2;
+                                background: Theme.icon-well;
+                                EntryGlyph {
+                                    entry: root.entry;
+                                    icon-size: 60px;
+                                    image-size: 84px;
+                                    icon-color: Theme.text-strong;
+                                }
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        if root.title != "": Text {
+                            text: root.title;
+                            font-size: 26px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        Text {
+                            text: root.countdown >= 0 ? @tr("Starting in {} s", root.countdown) : @tr("Starting");
+                            font-size: 15px;
+                            color: Theme.text-muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    if !root.ring && root.countdown >= 0: HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 320px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.surface-strong;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * (1 - root.progress);
+                                height: parent.height;
+                                border-radius: 2px;
+                                background: Theme.accent;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.show-hint: Rectangle {
+        // A glass pill on the wallpaper.
+        if root.on-wallpaper: Panel {
+            on-backdrop: true;
+            width: 100%;
+            height: 100%;
+            border-radius: self.height / 2;
+        }
+        width: hint-text.preferred-width + 36px;
+        height: 34px;
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 72px;
+        hint-text := Text {
+            text: @tr("Press any key for the boot menu");
+            font-size: 13px;
+            color: Theme.text-muted;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    // Clicks open the menu; mere pointer movement doesn't (it can be noise).
+    TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.dismissed();
+            }
+        }
+    }
+}

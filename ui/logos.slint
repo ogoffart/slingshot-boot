@@ -1,0 +1,15 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The operating systems' logos (assets/os/, see SOURCES.md there), by the
+// names src/app/logos.rs gives the entries, in the order of config::ICONS.
+export struct Logo {
+    name: string,
+    image: image,
+}
+
+export global Logos {
+    // Set by the program (src/app/logos.rs), which keeps the PNG files
+    // compressed: embedded here, they'd be raw pixels, 1.3 MB.
+    in property <[Logo]> all;
+}

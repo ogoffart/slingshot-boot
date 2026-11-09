@@ -1,0 +1,784 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import { Logos } from "logos.slint";
+
+export struct BootEntry {
+    title: string,
+    subtitle: string,
+    kind: string,
+    // An image from slingshot.toml, shown instead of the icon.
+    image: image,
+    has-image: bool,
+    // Its kernel options can be edited (E) before starting it.
+    editable: bool,
+    // A boot entry that the Customize dialog (C) can change.
+    customizable: bool,
+    // It just appeared (a USB stick plugged in): it comes in animated.
+    arrived: bool,
+}
+
+// An entry's icon, or its picture when it has one, centered.
+export component EntryGlyph inherits Rectangle {
+    in property <BootEntry> entry;
+    in property <length> icon-size;
+    in property <length> image-size;
+    in property <color> icon-color;
+    if !root.entry.has-image: Icon {
+        kind: root.entry.kind;
+        size: root.icon-size;
+        color: root.icon-color;
+    }
+    if root.entry.has-image: Image {
+        width: root.image-size;
+        height: root.image-size;
+        source: root.entry.image;
+        image-fit: contain;
+    }
+}
+
+export struct InfoItem {
+    label: string,
+    title: string,
+    detail: string,
+    // Optional icon shown before the title ("" for none).
+    icon: string,
+    good: bool,
+}
+
+export struct BatteryFact {
+    label: string,
+    value: string,
+}
+
+// The System screen's battery card (`present` false: no card).
+export struct BatteryInfo {
+    present: bool,
+    // The charge level, 0 to 100, or -1 when unknown.
+    level: float,
+    // Which way the charge goes, and the gradient moves: 1 up, -1 down, 0 neither.
+    direction: int,
+    state: string,
+    time-left: string,
+    // "AC adapter plugged in", or "" when nothing says.
+    ac: string,
+    low: bool,
+    // Measurements: power, energy, health…
+    facts: [BatteryFact],
+    // What it is: chemistry, model, serial number…
+    identity: string,
+}
+
+export struct MemorySegment {
+    // Relative size, used as the stretch factor of the bar segment.
+    weight: float,
+    color: color,
+}
+
+// Moves the keyboard focus to the next or previous element, as Tab and
+// Shift+Tab do: the arrow keys in lists and rows. Done by the Rust side
+// (Slint has no "next element" to focus from .slint).
+export global Focus {
+    callback move(bool);
+}
+
+// A pill-shaped button: Enter or Space presses it when it has the focus.
+export component Button inherits Rectangle {
+    in property <string> text;
+    // An icon before the text ("" for none).
+    in property <string> icon;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    out property <bool> has-focus: fs.has-focus;
+    callback clicked;
+
+    forward-focus: fs;
+    min-height: 44px;
+    min-width: label.preferred-width + 40px + (root.icon != "" ? 28px : 0px);
+    accessible-role: button;
+    accessible-label: text;
+    accessible-enabled: enabled;
+    accessible-action-default => {
+        if enabled {
+            clicked();
+        }
+    }
+    border-radius: 10px;
+    border-width: primary || danger ? 0px : 1px;
+    border-color: Theme.border-strong;
+    background: !enabled ? (primary ? Theme.accent.with-alpha(0.35) : transparent)
+        : primary ? (touch.pressed ? Theme.accent.darker(0.15) : touch.has-hover ? Theme.accent.brighter(0.1) : Theme.accent)
+        : (touch.pressed ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised
+            // Over the wallpaper (the boot screen's), readable.
+            : Theme.frosted ? Theme.surface.with-alpha(0.7) : transparent);
+    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+
+    focus-ring := Rectangle {
+        x: -4px;
+        y: -4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        border-radius: parent.border-radius + 4px;
+        border-width: 2px;
+        border-color: fs.has-focus ? Theme.accent : transparent;
+        animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 10px;
+        padding-left: 20px;
+        padding-right: 20px;
+        if root.icon != "": VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon;
+                size: 18px;
+                thickness: 2px;
+                color: label.color;
+            }
+        }
+        label := Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: root.primary ? Theme.on-accent.with-alpha(root.enabled ? 1 : 0.6)
+                : root.danger ? Theme.danger
+                : root.enabled ? Theme.text-soft : Theme.text-muted.with-alpha(0.6);
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// One option inside a segmented control.
+export component Segment inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked;
+
+    height: 44px;
+    border-radius: 9px;
+    background: selected ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised : transparent;
+    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+    accessible-role: radio-button;
+    accessible-label: text;
+    accessible-checkable: true;
+    accessible-checked: selected;
+    accessible-action-default => { clicked(); }
+
+    Text {
+        text: root.text;
+        font-size: 14px;
+        font-weight: root.selected ? 600 : 500;
+        color: root.selected ? Theme.text-strong : Theme.text-muted;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// A row of mutually exclusive options.
+export component SegmentedControl inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    out property <bool> has-focus: fs.has-focus;
+    callback activated(int);
+
+    function choose(i: int) {
+        if i != root.current {
+            root.current = i;
+            root.activated(i);
+        }
+    }
+
+    forward-focus: fs;
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    accessible-role: radio-group;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
+        for option[i] in root.options: Segment {
+            horizontal-stretch: 1;
+            text: option;
+            selected: i == root.current;
+            clicked => {
+                fs.focus();
+                root.current = i;
+                root.activated(i);
+            }
+        }
+    }
+    // ← → choose.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow {
+                root.choose(max(0, root.current - 1));
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.choose(min(root.options.length - 1, root.current + 1));
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// The keyboard shortcut chips shown in the footer.
+export component KeyChip inherits HorizontalLayout {
+    in property <string> key;
+    in property <string> label;
+    spacing: 8px;
+    Rectangle {
+        background: Theme.icon-well;
+        border-color: Theme.border-strong;
+        border-width: 1px;
+        border-radius: 6px;
+        min-width: key-text.preferred-width + 16px;
+        height: 24px;
+        y: (parent.height - self.height) / 2;
+        key-text := Text {
+            text: root.key;
+            font-size: 12px;
+            color: Theme.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        text: root.label;
+        horizontal-stretch: 0;
+        font-size: 13px;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+    }
+}
+
+// A turning arc, while something takes a moment (checking a passphrase).
+// Its length breathes, like the system spinners.
+export component Spinner inherits Rectangle {
+    in property <length> size: 22px;
+    in property <length> thickness: 2.5px;
+
+    width: size;
+    height: size;
+    // In turns: one every 0.9 s; the arc grows and shrinks every 1.8 s.
+    property <float> t: animation-tick() / 1ms;
+    property <angle> from: mod(t, 900) / 900 * 360deg;
+    property <angle> sweep: 50deg + 220deg * (0.5 - 0.5 * cos(mod(t, 1800) / 1800 * 360deg));
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: Theme.accent.transparentize(80%);
+        stroke-width: root.thickness;
+        commands: "M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0";
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: Theme.accent;
+        stroke-width: root.thickness;
+        stroke-line-cap: round;
+        MoveTo {
+            x: 12 + 9 * sin(root.from);
+            y: 12 - 9 * cos(root.from);
+        }
+        ArcTo {
+            x: 12 + 9 * sin(root.from + root.sweep);
+            y: 12 - 9 * cos(root.from + root.sweep);
+            radius-x: 9;
+            radius-y: 9;
+            large-arc: root.sweep > 180deg;
+            sweep: true;
+        }
+    }
+}
+
+// The ring around the focused boot card. `progress` goes from 1 (full) to 0.
+export component CountdownRing inherits Path {
+    in property <float> progress;
+    in property <color> ring-color;
+    in property <length> thickness: 5px;
+
+    property <angle> sweep: max(0.001, min(progress, 0.9999)) * 360deg;
+
+    viewbox-width: 112;
+    viewbox-height: 112;
+    stroke: ring-color;
+    stroke-width: thickness;
+    stroke-line-cap: round;
+
+    MoveTo {
+        x: 56;
+        y: 4;
+    }
+    ArcTo {
+        x: 56 + 52 * sin(root.sweep);
+        y: 56 - 52 * cos(root.sweep);
+        radius-x: 52;
+        radius-y: 52;
+        large-arc: root.sweep > 180deg;
+        sweep: true;
+    }
+}
+
+// A discreet "Made with Slint" mark for the footer, using the Slint logo
+// mark from the official #MadeWithSlint logo.
+export component MadeWithSlint inherits HorizontalLayout {
+    spacing: 6px;
+    VerticalLayout {
+        alignment: center;
+        Path {
+            width: 9px;
+            height: 13px;
+            viewbox-x: 39;
+            viewbox-y: 16.5;
+            viewbox-width: 27.7;
+            viewbox-height: 38.6;
+            fill: Theme.dark ? #6f8fd8 : #2379f4;
+            commands: "M44.116 54.8572L65.6681 39.826C65.6681 39.826 66.6407 39.2638 66.6407 38.3765C66.6407 37.1949 65.4108 36.8106 65.4108 36.8106L53.5542 32.0886C53.1311 31.9217 52.5489 32.3895 53.094 32.9825L57.0193 36.9358C57.0193 36.9358 58.1097 38.0141 58.1097 38.7213C58.1097 39.4285 57.4402 40.0588 57.4402 40.0588L43.1565 53.948C42.6484 54.4421 43.3353 55.3382 44.116 54.8572Z M61.5247 16.75L39.9726 31.779C39.9726 31.779 39 32.3412 39 33.2285C39 34.4101 40.2299 34.7944 40.2299 34.7944L52.0865 39.5186C52.5096 39.6833 53.094 39.2155 52.5467 38.6247L48.6214 34.6583C48.6214 34.6583 47.531 33.5821 47.531 32.8727C47.531 32.1633 48.2005 31.5352 48.2005 31.5352L62.4755 17.657C62.9924 17.1629 62.3076 16.2668 61.5247 16.75Z";
+        }
+    }
+    Text {
+        text: "Made with Slint";
+        horizontal-stretch: 0;
+        font-size: 12px;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+    }
+}
+
+// A check box with its label, in the style of the other controls.
+export component Toggle inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    out property <bool> has-focus: fs.has-focus;
+    callback clicked;
+
+    forward-focus: fs;
+    height: 40px;
+    width: row.preferred-width + 24px;
+    border-radius: Theme.radius;
+    background: Theme.surface-raised;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+    row := HorizontalLayout {
+        x: 12px;
+        spacing: 10px;
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 5px;
+            background: root.checked ? Theme.accent : transparent;
+            border-width: root.checked ? 0px : 2px;
+            border-color: Theme.border-strong;
+            if root.checked: Path {
+                width: 18px;
+                height: 18px;
+                viewbox-width: 18;
+                viewbox-height: 18;
+                commands: "M4.5 9.5l3 3l6 -7";
+                stroke: Theme.on-accent;
+                stroke-width: 2.2px;
+                stroke-line-cap: round;
+                fill: transparent;
+            }
+        }
+        Text {
+            text: root.text;
+            font-size: 14px;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
+    }
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// The icon of a boot entry: "Auto" (the entry's own), then the icons that
+// slingshot.toml names: the drawn ones, and below them the systems' logos.
+export component IconPicker inherits Rectangle {
+    // 0 = Auto, else 1 + an index in `kinds`, then in `Logos.all`.
+    in property <int> current;
+    // The same names, in the same order, as `config::ICONS` (its logos are
+    // `Logos.all`).
+    out property <[string]> kinds: ["linux", "usb", "network", "shell", "disc", "app", "disk", "sliders"];
+    out property <int> count: kinds.length + Logos.all.length;
+    out property <bool> has-focus: fs.has-focus;
+    callback activated(int);
+
+    forward-focus: fs;
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+    accessible-role: radio-group;
+
+    VerticalLayout {
+        padding: 3px;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 3px;
+            alignment: start;
+            Segment {
+                width: 52px;
+                height: 40px;
+                text: @tr("Auto");
+                selected: root.current == 0;
+                clicked => {
+                    fs.focus();
+                    root.activated(0);
+                }
+            }
+            for kind[i] in root.kinds: Segment {
+                width: 42px;
+                height: 40px;
+                accessible-label: kind;
+                selected: root.current == i + 1;
+                clicked => {
+                    fs.focus();
+                    root.activated(i + 1);
+                }
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    kind: kind;
+                    size: 20px;
+                    color: root.current == i + 1 ? Theme.text-strong : Theme.text-muted;
+                }
+            }
+        }
+        // The logos, 8 to a row, under the drawn icons.
+        Rectangle {
+            height: Math.ceil(Logos.all.length / 8) * 43px - 3px;
+            for logo[i] in Logos.all: Segment {
+                x: 55px + Math.mod(i, 8) * 45px;
+                y: Math.floor(i / 8) * 43px;
+                width: 42px;
+                height: 40px;
+                accessible-label: logo.name;
+                selected: root.current == root.kinds.length + i + 1;
+                clicked => {
+                    fs.focus();
+                    root.activated(root.kinds.length + i + 1);
+                }
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: logo.image;
+                    width: 24px;
+                    height: 24px;
+                    image-fit: contain;
+                    opacity: root.current == root.kinds.length + i + 1 ? 1 : 0.75;
+                }
+            }
+        }
+    }
+    // ← → choose.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow && root.current > 0 {
+                root.activated(root.current - 1);
+                return accept;
+            }
+            if event.text == Key.RightArrow && root.current < root.count {
+                root.activated(root.current + 1);
+                return accept;
+            }
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// One of the pictures next to slingshot.toml, or none: ‹ › step through
+// them.
+export component PicturePicker inherits Rectangle {
+    // "None" first, then the file names.
+    in property <[string]> names;
+    in-out property <int> current;
+    // The current picture, if it could be read.
+    in property <image> preview;
+    in property <bool> has-preview;
+    // What "no picture" is called here.
+    in property <string> none-text: @tr("None");
+    // Another picture was chosen: `current`.
+    callback activated(int);
+    callback add();
+    out property <bool> has-focus: fs.has-focus;
+
+    // The previous (-1) or next (+1) picture.
+    function step(delta: int) {
+        let next = clamp(root.current + delta, 0, root.names.length - 1);
+        if next != root.current {
+            root.current = next;
+            root.activated(next);
+        }
+    }
+
+    forward-focus: fs;
+    height: 48px;
+    background: Theme.surface-raised;
+    border-radius: Theme.radius;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+    accessible-role: spinbox;
+    accessible-value: root.names[root.current];
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 10px;
+        Rectangle {
+            width: 36px;
+            opacity: root.current > 0 ? 1 : 0.35;
+            Icon { kind: "chevron-left"; size: 18px; color: Theme.text-soft; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+            TouchArea {
+                clicked => {
+                    fs.focus();
+                    root.step(-1);
+                }
+            }
+        }
+        if root.has-preview && root.current > 0: Image {
+            width: 32px;
+            height: 32px;
+            y: 8px;
+            source: root.preview;
+            image-fit: contain;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.current == 0 ? root.none-text : root.names[root.current];
+            font-size: 14px;
+            color: root.current > 0 ? Theme.text : Theme.text-muted;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Rectangle {
+            width: 36px;
+            opacity: root.current < root.names.length - 1 ? 1 : 0.35;
+            Icon { kind: "chevron-right"; size: 18px; color: Theme.text-soft; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+            TouchArea {
+                clicked => {
+                    fs.focus();
+                    root.step(1);
+                }
+            }
+        }
+        // "Add…": on the desktop, a file dialog.
+        Rectangle {
+            width: add-label.preferred-width + 20px;
+            add-label := Text {
+                text: @tr("Add…");
+                font-size: 14px;
+                font-weight: 600;
+                color: add-touch.has-hover ? Theme.text-strong : Theme.accent;
+                vertical-alignment: center;
+            }
+            add-touch := TouchArea { clicked => { root.add(); } }
+        }
+    }
+    // ← → step, Enter or Space: "Add…".
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                root.step(event.text == Key.LeftArrow ? -1 : 1);
+                return accept;
+            }
+            if event.text == Key.Return || event.text == " " {
+                root.add();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// A single-line text input, inside a frame drawn by the parent. Like a line
+// edit, it scrolls to keep the cursor in view.
+export component TextField inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <length> font-size: 15px;
+    in property <InputType> input-type <=> input.input-type;
+    in property <bool> enabled <=> input.enabled;
+    out property <bool> has-focus: input.has-focus;
+    callback accepted(string);
+    callback edited(string);
+    // ↑ or ↓ (`down`), before the text takes them: true if used.
+    callback arrow(/* down */ bool) -> bool;
+
+    clip: true;
+    forward-focus: input;
+
+    public function set-selection-offsets(anchor: int, focus: int) {
+        input.set-selection-offsets(anchor, focus);
+    }
+
+    if root.text == "" && input.preedit-text == "": Text {
+        // At the left, where the text starts (a child is centered otherwise).
+        x: 0;
+        width: parent.width;
+        text: root.placeholder;
+        font-size: root.font-size;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    // The arrows first, for the field's user (Settings goes on with them).
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if (event.text == Key.UpArrow || event.text == Key.DownArrow) && root.arrow(event.text == Key.DownArrow) {
+                return accept;
+            }
+            reject
+        }
+        input := TextInput {
+            // How far the text is scrolled to the left (≤ 0).
+            property <length> scroll;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            font-size: root.font-size;
+            color: Theme.text;
+            selection-background-color: Theme.accent;
+            selection-foreground-color: Theme.on-accent;
+            vertical-alignment: center;
+            single-line: true;
+            cursor-position-changed(pos) => {
+                if pos.x + self.scroll < 0 {
+                    self.scroll = -pos.x;
+                } else if pos.x + self.scroll > parent.width - self.text-cursor-width {
+                    self.scroll = parent.width - self.text-cursor-width - pos.x;
+                }
+            }
+            accepted => { root.accepted(self.text); }
+            edited => { root.edited(self.text); }
+        }
+    }
+}
+
+// Frosted glass: the blurred wallpaper (`Theme.backdrop`) as it is behind
+// this element, clipped to its rounded corners, under a tint. Without a
+// wallpaper, just the tint.
+export component Frost inherits Rectangle {
+    in property <color> tint;
+    // Over a full-window Theme.backdrop already: the same pixels, so the
+    // tint alone.
+    in property <bool> on-backdrop;
+    if Theme.frosted && !root.on-backdrop: Rectangle {
+        border-radius: root.border-radius;
+        clip: true;
+        Image {
+            x: -root.absolute-position.x;
+            y: -root.absolute-position.y;
+            width: Theme.window-width;
+            height: Theme.window-height;
+            source: Theme.backdrop;
+            image-fit: cover;
+        }
+    }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: Theme.frosted ? root.tint.with-alpha(Theme.dark ? 0.45 : 0.4) : root.tint;
+        animate background { duration: Theme.restyling ? 0ms : 160ms; }
+    }
+}
+
+// A panel of the screens: frosted glass over the wallpaper, a border on
+// top of the content.
+export component Panel inherits Rectangle {
+    in property <color> tint: Theme.surface;
+    in property <color> stroke: Theme.border;
+    in property <bool> on-backdrop <=> frost.on-backdrop;
+    border-radius: 16px;
+    frost := Frost {
+        width: 100%;
+        height: 100%;
+        border-radius: root.border-radius;
+        tint: root.tint;
+    }
+    @children
+    Rectangle {
+        width: 100%;
+        height: 100%;
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.stroke;
+    }
+}

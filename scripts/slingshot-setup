@@ -1,0 +1,1527 @@
+#!/usr/bin/env bash
+# Copyright © Olivier Goffart
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Installs Slingshot next to the existing boot loader on a Linux system.
+# Run `slingshot-setup help` for the commands. Manual steps: docs/install-manually.md
+
+set -euo pipefail
+
+LABEL="Slingshot"
+ESP_DIR="EFI/slingshot"
+EFI_NAME="slingshot.efi"
+LOADER_ENTRY="loader/entries/slingshot.conf"
+# For what's shown to the user, and the comments written in their files.
+DOCS="https://github.com/ogoffart/slingshot-boot/blob/master/docs"
+# The first lines of what luks-entry writes, for uninstall to find them.
+LUKS_ENTRY_MARK="# Written by slingshot-setup"
+PRESET_MARK="# slingshot-setup: the initramfs as well"
+GLOBAL_GUID="8be4df61-93ca-11d2-aa0d-00e098032b8c"
+# The GPT partition type of an EFI System Partition.
+ESP_TYPE="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+# The tests' overrides, below, aren't for root: with `sudo -E`, they'd
+# have root read and run the files of whoever set them. Unless the tests
+# themselves run as root (they say so).
+if [ "$(id -u)" = 0 ] && [ "${SLINGSHOT_TESTING:-}" != 1 ]; then
+    unset SLINGSHOT_ARCH SLINGSHOT_SYSFS SLINGSHOT_ETC SLINGSHOT_REFIND_DRIVERS SLINGSHOT_EFIFS_URL SLINGSHOT_EFIFS_SUMS SLINGSHOT_HOME
+fi
+# The firmware's architecture: x64 or aa64 in EFI file names
+# (SLINGSHOT_ARCH overrides it, for the tests).
+case "${SLINGSHOT_ARCH:-$(uname -m)}" in
+    aarch64 | arm64) EFI_ARCH=aa64 UEFI_TARGET=aarch64-unknown-uefi PE_MACHINE=aa64 ;;
+    *) EFI_ARCH=x64 UEFI_TARGET=x86_64-unknown-uefi PE_MACHINE=8664 ;;
+esac
+# Where sysfs is: tests point it at a fake one.
+SYS=${SLINGSHOT_SYSFS:-/sys}
+ETC=${SLINGSHOT_ETC:-/etc}
+# This script's folder: slingshot.efi and the slingshot program can be next to it.
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+ASSUME_YES=0
+DRY_RUN=0
+NO_RESTART=0
+PORCELAIN=0
+EFI_FILE=""
+ESP=""
+# From the source tree on a PC: the build with hardware floating point (as
+# the releases), unless --no-sse; 0 = no, 1 = asked, "" = if it can.
+SSE=""
+SIGN=0
+
+# --- output ----------------------------------------------------------------
+
+if [ -t 1 ]; then
+    BOLD=$'\e[1m' DIM=$'\e[2m' RED=$'\e[31m' GREEN=$'\e[32m' YELLOW=$'\e[33m' BLUE=$'\e[34m' RESET=$'\e[0m'
+else
+    BOLD="" DIM="" RED="" GREEN="" YELLOW="" BLUE="" RESET=""
+fi
+
+step() { printf '%s==>%s %s%s%s\n' "$BLUE" "$RESET" "$BOLD" "$*" "$RESET"; }
+info() { printf '    %s\n' "$*"; }
+ok()   { printf '    %s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '    %s!%s %s\n' "$YELLOW" "$RESET" "$*"; }
+die()  { printf '%serror:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
+
+ask() {
+    # ask "Question?" → returns 0 for yes
+    if [ "$ASSUME_YES" = 1 ]; then return 0; fi
+    local answer
+    printf '    %s [y/N] ' "$1"
+    read -r answer || { echo; return 1; }
+    [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+# The commands run as root are shown on fd 3, the script's standard
+# output: not silenced with the command's own output (`as_root tee … >/dev/null`).
+exec 3>&1
+
+# Runs a command as root (through sudo when needed), showing it first, or
+# only shows it with --dry-run.
+as_root() {
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '    %s[dry run]%s %s\n' "$DIM" "$RESET" "$*"
+        return 0
+    fi
+    if [ "$EUID" = 0 ]; then
+        printf '    %s# %s%s\n' "$DIM" "$(shown_command "$@")" "$RESET" >&3
+        "$@"
+    else
+        printf '    %s$ sudo %s%s\n' "$DIM" "$(shown_command "$@")" "$RESET" >&3
+        sudo "$@"
+    fi
+}
+
+# A command as one would type it: arguments quoted when they need it.
+shown_command() {
+    local arg out=""
+    for arg in "$@"; do
+        case $arg in
+            "" | *[!A-Za-z0-9_./:=@%+,-]*) arg="'${arg//\'/\'\\\'\'}'" ;;
+        esac
+        out+="${out:+ }$arg"
+    done
+    printf '%s' "$out"
+}
+
+# The ESP is often readable by root only (fmask=0077, dmask=0077): these
+# look as root when the user can't. Without asking for a password for
+# `status`, or a dry run without a terminal (the desktop app runs them).
+QUIET_SUDO=0
+# The presets mkinitcpio built (" linux linux-lts ").
+BUILT=" "
+# Said once, before sudo first asks for a password to read something.
+SAID_WHY=0
+as_root_quietly() {
+    [ "$EUID" != 0 ] || return 1
+    if [ "$QUIET_SUDO" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ ! -t 0 ]; }; then
+        sudo -n "$@" 2>/dev/null
+    else
+        if [ "$SAID_WHY" = 0 ] && ! sudo -n true 2>/dev/null; then
+            info "Only root can read ${*: -1}: sudo asks for your password to read it."
+            info "(Nothing is changed before you confirm.)"
+            SAID_WHY=1
+        fi
+        sudo "$@" 2>/dev/null
+    fi
+}
+# A command that only reads: as the user, else as root.
+as_user_or_root() { "$@" 2>/dev/null || as_root_quietly "$@"; }
+root_exists() { as_user_or_root test -e "$1"; }
+root_dir() { as_user_or_root test -d "$1"; }
+root_cat() { as_user_or_root cat "$1" || true; }
+# A file root owns, that nobody else can write (nor its folder).
+owned_by_root() { # file
+    local f
+    for f in "$1" "$(dirname "$1")"; do
+        case "$(stat -Lc '%u %a' "$f" 2>/dev/null)" in
+            "0 "*[2367]? | "0 "*[2367]) return 1 ;;
+            "0 "*) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
+# Writes stdin to the file $1 as root ($2 = -a: appends), or shows it with
+# --dry-run (`as_root tee` would print the command and not read stdin).
+root_write() { # file [-a]
+    if [ "$DRY_RUN" = 1 ]; then
+        printf '    %s[dry run]%s write %s:\n' "$DIM" "$RESET" "$1"
+        sed 's/^/        /'
+        return 0
+    fi
+    as_root tee ${2:-} "$1" >/dev/null
+}
+
+# The value of KEY=… (quotes removed) in the first of the files that has it.
+conf_value() { # key file…
+    local key=$1 f value
+    shift
+    for f in "$@"; do
+        [ -f "$f" ] || continue
+        value=$(sed -n "s/^$key=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$f" | tail -1)
+        if [ -n "$value" ]; then
+            printf '%s' "$value"
+            return
+        fi
+    done
+}
+
+# --- detection -------------------------------------------------------------
+
+require_uefi() {
+    [ -d "$SYS/firmware/efi" ] || die "this system didn't boot in UEFI mode (no /sys/firmware/efi)."
+    command -v efibootmgr >/dev/null || die "efibootmgr is needed: install it (Arch: pacman -S efibootmgr, Debian/Ubuntu: apt install efibootmgr)."
+}
+
+find_esp() {
+    if [ -n "$ESP" ]; then
+        [ -d "$ESP/EFI" ] || die "$ESP doesn't look like an EFI System Partition (no EFI folder)."
+        printf '%s' "$ESP"
+        return
+    fi
+    local esp="" m dev
+    if command -v bootctl >/dev/null; then
+        esp=$(bootctl --print-esp-path 2>/dev/null || true)
+    fi
+    # Without root: Ubuntu mounts it with umask=0077, only root sees inside.
+    # Looking is enough to have systemd mount an automounted one ("autofs"
+    # until then).
+    if [ -z "$esp" ]; then
+        for m in /efi /boot /boot/efi; do
+            test -d "$m/EFI" 2>/dev/null || true
+            if [ "$(findmnt -no FSTYPE "$m" 2>/dev/null | tail -n1)" = vfat ] && { [ -d "$m/EFI" ] || is_esp_partition "$m"; }; then
+                esp=$m
+                break
+            fi
+        done
+    fi
+    # Mounted elsewhere: the partition of the EFI System Partition's type.
+    if [ -z "$esp" ]; then
+        esp=$(lsblk -rno PARTTYPE,MOUNTPOINT 2>/dev/null |
+            awk -v t="$ESP_TYPE" 'tolower($1) == t && $2 != "" { print $2; exit }')
+        esp=$(printf '%b' "$esp")  # lsblk writes spaces as \x20
+    fi
+    if [ -z "$esp" ]; then
+        dev=$(lsblk -rno PATH,PARTTYPE 2>/dev/null | awk -v t="$ESP_TYPE" 'tolower($2) == t { print $1; exit }')
+        [ -z "$dev" ] || die "the EFI System Partition ($dev) isn't mounted. Mount it, for example: sudo mount $dev /boot/efi"
+        die "couldn't find the EFI System Partition. Is it mounted (on /efi, /boot or /boot/efi)?"
+    fi
+    printf '%s' "$esp"
+}
+
+# Whether what's mounted on $1 is a partition of the EFI System Partition's
+# type (lsblk reads it without root).
+is_esp_partition() {
+    local dev
+    dev=$(findmnt -no SOURCE "$1" 2>/dev/null | tail -n1)
+    [ -n "$dev" ] && [ "$(lsblk -no PARTTYPE "$dev" 2>/dev/null | tr A-Z a-z)" = "$ESP_TYPE" ]
+}
+
+# Prints "disk partition" for the ESP, e.g. "/dev/nvme0n1 1".
+esp_disk_and_partition() {
+    local dev disk part
+    dev=$(findmnt -no SOURCE "$1")
+    disk=$(lsblk -no PKNAME "$dev" | head -n1)
+    part=$(cat "$SYS/class/block/$(basename "$dev")/partition")
+    [ -n "$disk" ] && [ -n "$part" ] || die "couldn't find the disk and partition number of $dev."
+    printf '/dev/%s %s' "$disk" "$part"
+}
+
+# Prints the Boot#### number of the Slingshot entry, if there is one.
+# The firmware's entries, as efibootmgr lists them: what entry_number and
+# boot_order read, so that a command reads the variables once.
+boot_entries() { efibootmgr 2>/dev/null || true; }
+
+# Slingshot's Boot#### number, from boot_entries on stdin.
+entry_number() {
+    sed -n "s/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\}[[:space:]]\+$LABEL\b.*/\1/p" | head -n1
+}
+
+# BootOrder, from boot_entries on stdin.
+boot_order() {
+    sed -n 's/^BootOrder: //p'
+}
+
+# The boot order $1 without entry $2.
+boot_order_without() {
+    tr ',' '\n' <<<"$1" | { grep -vix "$2" || true; } | paste -sd, -
+}
+
+secure_boot_enabled() {
+    local var="$SYS/firmware/efi/efivars/SecureBoot-$GLOBAL_GUID"
+    [ -r "$var" ] && [ "$(od -An -t u1 -j 4 -N 1 "$var" | tr -d ' ')" = 1 ]
+}
+
+uses_systemd_boot() {
+    local esp=$1
+    root_exists "$esp/EFI/systemd/systemd-boot$EFI_ARCH.efi" && root_dir "$esp/loader"
+}
+
+# The machine type in an EFI program's PE header: 8664 (x64) or aa64
+# (ARM). Nothing for a file that isn't a PE program.
+pe_machine() {
+    local pe
+    [ "$(head -c 2 "$1")" = MZ ] || return 0
+    pe=$(od -An -t u4 -j 60 -N 4 "$1" | tr -d ' ')
+    od -An -t x2 -j $((pe + 4)) -N 2 "$1" | tr -d ' '
+}
+
+# Finds the program to install, and checks it's for this computer (a
+# release archive for PCs, unpacked on an ARM computer, has the wrong one).
+find_efi_file() {
+    locate_efi_file
+    local machine
+    machine=$(pe_machine "$EFI_FILE")
+    if [ -n "$machine" ] && [ "$machine" != "$PE_MACHINE" ]; then
+        die "$EFI_FILE is for another kind of processor than this computer's ($(uname -m))."
+    fi
+}
+
+locate_efi_file() {
+    if [ -n "$EFI_FILE" ]; then
+        [ -f "$EFI_FILE" ] || die "$EFI_FILE doesn't exist."
+        return
+    fi
+    local root built
+    root=$(cd "$HERE/.." && pwd)
+    # A release archive (next to this script) or a package (/usr/lib).
+    if [ ! -f "$root/Cargo.toml" ]; then
+        for built in "$HERE/slingshot.efi" "$root/lib/slingshot/slingshot.efi" /usr/lib/slingshot/slingshot.efi; do
+            if [ -f "$built" ]; then
+                EFI_FILE=$built
+                return
+            fi
+        done
+        die "slingshot.efi not found (pass --efi FILE)."
+    fi
+    # --sse: the x86 build with hardware floating point (the releases'),
+    # its standard library built from source (.cargo/config.toml).
+    local target=$UEFI_TARGET
+    if [ "$SSE" = 1 ] && [ "$EFI_ARCH" != x64 ]; then
+        die "--sse is for x86 PCs."
+    fi
+    if [ "$EFI_ARCH" != x64 ]; then
+        SSE=0
+    elif [ -z "$SSE" ]; then
+        # It builds Rust's core library from source: rust-src, which rustup
+        # can add. A Rust without rustup and without it: the slower build.
+        if command -v rustup >/dev/null || [ -d "$(rustc --print sysroot 2>/dev/null)/lib/rustlib/src/rust/library" ]; then
+            SSE=1
+        else
+            SSE=0
+            warn "Building without hardware floating point (no rust-src): the screens will draw about twice as slowly."
+        fi
+    fi
+    if [ "$SSE" = 1 ]; then
+        target=x86_64-unknown-uefi-sse
+    fi
+    built="$root/target/$target/release/slingshot.efi"
+    if [ ! -f "$built" ] || [ -n "$(find "$root/src" "$root/ui" "$root/Cargo.toml" -newer "$built" -print -quit 2>/dev/null)" ]; then
+        step "Building Slingshot"
+        command -v cargo >/dev/null || die "cargo is needed to build Slingshot (or pass --efi FILE)."
+        if [ "$SSE" = 1 ]; then
+            if command -v rustup >/dev/null && ! rustup component list --installed | grep -q '^rust-src'; then
+                info "Installing the Rust component rust-src"
+                rustup component add rust-src
+            fi
+            (cd "$root" && RUSTC_BOOTSTRAP=1 cargo build-uefi-sse)
+        else
+            if command -v rustup >/dev/null && ! rustup target list --installed | grep -q $UEFI_TARGET; then
+                info "Installing the Rust target $UEFI_TARGET"
+                rustup target add $UEFI_TARGET
+            fi
+            (cd "$root" && cargo build --release --target $UEFI_TARGET)
+        fi
+    fi
+    EFI_FILE=$built
+}
+
+# Copies the wallpapers next to slingshot.toml, where Settings offers them
+# (not over a file of the same name), and makes one of them, at random, the
+# wallpaper unless slingshot.toml has one: it looks better than none.
+add_wallpapers() { # dir
+    local dir src f n=0 all=()
+    # The release archive, the package, the source tree.
+    for dir in "$HERE/wallpapers" "$HERE/../share/slingshot/wallpapers" "$HERE/../assets/wallpapers"; do
+        [ -d "$dir" ] && break
+    done
+    [ -d "$dir" ] || return 0
+    for src in "$dir"/*.jpg; do
+        [ -f "$src" ] || continue
+        all+=("$(basename "$src")")
+        f="$1/${all[-1]}"
+        root_exists "$f" && continue
+        as_root cp "$src" "$f"
+        n=$((n + 1))
+    done
+    if [ "$n" -gt 0 ]; then ok "Wallpapers: $n, to choose in Settings"; fi
+    [ "${#all[@]}" -gt 0 ] || return 0
+    f=${all[RANDOM % ${#all[@]}]}
+    if toml_prepend "$1" wallpaper "$f"; then ok "Wallpaper: $f"; fi
+}
+
+# The console's keyboard layout, as slingshot.toml names it ("" for US or
+# unknown): the firmware types as on a US keyboard, and a LUKS passphrase
+# must be typed with the layout the initrd uses.
+keyboard_layout() {
+    local map
+    map=$(conf_value KEYMAP "$ETC/vconsole.conf")
+    if [ -z "$map" ] && [ -f "$ETC/default/keyboard" ]; then
+        map=$(sed -n 's/^XKBLAYOUT="\{0,1\}\([^",]*\).*/\1/p' "$ETC/default/keyboard" | tail -1)
+    fi
+    if [ -z "$map" ]; then
+        map=$(desktop_layout)
+        map=${map%% *}
+    fi
+    case "$map" in
+        fr*|azerty*) echo fr ;;
+        de*) echo de ;;
+        uk*|gb*) echo uk ;;
+        es*) echo es ;;
+        it*) echo it ;;
+        *) echo "" ;;
+    esac
+}
+
+# Adds `language = "…"` to slingshot.toml from the system's locale, when
+# Slingshot is translated into it and the file doesn't say already: the
+# firmware's own language setting is usually English.
+write_language() { # dir
+    local locale lang
+    locale=$(conf_value LANG "$ETC/locale.conf" "$ETC/default/locale")
+    [ -n "$locale" ] || locale=${LANG:-}
+    lang=${locale%%[_.@-]*}
+    case "$lang" in
+        fr|de) ;;
+        *) return 0 ;;
+    esac
+    if toml_prepend "$1" language "$lang"; then ok "Language: $lang (from the system's)"; fi
+}
+
+# Writes this system's keyboard layout as keymap.txt (`slingshot keymap`,
+# which knows every XKB layout and its dead keys). Fails without the
+# slingshot program, or when the layout isn't known.
+write_keymap() { # dir
+    local program="${SLINGSHOT_PROGRAM:-}" tmp name error
+    if [ -z "$program" ]; then
+        # Next to this script (release archive), in the source tree once
+        # built (cargo build --release), else installed.
+        for program in "$HERE/slingshot" "$HERE/../target/release/slingshot" "$(command -v slingshot 2>/dev/null)"; do
+            [ ! -x "$program" ] || break
+        done
+    fi
+    if [ ! -x "$program" ]; then
+        return 1
+    fi
+    # Run as root: only a program that only root can change.
+    if [ "$EUID" = 0 ] && ! owned_by_root "$program"; then
+        warn "$program can be changed by other users than root: not running it as root."
+        return 1
+    fi
+    tmp=$(mktemp) || return 1
+    if ! error=$("$program" keymap -o "$tmp" 2>&1 >/dev/null); then
+        rm -f "$tmp"
+        case $error in
+            *"unknown option keymap"*) info "$program is an older version, without 'keymap'." ;;
+            *) warn "slingshot keymap: $(head -1 <<<"${error:-failed}")" ;;
+        esac
+        return 1
+    fi
+    name=$(sed -n 's/^name //p' "$tmp")
+    as_root cp "$tmp" "$1/keymap.txt"
+    rm -f "$tmp"
+    ok "Keyboard layout: $name (keymap.txt)"
+}
+
+# The desktop's keyboard layout, as XKB names it ("layout variant"): the
+# system's (localectl set-x11-keymap), else the user's KDE or GNOME
+# settings (the user who ran sudo, pkexec or su). Desktops often have no
+# console keymap: the layout is only set there.
+desktop_layout() {
+    local f layout="" variant="" user home sources
+    f="$ETC/X11/xorg.conf.d/00-keyboard.conf"
+    if [ -f "$f" ]; then
+        layout=$(sed -n 's/.*Option[[:space:]]*"XkbLayout"[[:space:]]*"\([^",]*\).*/\1/p' "$f" | head -1)
+        variant=$(sed -n 's/.*Option[[:space:]]*"XkbVariant"[[:space:]]*"\([^",]*\).*/\1/p' "$f" | head -1)
+    fi
+    if [ -z "$layout" ]; then
+        user=${SUDO_USER:-}
+        [ -n "$user" ] || [ -z "${PKEXEC_UID:-}" ] || user=$(id -nu "$PKEXEC_UID" 2>/dev/null || true)
+        # After su: who logged in on this terminal.
+        [ -n "$user" ] || [ "$EUID" != 0 ] || user=$(logname 2>/dev/null || true)
+        [ -n "$user" ] || user=$(id -un)
+        home=${SLINGSHOT_HOME:-$(getent passwd "$user" | cut -d: -f6)}
+        f="$home/.config/kxkbrc"
+        if [ -f "$f" ]; then
+            layout=$(sed -n 's/^LayoutList=\([^,]*\).*/\1/p' "$f" | head -1)
+            variant=$(sed -n 's/^VariantList=\([^,]*\).*/\1/p' "$f" | head -1)
+        fi
+        if [ -z "$layout" ] && command -v gsettings >/dev/null; then
+            # [('xkb', 'fr+oss'), ('xkb', 'us')]: the first one.
+            if [ "$(id -un)" = "$user" ]; then
+                sources=$(gsettings get org.gnome.desktop.input-sources sources 2>/dev/null || true)
+            elif [ "$EUID" = 0 ]; then
+                sources=$(runuser -u "$user" -- env HOME="$home" gsettings get org.gnome.desktop.input-sources sources 2>/dev/null || true)
+            fi
+            sources=$(sed -n "s/^[^(]*('xkb', '\([^']*\)').*/\1/p" <<<"${sources:-}")
+            layout=${sources%%+*}
+            [ "$sources" = "${sources#*+}" ] || variant=${sources#*+}
+        fi
+    fi
+    [ -n "$layout" ] && printf '%s %s' "$layout" "$variant"
+}
+
+# The console keymaps (kbd's names) for an XKB layout, the best first.
+console_maps_for() { # layout [variant]
+    local variant=${2:-}
+    case "$1:$variant" in
+        us:dvorak*) echo dvorak ;;
+        us:*) ;;
+        fr:bepo*) echo fr-bepo ;;
+        fr:*) echo fr-latin9 fr ;;
+        gb:*) echo uk ;;
+        ch:fr*) echo fr_CH-latin1 fr_CH ;;
+        ch:*) echo de_CH-latin1 de_CH ;;
+        de:*) echo de-latin1 de ;;
+        se:*) echo sv-latin1 ;;
+        br:*) echo br-abnt2 ;;
+        *) echo ${variant:+$1-$variant} "$1-latin1" "$1" ;;
+    esac
+}
+
+# The console's keyboard layout as keymap.txt, for when there's no slingshot
+# program: the console keymap (vconsole.conf's KEYMAP, or the one Debian's
+# console-setup made from the desktop's layout, else the one for the
+# desktop's layout), compiled by loadkeys (without loading it) to tables of
+# characters, dead keys included. The candidates, one per line.
+console_keymap_source() {
+    local cached map
+    for cached in "$ETC"/console-setup/cached_UTF-8_*.kmap.gz "$ETC"/console-setup/cached_*.kmap.gz; do
+        [ ! -f "$cached" ] || { echo "$cached"; return; }
+    done
+    map=$(conf_value KEYMAP "$ETC/vconsole.conf")
+    if [ -n "$map" ]; then
+        echo "$map"
+        return
+    fi
+    map=$(desktop_layout)
+    [ -z "$map" ] || console_maps_for ${map} | tr ' ' '\n'
+}
+
+console_keymap() { # source name
+    loadkeys -q -u --mktable "$1" 2>/dev/null | awk -v name="$2" '
+    function hex(s,   i, c, n) {
+        n = 0; s = tolower(s); sub(/^0x/, "", s)
+        for (i = 1; i <= length(s); i++) { c = index("0123456789abcdef", substr(s, i, 1)); if (!c) return -1; n = n * 16 + c - 1 }
+        return n
+    }
+    function u(n) { return sprintf("U+%04X", n) }
+    # A map entry: a character, a dead key, or "-".
+    function out(v,   t, x) {
+        if (v == "") return "-"
+        if (v < 61440) return v ? u(v) : "-"   # Unicode (below 0xf000)
+        t = int(v / 256) - 240; x = v % 256
+        if ((t == 0 || t == 11) && x >= 32 && x != 127) return u(x)   # KT_LATIN, KT_LETTER
+        if (t == 4 && x < 6) return "dead:" u(dead[x])                  # KT_DEAD
+        return "-"
+    }
+    BEGIN {
+        split("96 180 94 126 168 184", d, " "); for (i = 1; i <= 6; i++) dead[i - 1] = d[i]
+        # The keys, by Linux keycode: their US characters.
+        us = "1234567890-="; for (i = 1; i <= 12; i++) key[i + 1] = substr(us, i, 1)
+        us = "qwertyuiop[]"; for (i = 1; i <= 12; i++) key[i + 15] = substr(us, i, 1)
+        us = "asdfghjkl;\047"; for (i = 1; i <= 11; i++) key[i + 29] = substr(us, i, 1)
+        key[41] = "`"; key[43] = "\\"
+        us = "zxcvbnm,./"; for (i = 1; i <= 10; i++) key[i + 43] = substr(us, i, 1)
+        # Accent characters in the accent table, and the dead keys they are.
+        acc["`"] = 96; acc["\047"] = 180; acc["^"] = 94; acc["~"] = 126; acc["\""] = 168; acc[","] = 184
+        ascii = ""; for (i = 32; i < 127; i++) ascii = ascii sprintf("%c", i)
+    }
+    /unsigned short (plain|shift|altgr|shift_altgr)_map\[/ {
+        m = $0; sub(/.*unsigned short /, "", m); sub(/_map.*/, "", m); n = 0; inmap = 1; next
+    }
+    inmap && /^};/ { inmap = 0; next }
+    inmap { gsub(/,/, " "); for (i = 1; i <= NF; i++) val[m, n++] = hex($i); next }
+    /accent_table\[/ { inacc = 1; next }
+    inacc && /^};/ { inacc = 0; next }
+    inacc {
+        line = $0
+        while (match(line, /\{\047(\\.|[^\\])\047, \047(\\.|[^\\])\047, 0x[0-9a-fA-F]+\}/)) {
+            e = substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH)
+            a = substr(e, 2, 1); if (a == "\\") a = substr(e, 3, 1)
+            sub(/^\047(\\.|[^\\])\047, \047/, "", e)
+            b = substr(e, 1, 1); if (b == "\\") b = substr(e, 2, 1)
+            sub(/^.*0x/, "0x", e)
+            if ((a in acc) && index(ascii, b)) compose[++nc] = u(acc[a]) " " u(index(ascii, b) + 31) " " u(hex(e))
+        }
+    }
+    END {
+        if (!(("plain", 16) in val)) exit 1
+        print "name " name
+        for (k = 2; k <= 53; k++) {
+            if (!(k in key)) continue
+            c = key[k]
+            printf "key %s %s %s %s %s\n", u(index(ascii, c) + 31), out(val["plain", k]), out(val["shift", k]), out(val["altgr", k]), out(val["shift_altgr", k])
+        }
+        for (i = 1; i <= nc; i++) print "compose " compose[i]
+    }'
+}
+
+write_console_keymap() { # dir
+    local source name tmp
+    command -v loadkeys >/dev/null || return 1
+    tmp=$(mktemp) || return 1
+    while read -r source; do
+        [ -n "$source" ] || continue
+        name=$(sed -n 's/^XKBLAYOUT="\{0,1\}\([^",]*\).*/\1/p' "$ETC/default/keyboard" 2>/dev/null | tail -1)
+        [ -n "$name" ] || name=$(basename "$source" .map.gz)
+        # US: as the firmware types already.
+        case $name in us | us.* | defkeymap) break ;; esac
+        if console_keymap "$source" "$name" >"$tmp" && grep -q '^key ' "$tmp"; then
+            as_root cp "$tmp" "$1/keymap.txt"
+            rm -f "$tmp"
+            ok "Keyboard layout: $name (keymap.txt)"
+            return 0
+        fi
+    done <<<"$(console_keymap_source)"
+    rm -f "$tmp"
+    return 1
+}
+
+# The last fallback: adds `keyboard = "…"` to slingshot.toml unless it says one
+# already (Slingshot's built-in layouts).
+write_keyboard_layout() { # dir
+    local layout
+    layout=$(keyboard_layout)
+    [ -n "$layout" ] || return 0
+    if toml_prepend "$1" keyboard "$layout"; then ok "Keyboard layout: $layout (Slingshot's built-in one)"; fi
+}
+
+# Adds `key = "value"` at the top of slingshot.toml in dir; fails when the
+# file has the key already.
+toml_prepend() { # dir key value
+    local file="$1/slingshot.toml" text
+    # A value made of file names: nothing that would end the string.
+    case $3 in *[\"\\$'\n\r']*) warn "Not writing $2 = $3 to slingshot.toml"; return 1 ;; esac
+    text=$(root_cat "$file")
+    ! grep -q "^[[:space:]]*$2[[:space:]]*=" <<<"$text" || return 1
+    printf '%s = "%s"\n%s' "$2" "$3" "${text:+$text$'\n'}" | root_write "$file"
+}
+
+# --- encrypted disks and unified kernel images -----------------------------
+# Slingshot can't unlock the disk for a unified kernel image (its initrd is
+# signed with it): it needs an entry with the kernel and the initramfs as
+# separate files, which mkinitcpio can build too (docs/encrypted-disks.md).
+
+# The kernel command line mkinitcpio builds unified images with.
+uki_cmdline() {
+    { cat "$ETC/kernel/cmdline" 2>/dev/null || cat "$ETC"/cmdline.d/*.conf 2>/dev/null || true; } \
+        | { grep -v '^[[:space:]]*#' || true; } | tr -s ' \n' '  ' | sed 's/^ //; s/ $//'
+}
+
+# Whether the command line opens an encrypted disk.
+opens_luks() {
+    [[ " $1 " =~ [[:space:]](cryptdevice|rd\.luks\.uuid|rd\.luks\.name)= ]]
+}
+
+# The mkinitcpio presets that build a unified image on the ESP $1 and have
+# no entry yet, as "pkgbase kernel image has_image entry" lines: the kernel
+# and the initramfs the entry needs (where mkinitcpio puts them, or would),
+# whether the preset builds that initramfs already, and the entry to write
+# (arch-linux.efi → arch-linux.conf). Skips (with a warning) a kernel copied
+# outside the ESP, which the firmware can't read.
+pending_entries() {
+    local esp=$1 preset pkgbase kernel image uki
+    command -v mkinitcpio >/dev/null || return 0
+    for preset in "$ETC"/mkinitcpio.d/*.preset; do
+        [ -f "$preset" ] || continue
+        pkgbase=$(basename "$preset" .preset)
+        read -r kernel image uki < <(
+            # shellcheck disable=SC1090
+            . "$preset" >/dev/null 2>&1
+            printf '%s %s %s\n' "${ALL_kver:-/boot/vmlinuz-$pkgbase}" "${default_image:--}" "${default_uki:--}"
+        )
+        [ "$uki" != - ] || continue
+        local entry="$esp/loader/entries/$(basename "$uki" .efi).conf" has_image=1
+        ! root_exists "$entry" || continue
+        if [ "$image" = - ]; then
+            image="$(dirname "$kernel")/initramfs-$pkgbase.img"
+            has_image=0
+        fi
+        if [[ "$kernel" != "$esp"/* || "$image" != "$esp"/* ]]; then
+            warn "$pkgbase: its kernel or initramfs isn't on the EFI System Partition ($kernel): see $DOCS/encrypted-disks.md" >&2
+            continue
+        fi
+        printf '%s %s %s %s %s\n' "$pkgbase" "$kernel" "$image" "$has_image" "$entry"
+    done
+}
+
+# The entry's initrd lines for the microcode, unless mkinitcpio puts it into
+# the initramfs (the `microcode` hook).
+microcode_initrds() { # esp
+    grep -qs '^[[:space:]]*HOOKS=.*\bmicrocode\b' "$ETC/mkinitcpio.conf" "$ETC"/mkinitcpio.conf.d/*.conf && return 0
+    for ucode in "$1"/amd-ucode.img "$1"/intel-ucode.img; do
+        if root_exists "$ucode"; then printf 'initrd  /%s\n' "${ucode##*/}"; fi
+    done
+}
+
+# Makes `match` Slingshot's default entry, unless slingshot.toml has one:
+# as the first rule, since the first that matches an entry is the one used.
+make_slingshot_default() { # esp match
+    local toml="$1/$ESP_DIR/slingshot.toml" text
+    root_dir "$1/$ESP_DIR" || return 0
+    text=$(root_cat "$toml")
+    ! grep -q '^[[:space:]]*default[[:space:]]*=[[:space:]]*true' <<<"$text" || return 0
+    ask "Make it Slingshot's default entry?" || return 0
+    printf '%s' "${text:+$text$'\n'}" | awk -v m="$2" '
+        function rule() { printf "[[entry]]\nmatch = \"%s\"\ndefault = true\n", m }
+        !done && /^[[:space:]]*\[\[entry\]\]/ { rule(); print ""; done = 1 }
+        { print }
+        END { if (!done) { print ""; rule() } }' | root_write "$toml"
+    ok "Slingshot's default: $2"
+}
+
+# `pending`: what pending_entries says, when the caller has it already.
+add_unlock_entries() { # esp [pending]
+    local esp=$1 cmdline title ucode pkgbase kernel image has_image entry name first="" pending=0
+    cmdline=$(uki_cmdline)
+    [ -n "$cmdline" ] || die "no kernel command line in $ETC/kernel/cmdline or $ETC/cmdline.d/: the entry needs one."
+    opens_luks "$cmdline" || die "the kernel command line doesn't open an encrypted disk (cryptdevice=, rd.luks.uuid=, rd.luks.name=)."
+    title=$(conf_value PRETTY_NAME "$ETC/os-release" /usr/lib/os-release)
+    ucode=$(microcode_initrds "$esp")
+    as_root mkdir -p "$esp/loader/entries"
+    while read -r pkgbase kernel image has_image entry; do
+        pending=1
+        # The initramfs as well as the unified image, now and on updates. A
+        # full build (the unified image too) only when it's missing.
+        if [ "$has_image" = 0 ]; then
+            printf '\n%s, for Slingshot to ask for the passphrase of\n# the encrypted disk: %s/encrypted-disks.md\n# (`slingshot-setup uninstall` removes these lines).\ndefault_image="%s"\n' "$PRESET_MARK" "$DOCS" "$image" \
+                | root_write "$ETC/mkinitcpio.d/$pkgbase.preset" -a
+            ok "$pkgbase.preset: builds $image too"
+        fi
+        if [ "$has_image" = 0 ] || ! root_exists "$image" || [ "$REBUILD" = 1 ]; then
+            as_root mkinitcpio -p "$pkgbase"
+            BUILT="$BUILT$pkgbase "
+        fi
+        if [ "$DRY_RUN" = 0 ] && ! { root_exists "$kernel" && root_exists "$image"; }; then
+            warn "$pkgbase: mkinitcpio didn't make $kernel and $image: no entry written."
+            continue
+        fi
+        name=${title:-Linux}
+        [ "$pkgbase" = linux ] || name="$name ($pkgbase)"
+        {
+            printf '%s: the kernel and initramfs as separate files, for\n' "$LUKS_ENTRY_MARK"
+            printf '# Slingshot to ask for the passphrase of the encrypted disk:\n# %s/encrypted-disks.md\n' "$DOCS"
+            printf '# Keep the options as in %s/kernel/cmdline. `slingshot-setup uninstall`\n# removes this entry.\n' "$ETC"
+            printf 'title   %s\nlinux   %s\n' "$name" "${kernel#"$esp"}"
+            printf '%s' "${ucode:+$ucode$'\n'}"
+            printf 'initrd  %s\noptions %s\n' "${image#"$esp"}" "$cmdline"
+        } | root_write "$entry"
+        ok "Added $entry (\"$name\")"
+        first=${first:-$(basename "$entry")}
+    done < <(if [ $# -ge 2 ]; then printf '%s\n' "$2"; else pending_entries "$esp"; fi)
+    if [ "$pending" = 0 ]; then
+        ok "Nothing to add: each unified kernel image has its entry."
+    fi
+    [ -n "$first" ] || return 0
+    make_slingshot_default "$esp" "$first"
+    info "If you change the kernel command line, change the entry's options line too."
+}
+
+# Undoes luks-entry: its entries, and in the presets, the initramfs it
+# turned on (and that initramfs, which nothing would update any more).
+remove_luks_entries() { # esp
+    local esp=$1 entry preset image text
+    # One file per line, whatever its name has (spaces, *).
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        as_root rm -f -- "$entry"
+        ok "Removed $entry"
+    done < <(luks_entry_files "$esp")
+    for preset in "$ETC"/mkinitcpio.d/*.preset; do
+        grep -qs "^$PRESET_MARK" "$preset" || continue
+        image=$(sed -n "/^$PRESET_MARK/,/^default_image=/s/^default_image=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$preset")
+        # The marked lines, and the empty line before them. Read whole
+        # first: tee empties the file as it starts.
+        text=$(cat "$preset")
+        awk -v mark="$PRESET_MARK" '
+            index($0, mark) == 1 { skip = 1; blank = 0 }
+            skip { if ($0 ~ /^default_image=/) skip = 0; next }
+            blank { print ""; blank = 0 }
+            /^$/ { blank = 1; next }
+            { print }
+            END { if (blank) print "" }' <<<"$text" | root_write "$preset"
+        ok "$(basename "$preset"): the initramfs is no longer built"
+        if [ -n "$image" ] && root_exists "$image"; then
+            as_root rm -f "$image"
+            ok "Removed $image"
+        fi
+    done
+}
+
+# --- encrypt → sd-encrypt ---------------------------------------------------
+# mkinitcpio's busybox `encrypt` hook can only open the disk with the
+# passphrase: it derives the key again, a pause as long as Slingshot's own
+# check. `sd-encrypt` (systemd) takes the volume key Slingshot found.
+
+# The hooks known to work in a systemd-based initramfs. Others (netconf,
+# dropbear…) are busybox ones: then the switch is left to the user.
+SYSTEMD_HOOKS=" base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt lvm2 mdadm_udev filesystems fsck btrfs plymouth "
+
+# The HOOKS of mkinitcpio.conf, when they have `encrypt` and are on one line
+# of that file (not in a drop-in, which would need its own edit).
+encrypt_hooks() {
+    local conf="$ETC/mkinitcpio.conf" hooks
+    [ "$(grep -c '^[[:space:]]*HOOKS=' "$conf" 2>/dev/null)" = 1 ] || return 1
+    grep -q '^[[:space:]]*HOOKS=(.*)[[:space:]]*$' "$conf" || return 1
+    ! grep -qs '^[[:space:]]*HOOKS=' "$ETC"/mkinitcpio.conf.d/*.conf || return 1
+    # shellcheck disable=SC1090
+    hooks=$(. "$conf" >/dev/null 2>&1; echo "${HOOKS[*]}")
+    [[ " $hooks " == *" encrypt "* ]] || return 1
+    printf '%s' "$hooks"
+}
+
+# The same hooks for systemd, or fails when one has no known equivalent.
+systemd_hooks() { # hooks
+    local h out=() vconsole=0
+    for h in $1; do
+        case $h in
+            udev) out+=(systemd) ;;
+            keymap | consolefont)
+                [ "$vconsole" = 1 ] || out+=(sd-vconsole)
+                vconsole=1
+                ;;
+            encrypt) out+=(sd-encrypt) ;;
+            resume) ;; # systemd resumes by itself
+            *) out+=("$h") ;;
+        esac
+    done
+    for h in "${out[@]}"; do
+        [[ "$SYSTEMD_HOOKS" == *" $h "* ]] || return 1
+    done
+    printf '%s' "${out[*]}"
+}
+
+# The UUID of the LUKS volume on the device $1: from udev (lsblk), else
+# from its header (which needs root).
+luks_uuid() {
+    local uuid
+    uuid=$(lsblk -dno UUID "$1" 2>/dev/null || true)
+    [ ${#uuid} = 36 ] || uuid=$(as_user_or_root cryptsetup luksUUID "$1" || true)
+    [ ${#uuid} = 36 ] && printf '%s' "$uuid"
+}
+
+# rd.luks.name= (and rd.luks.options=) for the cryptdevice= option $1, or
+# fails for what it can't say the same way.
+systemd_luks_options() { # cryptdevice=device:name[:options]
+    local device name options uuid
+    IFS=: read -r device name options <<<"${1#cryptdevice=}"
+    case $options in "" | allow-discards | discard) ;; *) return 1 ;; esac
+    case $device in
+        UUID=*) uuid=${device#UUID=} ;;
+        PARTUUID=*) uuid=$(luks_uuid "/dev/disk/by-partuuid/${device#PARTUUID=}") ;;
+        /dev/*) uuid=$(luks_uuid "$device") ;;
+        *) return 1 ;;
+    esac
+    [ -n "$uuid" ] || return 1
+    printf 'rd.luks.name=%s=%s' "$uuid" "${name:-cryptroot}"
+    if [ -n "$options" ]; then printf ' rd.luks.options=%s=discard' "$uuid"; fi
+}
+
+# The files the kernel command line comes from (see uki_cmdline).
+cmdline_files() {
+    if [ -f "$ETC/kernel/cmdline" ]; then
+        printf '%s\n' "$ETC/kernel/cmdline"
+    else
+        for f in "$ETC"/cmdline.d/*.conf; do
+            if [ -f "$f" ]; then printf '%s\n' "$f"; fi
+        done
+    fi
+}
+
+# Replaces $2 by $3 in the file $1 (as root), keeping a copy of the file
+# as it was the first time.
+replace_in() { # file old new
+    local text
+    text=$(root_cat "$1")
+    [[ "$text" == *"$2"* ]] || return 0
+    root_exists "$1.slingshot-setup.bak" || as_root cp -p "$1" "$1.slingshot-setup.bak"
+    printf '%s\n' "${text//"$2"/"$3"}" | root_write "$1"
+}
+
+# The loader entries grep matches (as root when only root can read them:
+# the folder's glob too).
+grep_entries() { # esp grep-args…
+    local esp=$1
+    shift
+    { grep -l "$@" "$esp"/loader/entries/*.conf 2>/dev/null \
+        || as_root_quietly sh -c 'd=$1; shift; grep -l "$@" "$d"/loader/entries/*.conf' sh "$esp" "$@"; } || true
+}
+
+# The entries luks-entry wrote.
+luks_entry_files() { grep_entries "$1" -e "^$LUKS_ENTRY_MARK"; } # esp
+
+# The loader entries that have $2.
+loader_entries_with() { grep_entries "$1" -F -e "$2"; } # esp text
+
+# Whether mkinitcpio puts the cryptsetup program in the initramfs: the
+# sd-encrypt hook has systemd-cryptsetup, not it, and Slingshot's unit needs
+# it to open the disk with the volume key.
+initramfs_has_cryptsetup() {
+    # shellcheck disable=SC1090
+    (
+        . "$ETC/mkinitcpio.conf"
+        for f in "$ETC"/mkinitcpio.conf.d/*.conf; do
+            if [ -f "$f" ]; then . "$f"; fi
+        done
+        [[ " ${BINARIES[*]} " =~ [/[:space:]]cryptsetup[[:space:]] ]]
+    ) >/dev/null 2>&1
+}
+
+add_cryptsetup() {
+    printf '\n# slingshot-setup: the cryptsetup program, for Slingshot to hand the\n# unlocked disk over: %s/encrypted-disks.md\nBINARIES+=(cryptsetup)\n' "$DOCS" \
+        | root_write "$ETC/mkinitcpio.conf" -a
+    ok "The initramfs gets the cryptsetup program"
+    REBUILD=1
+}
+
+# Already sd-encrypt, without cryptsetup: offers it.
+offer_cryptsetup() {
+    # shellcheck disable=SC1090
+    (. "$ETC/mkinitcpio.conf" >/dev/null 2>&1; [[ " ${HOOKS[*]} " == *" sd-encrypt "* ]]) || return 0
+    ! initramfs_has_cryptsetup || return 0
+    step "The initramfs has no cryptsetup program"
+    info "Slingshot's unit needs it to open the disk with the key Slingshot found: without"
+    info "it, the initramfs derives the key from the passphrase again."
+    if ask "Add it to $ETC/mkinitcpio.conf?"; then add_cryptsetup; fi
+}
+
+# Offers the switch; REBUILD=1 once done (the initramfs then needs
+# building again).
+REBUILD=0
+switch_to_sd_encrypt() { # esp
+    local esp=$1 hooks new_hooks option="" new f files
+    hooks=$(encrypt_hooks) || return 0
+    files=$(cmdline_files)
+    step "The initramfs opens the disk with mkinitcpio's encrypt hook"
+    info "It derives the key from the passphrase again, which pauses the boot: sd-encrypt"
+    info "takes the key Slingshot found. $DOCS/encrypted-disks.md#faster-with-sd-encrypt-than-with-encrypt"
+    if [ -n "$files" ]; then
+        option=$({ grep -hv '^[[:space:]]*#' $files 2>/dev/null || true; } | grep -o 'cryptdevice=[^[:space:]]*' | head -n1 || true)
+    fi
+    if ! new_hooks=$(systemd_hooks "$hooks"); then
+        warn "Some of the hooks have no systemd version that this script knows: see the link to switch."
+        return 0
+    fi
+    if [ -z "$option" ]; then
+        warn "No cryptdevice= in the kernel options ($ETC/kernel/cmdline): see the link to switch."
+        return 0
+    fi
+    if ! new=$(systemd_luks_options "$option"); then
+        warn "This script can't switch $option (its device's LUKS UUID wasn't found, or"
+        warn "its options aren't only allow-discards): see the link to switch."
+        return 0
+    fi
+    info "HOOKS: $new_hooks, and the cryptsetup program"
+    info "Kernel options: $option → $new"
+    ask "Switch to sd-encrypt?" || return 0
+    replace_in "$ETC/mkinitcpio.conf" "$(grep '^[[:space:]]*HOOKS=' "$ETC/mkinitcpio.conf")" "HOOKS=($new_hooks)"
+    # Every entry that opens the disk this way: sd-encrypt ignores cryptdevice=.
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        replace_in "$f" "$option" "$new"
+    done < <(printf '%s\n' $files; loader_entries_with "$esp" "$option")
+    if grep -qsF "$option" "$ETC/default/grub"; then
+        warn "GRUB has $option too: change it to $new in $ETC/default/grub, then"
+        warn "run grub-mkconfig -o /boot/grub/grub.cfg."
+    fi
+    ok "Switched (the files as they were: *.slingshot-setup.bak)"
+    initramfs_has_cryptsetup || add_cryptsetup
+    REBUILD=1
+}
+
+# After the switch: builds the initramfs of the presets add_unlock_entries
+# didn't build, and checks that they have the cryptsetup program, which the
+# volume key needs.
+finish_sd_encrypt() { # esp
+    local preset pkgbase entry image
+    [ "$REBUILD" = 1 ] || return 0
+    for preset in "$ETC"/mkinitcpio.d/*.preset; do
+        [ -f "$preset" ] || continue
+        pkgbase=$(basename "$preset" .preset)
+        [[ "$BUILT" == *" $pkgbase "* ]] || as_root mkinitcpio -p "$pkgbase"
+    done
+    [ "$DRY_RUN" = 0 ] || return 0
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        image=$1$(root_cat "$entry" | sed -n 's/^initrd[[:space:]]\{1,\}\(.*initramfs.*\)$/\1/p' | tail -1)
+        if ! as_user_or_root lsinitcpio "$image" | grep -q 'bin/cryptsetup$'; then
+            warn "$image has no cryptsetup program: the initramfs derives the key again. See $DOCS/encrypted-disks.md"
+        fi
+    done < <(luks_entry_files "$1")
+}
+
+# --- file system drivers ------------------------------------------------------
+
+# The file system /boot is on: where the kernels are (/boot itself when it's
+# a mount point, often the EFI System Partition, else /). The firmware only
+# reads FAT; for the others, Slingshot needs a driver.
+kernel_filesystems() {
+    findmnt -no FSTYPE /boot 2>/dev/null || findmnt -no FSTYPE / 2>/dev/null || true
+}
+
+# rEFInd's driver for a file system type ("" if it has none).
+driver_name() { # fstype
+    case $1 in
+        ext2 | ext3 | ext4) echo "ext4_$EFI_ARCH.efi" ;;
+        btrfs) echo "btrfs_$EFI_ARCH.efi" ;;
+        reiserfs) echo "reiserfs_$EFI_ARCH.efi" ;;
+        hfsplus) echo "hfs_$EFI_ARCH.efi" ;;
+        iso9660) echo "iso9660_$EFI_ARCH.efi" ;;
+    esac
+}
+
+# EfiFs (https://github.com/pbatard/efifs, GRUB's file system code as EFI
+# drivers): downloaded when rEFInd's package has no driver for the file
+# system (XFS, F2FS, ZFS…), or isn't installed. Checked against these
+# sums before being copied, or signed.
+EFIFS_VERSION=1.13
+EFIFS_URL=${SLINGSHOT_EFIFS_URL:-https://github.com/pbatard/efifs/releases/download/v$EFIFS_VERSION}
+EFIFS_SUMS="
+0201bf1410f6fbb0d1bb2ad0d21890177b4b3ffadf0d06e5c2999a3cbdd8c7f7  btrfs_aa64.efi
+1712f61541cc4b308c9cbafe3361b7769d124ed430fb25337a05bb1b30df3862  btrfs_x64.efi
+6cfaf01972cc5e43c2f2804c569023d7400dce3abb0866d9ec1bcbcfb0928e1b  exfat_aa64.efi
+3f16a8b72ea81a6e7f9dea0fe92a108cd9b980e29c21f058ddb2f2730027ec81  exfat_x64.efi
+5d952d9ec7045c7e4369e108938cf6145381ed23817f983aad26f3c3990a1abc  ext2_aa64.efi
+b9ef4af046ec60ac912e81f37e0c0a6739f70fae81031238ed2469958fdcb35f  ext2_x64.efi
+412c3fa3ba98e845f1b779eaa9123bb244c91c6ab26678850718d2cff0aa5f67  f2fs_aa64.efi
+b62b4d210e76bb2e18a1a6431878bc96b738f6bb81f761815185e4c7dbdc2929  f2fs_x64.efi
+90f3ed17a703b837c2001131cd2fc5948b58bcb92fe8e990f1067bc0837b2af1  hfsplus_aa64.efi
+1fced68b912f3b67006aee74553301c72ccaa776e7d7cf7d8a7b02ccf607ae18  hfsplus_x64.efi
+80dc87ec36713eac9f9dc5d96e3527581bfac0ef67d6a5829475c55988a77895  iso9660_aa64.efi
+a327b7ab1c742c8bbe98c2e20b47c61c6bbd7fb2fe600502a9db907d55ee9f3c  iso9660_x64.efi
+2b5a6ff3fdf1e96d85f91bdc43fbb7fb4986d076b45cd58f877e8b40814bf6fc  jfs_aa64.efi
+3163e321d0878554cc0d86c1db81b805a4d30ae3923a61e9e507ebf45d23f596  jfs_x64.efi
+a56a93d2ea6f97e3548fae54eddc806288443f8b7d7f61c741fc7857b5b60096  ntfs_aa64.efi
+202aeb2cc078693e9c03f3c0a64e8c6c44f2c75eded8a32ada5e1589753b3317  ntfs_x64.efi
+3032c4c2f1ca58daa94dd2d8794191275d0c4295ca0366b8af4ff01ca8838343  reiserfs_aa64.efi
+04d646085428b4dd957b365fb70e65f734a5441e4c854a06af4f8d5015df4f91  reiserfs_x64.efi
+c2f26210a547a20e9864ca6d0aee3101b61dc6803d2d8cf556d5c6dbd57f8e49  udf_aa64.efi
+8c126fb13d7b7dc2525ba82cc72819dfdb7ef64a63fcaf0ff6a882458be2df76  udf_x64.efi
+3eba059cda2b17365c5fc6d99accf5619e68e519ad90317a49d35126dd74753c  xfs_aa64.efi
+e6634e30fa66416a617b039142cc90f8478f287143e978f013c0eb0ed7268dee  xfs_x64.efi
+6fd41657b155af441463ee4122abfeb7eee07a14152a4145489438def8e8fe4c  zfs_aa64.efi
+83b8eaa89435e1023b128d283caea6ecd5907f033bb952288474ece7b0440562  zfs_x64.efi
+"
+
+# EfiFs's driver for a file system type ("" if it has none).
+efifs_name() { # fstype
+    case $1 in
+        ext2 | ext3 | ext4) echo "ext2_$EFI_ARCH.efi" ;;
+        btrfs | xfs | f2fs | zfs | jfs | reiserfs | hfsplus | iso9660 | ntfs | exfat | udf) echo "${1}_$EFI_ARCH.efi" ;;
+        ntfs3) echo "ntfs_$EFI_ARCH.efi" ;;
+    esac
+}
+
+# The expected SHA-256 of an EfiFs driver (SLINGSHOT_EFIFS_SUMS: a file of
+# other sums, for the tests).
+efifs_sum() { # name
+    local sums=$EFIFS_SUMS
+    [ -z "${SLINGSHOT_EFIFS_SUMS:-}" ] || sums=$(cat "$SLINGSHOT_EFIFS_SUMS")
+    printf '%s\n' "$sums" | awk -v n="$1" '$2 == n { print $1 }'
+}
+
+# Downloads an EfiFs driver into the file $2, and checks it.
+fetch_efifs() { # name file
+    local expected actual
+    expected=$(efifs_sum "$1")
+    [ -n "$expected" ] || return 1
+    command -v curl >/dev/null || { warn "curl is needed to download it."; return 1; }
+    if ! curl -fsSL --retry 3 --proto '=https,file' -o "$2" "$EFIFS_URL/$1"; then
+        warn "Couldn't download $EFIFS_URL/$1"
+        warn "Try again later: slingshot-setup drivers"
+        return 1
+    fi
+    actual=$(sha256sum "$2" | cut -d' ' -f1)
+    if [ "$actual" != "$expected" ]; then
+        warn "$1 isn't the expected file (SHA-256 $actual): not installed."
+        return 1
+    fi
+}
+
+# Whether to sign what's installed with sbctl: --sign, or Secure Boot on
+# with sbctl there.
+should_sign() {
+    [ "$SIGN" = 1 ] || { secure_boot_enabled && command -v sbctl >/dev/null; }
+}
+
+# Where rEFInd's drivers are on this system: its package's folder, or an
+# installed rEFInd's (SLINGSHOT_REFIND_DRIVERS overrides it, for the tests).
+find_drivers_dir() { # esp
+    local d
+    for d in ${SLINGSHOT_REFIND_DRIVERS:-} \
+        "/usr/share/refind/drivers_$EFI_ARCH" \
+        "/usr/share/refind/refind/drivers_$EFI_ARCH" \
+        "$1/EFI/refind/drivers_$EFI_ARCH"; do
+        if root_dir "$d"; then
+            echo "$d"
+            return
+        fi
+    done
+}
+
+# Copies the drivers Slingshot needs to read the kernels' file systems:
+# rEFInd's from its package, else EfiFs's, downloaded and checked.
+add_drivers() { # esp
+    local esp=$1 fs name efifs dir target tmp
+    target="$esp/$ESP_DIR/drivers"
+    dir=$(find_drivers_dir "$esp")
+    for fs in $(kernel_filesystems); do
+        case $fs in vfat | "") continue ;; esac
+        name=$(driver_name "$fs")
+        efifs=$(efifs_name "$fs")
+        if [ -z "$name" ] && [ -z "$efifs" ]; then
+            warn "Your kernels are on $fs: Slingshot has no driver for it, so it shows the"
+            warn "boot loader's entries but can't find kernels there by itself."
+            continue
+        fi
+        if { [ -n "$name" ] && root_exists "$target/$name"; } || { [ -n "$efifs" ] && root_exists "$target/$efifs"; }; then
+            ok "Driver for $fs: already there"
+            continue
+        fi
+        if [ -n "$name" ] && [ -n "$dir" ] && root_exists "$dir/$name"; then
+            if ask "Your kernels are on $fs. Add rEFInd's $fs driver, so that Slingshot finds them by itself?"; then
+                as_root mkdir -p "$target"
+                as_root cp "$dir/$name" "$target/$name"
+                ok "Added $target/$name"
+                if should_sign; then
+                    # Only a package's driver: one on the EFI System Partition
+                    # could have been put there by anyone who can write there
+                    # (another system, a USB boot), and signing it would make
+                    # the firmware trust it.
+                    case $dir in
+                        "$esp"/*)
+                            warn "Not signed: it comes from the EFI System Partition, which anyone with"
+                            warn "access to it can change. Install rEFInd's package, or check the file"
+                            warn "and sign it yourself: sbctl sign -s $target/$name"
+                            ;;
+                        *) sign_file "$target/$name" ;;
+                    esac
+                fi
+            fi
+            continue
+        fi
+        [ -n "$efifs" ] || continue
+        if ask "Your kernels are on $fs. Download EfiFs's $fs driver (github.com/pbatard/efifs, v$EFIFS_VERSION), so that Slingshot finds them by itself?"; then
+            if [ "$DRY_RUN" = 1 ]; then
+                printf '    %s[dry run]%s download %s, check its SHA-256\n' "$DIM" "$RESET" "$EFIFS_URL/$efifs"
+                as_root mkdir -p "$target"
+                as_root cp "$efifs" "$target/$efifs"
+                ! should_sign || sign_file "$target/$efifs"
+                continue
+            fi
+            tmp=$(mktemp)
+            if fetch_efifs "$efifs" "$tmp"; then
+                as_root mkdir -p "$target"
+                as_root cp "$tmp" "$target/$efifs"
+                ok "Added $target/$efifs (SHA-256 checked)"
+                ! should_sign || sign_file "$target/$efifs"
+            fi
+            rm -f "$tmp"
+        fi
+    done
+}
+
+# Signs a file with sbctl, which signs it again after updates (-s).
+sign_file() { # file
+    command -v sbctl >/dev/null || die "--sign needs sbctl, with your keys enrolled (sbctl create-keys, sbctl enroll-keys)."
+    as_root sbctl sign -s "$1"
+    ok "Signed $1 with sbctl"
+}
+
+# --- commands ----------------------------------------------------------------
+
+cmd_drivers() {
+    require_uefi
+    local esp
+    esp=$(find_esp)
+    root_exists "$esp/$ESP_DIR/$EFI_NAME" || die "Slingshot isn't installed yet: run 'slingshot-setup install' first."
+    step "File system drivers"
+    add_drivers "$esp"
+}
+
+cmd_luks_entry() {
+    local esp
+    esp=$(find_esp)
+    command -v mkinitcpio >/dev/null || die "only mkinitcpio is supported (Arch Linux): for others, see $DOCS/encrypted-disks.md"
+    switch_to_sd_encrypt "$esp"
+    offer_cryptsetup
+    step "An entry Slingshot can unlock the encrypted disk for"
+    if secure_boot_enabled; then
+        warn "Secure Boot is on: this entry's initramfs isn't signed, the unified image's is."
+        ask "Add it anyway?" || { finish_sd_encrypt "$esp"; exit 0; }
+    fi
+    add_unlock_entries "$esp"
+    finish_sd_encrypt "$esp"
+}
+
+# For packages: after an upgrade, copy the new slingshot.efi over the
+# installed one (and sign it again with sbctl if it was signed). Does
+# nothing when Slingshot isn't installed.
+cmd_update() {
+    require_uefi
+    local esp target
+    esp=$(find_esp)
+    target="$esp/$ESP_DIR/$EFI_NAME"
+    if ! root_exists "$target"; then
+        info "Slingshot isn't installed on $esp: nothing to update."
+        return
+    fi
+    find_efi_file
+    if cmp -s "$EFI_FILE" "$target"; then
+        ok "Already up to date: $target"
+        return
+    fi
+    local signed=""
+    if command -v sbctl >/dev/null && sbctl list-files 2>/dev/null | grep -qF "$target"; then
+        signed=1
+    fi
+    # Copied and signed next to it, then renamed: a power cut or a failed
+    # signature leaves the working one in place.
+    as_root cp "$EFI_FILE" "$target.new"
+    if [ -n "$signed" ] && ! as_root sbctl sign "$target.new"; then
+        as_root rm -f "$target.new"
+        die "Couldn't sign the new $target with sbctl: kept the one there is."
+    fi
+    as_root mv "$target.new" "$target"
+    as_root sync
+    ok "Updated $target"
+    if [ -n "$signed" ]; then
+        ok "Signed again with sbctl"
+    fi
+}
+
+cmd_install() {
+    require_uefi
+    find_efi_file
+    local esp
+    esp=$(find_esp)
+
+    step "Installing $LABEL"
+    info "EFI System Partition: $esp"
+    as_root mkdir -p "$esp/$ESP_DIR"
+    as_root cp "$EFI_FILE" "$esp/$ESP_DIR/$EFI_NAME"
+    ok "Copied to $esp/$ESP_DIR/$EFI_NAME"
+    write_keymap "$esp/$ESP_DIR" || write_console_keymap "$esp/$ESP_DIR" || write_keyboard_layout "$esp/$ESP_DIR"
+    write_language "$esp/$ESP_DIR"
+    add_wallpapers "$esp/$ESP_DIR"
+
+    if [ "$SIGN" = 1 ]; then
+        step "Signing for Secure Boot"
+        sign_file "$esp/$ESP_DIR/$EFI_NAME"
+    elif secure_boot_enabled; then
+        step "Secure Boot is on"
+        if command -v sbctl >/dev/null && ask "Sign Slingshot with your sbctl keys?"; then
+            # Then the drivers too.
+            SIGN=1
+            sign_file "$esp/$ESP_DIR/$EFI_NAME"
+        else
+            warn "The firmware will refuse to start an unsigned Slingshot."
+            warn "Sign it (sbctl sign -s $esp/$ESP_DIR/$EFI_NAME) or turn Secure Boot off in the firmware setup."
+        fi
+    fi
+
+    step "Firmware boot entry"
+    local num
+    num=$(boot_entries | entry_number)
+    if [ -n "$num" ]; then
+        ok "Already there: Boot$num"
+    else
+        local disk part
+        read -r disk part <<<"$(esp_disk_and_partition "$esp")"
+        # --create-only: add the entry without putting it in BootOrder, so
+        # what boots by default doesn't change.
+        as_root efibootmgr --quiet --create-only --disk "$disk" --part "$part" \
+            --label "$LABEL" --loader "\\${ESP_DIR//\//\\}\\$EFI_NAME"
+        num=$(boot_entries | entry_number)
+        ok "Created ${num:+Boot$num }(not the default yet)"
+    fi
+
+    if uses_systemd_boot "$esp"; then
+        info "systemd-boot found: Slingshot will show its entries (Arch Linux, …) as cards."
+    fi
+
+    step "File system drivers"
+    add_drivers "$esp"
+
+    # An entry to add: a unified image, an encrypted disk.
+    local pending=""
+    if opens_luks "$(uki_cmdline)"; then pending=$(pending_entries "$esp"); fi
+    if [ -n "$pending" ]; then
+        step "Unified kernel image with an encrypted disk"
+        if secure_boot_enabled; then
+            info "Secure Boot is on: an entry for Slingshot to ask for the passphrase would"
+            info "have an unsigned initramfs. To add it anyway: slingshot-setup luks-entry"
+        elif ask "Add a boot entry, $(awk '{ print $5 }' <<<"$pending" | paste -sd ' '), for Slingshot to ask for the passphrase?"; then
+            add_unlock_entries "$esp" "$pending"
+        else
+            info "Later: slingshot-setup luks-entry"
+        fi
+    fi
+    if encrypt_hooks >/dev/null; then
+        info "Tip: with sd-encrypt rather than encrypt, Linux doesn't derive the key again:"
+        info "slingshot-setup luks-entry offers to switch."
+    fi
+
+    printf '\n%sDone.%s Nothing boots differently yet. Next:\n' "$GREEN" "$RESET"
+    info "${BOLD}slingshot-setup try${RESET}           start Slingshot once, on the next restart"
+    info "${BOLD}slingshot-setup make-default${RESET}  start Slingshot on every boot"
+}
+
+cmd_try() {
+    require_uefi
+    local num
+    num=$(boot_entries | entry_number)
+    [ -n "$num" ] || die "Slingshot isn't installed yet: run 'slingshot-setup install' first."
+    step "Starting Slingshot once, on the next restart"
+    as_root efibootmgr --quiet --bootnext "$num"
+    ok "BootNext = $num. The restart after that goes back to normal, whatever happens."
+    if [ "$NO_RESTART" = 0 ] && ask "Restart now?"; then
+        as_root systemctl reboot
+    else
+        info "Restart when you're ready."
+    fi
+}
+
+cmd_make_default() {
+    require_uefi
+    local entries num order rest new
+    entries=$(boot_entries)
+    num=$(entry_number <<<"$entries")
+    [ -n "$num" ] || die "Slingshot isn't installed yet: run 'slingshot-setup install' first."
+    order=$(boot_order <<<"$entries")
+    rest=$(boot_order_without "$order" "$num")
+    new="$num${rest:+,$rest}"
+    step "Making Slingshot the default"
+    info "Boot order now: $order"
+    info "Boot order new: $new"
+    if ask "Change the boot order?"; then
+        as_root efibootmgr --quiet --bootorder "$new"
+        ok "Slingshot starts on every boot. It boots your previous default after its countdown."
+        local esp
+        esp=$(find_esp)
+        if uses_systemd_boot "$esp" && ! root_cat "$esp/loader/loader.conf" | grep -qE '^\s*timeout\s+0\b'; then
+            info "Tip: set 'timeout 0' in $esp/loader/loader.conf so systemd-boot doesn't show"
+            info "its own menu after Slingshot's (hold a key at power-on to get it anyway)."
+        fi
+    fi
+}
+
+cmd_undefault() {
+    require_uefi
+    local entries num rest
+    entries=$(boot_entries)
+    num=$(entry_number <<<"$entries")
+    [ -n "$num" ] || die "Slingshot isn't installed."
+    rest=$(boot_order_without "$(boot_order <<<"$entries")" "$num")
+    step "Removing Slingshot from the boot order"
+    if [ -n "$rest" ]; then
+        as_root efibootmgr --quiet --bootorder "$rest"
+        ok "Boot order: $rest (the entry is kept, so 'try' still works)"
+    else
+        as_root efibootmgr --quiet --delete-bootorder
+        ok "Boot order removed (the entry is kept, so 'try' still works)"
+    fi
+}
+
+cmd_systemd_boot_entry() {
+    local esp
+    esp=$(find_esp)
+    uses_systemd_boot "$esp" || die "systemd-boot isn't installed on $esp."
+    root_exists "$esp/$ESP_DIR/$EFI_NAME" || die "Slingshot isn't installed yet: run 'slingshot-setup install' first."
+    step "Adding Slingshot to systemd-boot's menu"
+    printf 'title %s\nefi /%s/%s\n' "$LABEL" "$ESP_DIR" "$EFI_NAME" | root_write "$esp/$LOADER_ENTRY"
+    ok "Added $esp/$LOADER_ENTRY"
+}
+
+cmd_status() {
+    require_uefi
+    QUIET_SUDO=1
+    local esp entries num order
+    esp=$(find_esp)
+    entries=$(boot_entries)
+    num=$(entry_number <<<"$entries")
+    order=$(boot_order <<<"$entries")
+    if [ "$PORCELAIN" = 1 ]; then
+        status_porcelain "$esp" "$num" "$order"
+        return
+    fi
+    step "Slingshot status"
+    info "EFI System Partition: $esp"
+    if root_exists "$esp/$ESP_DIR/$EFI_NAME"; then ok "Installed: $esp/$ESP_DIR/$EFI_NAME"; else warn "Not installed"; fi
+    if [ -n "$num" ]; then
+        ok "Firmware entry: Boot$num"
+        case $(order_place "$num" "$order") in
+            first) ok "Default: starts on every boot" ;;
+            later) info "In the boot order, not first" ;;
+            *) info "Not in the boot order (start it with 'slingshot-setup try')" ;;
+        esac
+    else
+        warn "No firmware entry"
+    fi
+    if root_exists "$esp/$LOADER_ENTRY"; then ok "In systemd-boot's menu"; fi
+    if secure_boot_enabled; then warn "Secure Boot is on: Slingshot must be signed"; else info "Secure Boot is off"; fi
+    if uses_systemd_boot "$esp"; then info "Boot loader: systemd-boot"; fi
+}
+
+# `status --porcelain`: key=value lines, for the desktop app's Install panel.
+status_porcelain() {
+    local esp=$1 num=$2 order=$3
+    printf 'esp=%s\n' "$esp"
+    printf 'installed=%s\n' "$(flag root_exists "$esp/$ESP_DIR/$EFI_NAME")"
+    printf 'file=%s\n' "$esp/$ESP_DIR/$EFI_NAME"
+    printf 'entry=%s\n' "$num"
+    printf 'order=%s\n' "$(order_place "$num" "$order")"
+    printf 'systemd_boot=%s\n' "$(flag uses_systemd_boot "$esp")"
+    printf 'systemd_boot_entry=%s\n' "$(flag root_exists "$esp/$LOADER_ENTRY")"
+    printf 'secure_boot=%s\n' "$(flag secure_boot_enabled)"
+}
+
+# 1 when the command succeeds, else 0.
+flag() { if "$@"; then echo 1; else echo 0; fi; }
+
+# Where the entry $1 is in the boot order $2: first, later or none.
+order_place() { # num order
+    [ -n "$1" ] || { echo none; return; }
+    case ",$2," in
+        ",$1,"*) echo first ;;
+        *",$1,"*) echo later ;;
+        *) echo none ;;
+    esac
+}
+
+cmd_uninstall() {
+    require_uefi
+    local esp num
+    esp=$(find_esp)
+    num=$(boot_entries | entry_number)
+    step "Uninstalling Slingshot"
+    info "Tip: Slingshot's own settings are only visible to firmware programs; use"
+    info "Settings → Reset all settings in Slingshot first if you want them gone too."
+    ask "Remove Slingshot?" || exit 0
+    if [ -n "$num" ]; then
+        as_root efibootmgr --quiet --delete-bootnum --bootnum "$num"
+        ok "Removed firmware entry Boot$num"
+    fi
+    if root_exists "$esp/$LOADER_ENTRY"; then
+        as_root rm -f "$esp/$LOADER_ENTRY"
+        ok "Removed the systemd-boot entry"
+    fi
+    remove_luks_entries "$esp"
+    if root_dir "$esp/$ESP_DIR"; then
+        as_root rm -rf "$esp/$ESP_DIR"
+        ok "Removed $esp/$ESP_DIR"
+    fi
+}
+
+cmd_password() {
+    # Prints the slingshot.toml lines that lock the Settings screen.
+    command -v sha256sum >/dev/null || die "sha256sum not found"
+    local pw pw2
+    read -r -s -p "Password for Slingshot's Settings: " pw; echo
+    read -r -s -p "Again: " pw2; echo
+    [ "$pw" = "$pw2" ] || die "the passwords differ"
+    [ -n "$pw" ] || die "empty password"
+    local hash
+    hash=$(printf '%s' "$pw" | sha256sum | cut -d' ' -f1)
+    step "Add these lines to slingshot.toml (next to slingshot.efi):"
+    printf '\n[settings]\naccess = "password"\npassword = "sha256:%s"\n\n' "$hash"
+    info "Keyboard layouts differ in the firmware: prefer letters and digits."
+}
+
+usage() {
+    cat <<EOF
+${BOLD}slingshot-setup${RESET} — install Slingshot next to your boot loader
+
+${BOLD}Usage:${RESET} slingshot-setup [options] <command>
+
+${BOLD}Commands:${RESET}
+  install              build (if needed), copy to the EFI System Partition and add
+                       a firmware entry, without changing what boots by default
+  try                  start Slingshot once, on the next restart
+  make-default         start Slingshot on every boot
+  undefault            stop starting Slingshot by default (keeps it installed)
+  systemd-boot-entry   also add Slingshot to systemd-boot's menu
+  luks-entry           with a unified kernel image and an encrypted disk: add an
+                       entry with the kernel and initramfs as separate files, so
+                       that Slingshot asks for the passphrase; and from the
+                       encrypt hook to sd-encrypt, so that Linux takes the key
+                       Slingshot found (mkinitcpio)
+  drivers              add the drivers Slingshot needs to read the partitions
+                       with your kernels (ext4, btrfs, XFS…: rEFInd's package's,
+                       else EfiFs's, downloaded and checked)
+  password             print the slingshot.toml lines that lock Settings
+  update               copy a newer slingshot.efi over the installed one (for packages)
+  status               show what is installed
+  uninstall            remove everything
+
+${BOLD}Options:${RESET}
+  --efi FILE   install this slingshot.efi instead of building it
+  --no-sse     from the source tree, on a PC: build it without hardware
+               floating point (by default it has it, as the releases: twice as
+               fast, and needs Rust's rust-src component, which rustup adds)
+  --sign       sign Slingshot and its drivers with your sbctl keys, for Secure
+               Boot (without asking, even while Secure Boot is off)
+  --program FILE  the slingshot program, for this system's keyboard layout
+               (slingshot keymap; found next to this script or in PATH)
+  --esp DIR    the EFI System Partition is mounted there (default: found)
+  --yes, -y    don't ask for confirmation
+  --dry-run    print the commands that change the system instead of running them
+  --no-restart try: don't offer to restart
+  --porcelain  status: key=value lines, for programs
+
+Manual steps: $DOCS/install-manually.md
+EOF
+}
+
+main() {
+    local cmd=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --efi) EFI_FILE=${2:-}; shift ;;
+            --sse) SSE=1 ;;
+            --no-sse) SSE=0 ;;
+            --sign) SIGN=1 ;;
+            --program) SLINGSHOT_PROGRAM=${2:-}; shift ;;
+            --esp) ESP=${2:-}; shift ;;
+            --yes|-y) ASSUME_YES=1 ;;
+            --dry-run) DRY_RUN=1 ;;
+            --no-restart) NO_RESTART=1 ;;
+            --porcelain) PORCELAIN=1 ;;
+            -h|--help|help) usage; exit 0 ;;
+            -*) die "unknown option $1 (see 'slingshot-setup help')" ;;
+            *) [ -z "$cmd" ] || die "one command at a time"; cmd=$1 ;;
+        esac
+        shift
+    done
+    if [ "$SIGN" = 1 ] && ! command -v sbctl >/dev/null; then
+        die "--sign needs sbctl, with your keys enrolled (sbctl create-keys, sbctl enroll-keys)."
+    fi
+    case "$cmd" in
+        install) cmd_install ;;
+        try) cmd_try ;;
+        make-default) cmd_make_default ;;
+        undefault) cmd_undefault ;;
+        systemd-boot-entry) cmd_systemd_boot_entry ;;
+        luks-entry) cmd_luks_entry ;;
+        drivers) cmd_drivers ;;
+        password) cmd_password ;;
+        update) cmd_update ;;
+        status) cmd_status ;;
+        uninstall) cmd_uninstall ;;
+        "") usage; exit 1 ;;
+        *) die "unknown command '$cmd' (see 'slingshot-setup help')" ;;
+    esac
+}
+
+main "$@"

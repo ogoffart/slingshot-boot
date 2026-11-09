@@ -1,0 +1,201 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { Frost, Focus } from "widgets.slint";
+
+component Tab inherits Rectangle {
+    in property <string> text;
+    // The key that switches to this screen, e.g. "F1".
+    in property <string> shortcut;
+    in property <bool> active;
+    // Takes the keyboard focus when it becomes the active tab (← → in the
+    // tab bar).
+    in property <bool> grab;
+    out property <bool> has-focus: fs.has-focus;
+    callback clicked;
+    // ← → (-1, 1), ↓ or Enter (0).
+    callback key(int);
+    callback grabbed();
+
+    forward-focus: fs;
+
+    height: 44px;
+    width: row.preferred-width + 40px;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selectable: true;
+    accessible-item-selected: active;
+    accessible-action-default => { clicked(); }
+    border-radius: 9px;
+    background: active ? Theme.surface-strong : touch.has-hover ? Theme.surface-raised : transparent;
+    animate background { duration: Theme.restyling ? 0ms : 150ms; }
+
+    Rectangle {
+        border-radius: parent.border-radius;
+        border-width: 2px;
+        border-color: fs.has-focus ? Theme.accent : transparent;
+        animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+    }
+
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            font-size: 15px;
+            font-weight: root.active ? 600 : 500;
+            color: root.active ? Theme.text-strong : Theme.text-muted;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.shortcut;
+            font-size: 11px;
+            color: Theme.text-muted.with-alpha(0.8);
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    // Only the active tab takes the focus: the tab bar is one stop for Tab.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        enabled: root.active;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                root.key(event.text == Key.LeftArrow ? -1 : 1);
+                return accept;
+            }
+            if event.text == Key.DownArrow || event.text == Key.Return || event.text == " " {
+                root.key(0);
+                return accept;
+            }
+            // The top: ↑ goes nowhere (not round to the screen's bottom).
+            if event.text == Key.UpArrow {
+                return accept;
+            }
+            reject
+        }
+    }
+    changed grab => {
+        if root.grab {
+            fs.focus();
+            root.grabbed();
+        }
+    }
+}
+
+// The top bar: the desktop's badge ("Simulator…"), the tabs, the clock.
+export component TopBar inherits Rectangle {
+    // What the desktop program is ("" in the firmware).
+    in property <string> badge;
+    in property <string> clock;
+    // The screen shown: 0 Boot, 1 System, 2 Settings, 3 Install.
+    in property <int> screen;
+    // 1: the Settings screen is hidden.
+    in property <int> settings-access;
+    in property <bool> install-available;
+    callback go-to(int);
+    // ← → on the tab bar: the previous or next screen.
+    callback step(bool);
+    // ↓ or Enter on the tab bar: into the screen.
+    callback enter();
+    // The keyboard focus moves with the active tab.
+    property <bool> follow;
+    // The keyboard focus on the active tab.
+    public function focus-tab() {
+        root.follow = false;
+        root.follow = true;
+    }
+
+    height: 72px;
+    if Theme.frosted: Frost { tint: Theme.background; }
+    HorizontalLayout {
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 12px;
+        Rectangle {
+            width: 260px;
+            if root.badge != "": Rectangle {
+                x: 0;
+                height: 24px;
+                width: sim-label.preferred-width + 20px;
+                border-radius: 12px;
+                background: Theme.orange.with-alpha(0.16);
+                border-width: 1px;
+                border-color: Theme.orange;
+                sim-label := Text {
+                    text: root.badge;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: Theme.dark ? #f3b27a : #9a4f12;
+                }
+            }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Text {
+            text: root.clock;
+            font-size: 15px;
+            color: Theme.text-soft;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+    tab-bar := VerticalLayout {
+        x: (parent.width - self.preferred-width) / 2;
+        width: self.preferred-width;
+        height: parent.height;
+        alignment: center;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.radius;
+            HorizontalLayout {
+                padding: 4px;
+                spacing: 4px;
+                for tab in root.settings-access == 1 ? (root.install-available ? [
+                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
+                    { text: @tr("System"), shortcut: "F2", screen: 1 },
+                    { text: @tr("Install"), shortcut: "F4", screen: 3 },
+                ] : [
+                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
+                    { text: @tr("System"), shortcut: "F2", screen: 1 },
+                ]) : (root.install-available ? [
+                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
+                    { text: @tr("System"), shortcut: "F2", screen: 1 },
+                    { text: @tr("Settings"), shortcut: "F3", screen: 2 },
+                    { text: @tr("Install"), shortcut: "F4", screen: 3 },
+                ] : [
+                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
+                    { text: @tr("System"), shortcut: "F2", screen: 1 },
+                    { text: @tr("Settings"), shortcut: "F3", screen: 2 },
+                ]): Tab {
+                    text: tab.text;
+                    shortcut: tab.shortcut;
+                    active: root.screen == tab.screen;
+                    grab: root.follow && root.screen == tab.screen;
+                    grabbed => { root.follow = false; }
+                    clicked => { root.go-to(tab.screen); }
+                    key(d) => {
+                        if d == 0 {
+                            root.enter();
+                        } else {
+                            root.follow = true;
+                            root.step(d < 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.divider;
+    }
+}

@@ -1,0 +1,20 @@
+[alias]
+# The UEFI binary: target/x86_64-unknown-uefi/release/slingshot.efi
+build-uefi = "build --release --target x86_64-unknown-uefi"
+# With hardware floating point (SSE2), faster: the UI's float math isn't
+# emulated. Needs `core` built from source: `rustup component add rust-src`,
+# and RUSTC_BOOTSTRAP=1 for -Zbuild-std on a stable toolchain (AGENTS.md).
+# → target/x86_64-unknown-uefi-sse/release/slingshot.efi
+build-uefi-sse = "build --release --target targets/x86_64-unknown-uefi-sse.json -Zjson-target-spec -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem"
+# For 64-bit ARM: target/aarch64-unknown-uefi/release/slingshot.efi
+build-uefi-arm = "build --release --target aarch64-unknown-uefi"
+
+# The PE header's time stamp: a hash of the contents rather than the time;
+# and no PDB, whose identifier depends on where the objects were built: the
+# same source gives the same .efi (docs/reproducible-builds.md).
+[target.x86_64-unknown-uefi]
+rustflags = ["-C", "link-arg=/Brepro", "-C", "link-arg=/DEBUG:NONE"]
+[target.x86_64-unknown-uefi-sse]
+rustflags = ["-C", "link-arg=/Brepro", "-C", "link-arg=/DEBUG:NONE"]
+[target.aarch64-unknown-uefi]
+rustflags = ["-C", "link-arg=/Brepro", "-C", "link-arg=/DEBUG:NONE"]

@@ -1,0 +1,1019 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import "fonts/InterVariable.ttf";
+
+import { Theme } from "theme.slint";
+import { Logos } from "logos.slint";
+import { BootEntry, InfoItem, MemorySegment, Panel, Spinner, BatteryInfo, BatteryFact, Focus } from "widgets.slint";
+import { Palette } from "std-widgets.slint";
+import { Mock } from "mock.slint";
+import { TopBar } from "top-bar.slint";
+import { Footer } from "footer.slint";
+import { BootScreen } from "boot-screen.slint";
+import { SystemScreen } from "system-screen.slint";
+import { SettingsScreen } from "settings-screen.slint";
+import { SplashScreen } from "splash-screen.slint";
+import { InstallScreen, InstallInfo } from "install-screen.slint";
+import { Dialog, TimeDialog, OptionsDialog, CustomizeDialog, PasswordDialog, FileDialog, FileRow, UnlockDialog } from "dialogs.slint";
+
+export { Theme, Logos, BootEntry, InfoItem, MemorySegment, FileRow, InstallInfo, BatteryInfo, BatteryFact, Focus }
+
+// A dialog over the whole window, in a popup: modal (Tab stays in it), and
+// the keyboard focus goes back where it was when it closes. Shown while
+// `shown`; the dialog takes the focus when it's made. A popup of its own:
+// Slint closes the other popups of a parent when one opens, and some open
+// over another (the passphrase over the file browser).
+component ModalPopup inherits Rectangle {
+    in property <bool> shown;
+    changed shown => {
+        if root.shown {
+            popup.show();
+        } else {
+            popup.close();
+        }
+    }
+    // In a child of its own: Slint's generated code gives a popup of a
+    // component's root the component's position as its parent, the same
+    // for every ModalPopup, so one opening would close the others.
+    Rectangle {
+        popup := PopupWindow {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+            close-policy: no-auto-close;
+            @children
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    // 0 = boot picker, 1 = system info, 2 = settings
+    in-out property <int> screen: 0;
+    // Running in the desktop simulator, with simulated firmware.
+    in property <bool> simulated;
+    // Says what this is, in the top bar: the simulator, a preview, the
+    // configuration of this computer ("" in the firmware).
+    in property <string> badge;
+    // slingshot.toml `settings.access`: 0 = shown, 1 = hidden, 2 = password.
+    in property <int> settings-access: 0;
+    property <bool> settings-unlocked: settings-access == 0;
+    property <bool> password-visible;
+    property <bool> password-wrong;
+    pure callback check-password(string) -> bool;
+    // What the password unlocks: 0 = the Settings screen, 1 = the clock,
+    // 2 = customizing an entry, 3 = the file browser, 4 = the kernel options.
+    property <int> password-for;
+
+    // Customizing entry `cust-entry` of the boot menu.
+    in-out property <bool> cust-visible;
+    in-out property <string> cust-title;
+    in property <string> cust-entry-title;
+    in property <bool> cust-linux;
+    in property <string> cust-options-placeholder;
+    in-out property <string> cust-options;
+    in-out property <bool> cust-more;
+    in-out property <bool> cust-default;
+    in property <int> cust-entry;
+    // 0 = the entry's own, else 1 + an index in `config::ICONS`.
+    in-out property <int> cust-icon;
+    // An index in `picture-names`.
+    in-out property <int> cust-picture;
+    in property <image> cust-picture-preview;
+    in property <bool> cust-has-picture-preview;
+    callback cust-picture-changed(int);
+    // On the desktop: pictures can be added with a file dialog.
+    callback cust-add-picture();
+    callback add-splash-picture();
+    // "None", then the pictures (PNG, JPEG) next to Slingshot.
+    in property <[string]> picture-names: ["None"];
+    callback customize(int);
+    callback save-customize(int);
+
+    // The passphrase of an encrypted disk the entry being started needs
+    // (Rust drives it: `open-unlock`, then `unlock-*`).
+    in-out property <bool> unlock-visible;
+    in property <string> unlock-detail;
+    in property <string> unlock-counter;
+    // For the file browser (to see the disk's files), not to start Linux.
+    in property <bool> unlock-browsing;
+    // The entry being started: its logo and name on the passphrase screen.
+    in property <BootEntry> unlock-entry;
+    in property <string> unlock-title;
+    in property <bool> unlock-checking;
+    in-out property <bool> unlock-wrong;
+    in property <string> unlock-error;
+    callback unlock-submit(string);
+    callback unlock-skip();
+    callback unlock-cancel();
+    public function open-unlock() {
+        root.unlock-visible = true;
+    }
+    property <int> unlock-clear-request;
+    public function retry-unlock() {
+        root.unlock-clear-request += 1;
+    }
+    public function close-unlock() {
+        root.unlock-visible = false;
+    }
+
+    // Why an entry couldn't start.
+    in-out property <bool> error-visible;
+    in property <string> error-title;
+    in property <string> error-text;
+
+    // The Install screen (screen 3): only in `slingshot config`.
+    in property <bool> install-available;
+    // The Settings screen saves to slingshot.toml (on the desktop).
+    in property <bool> settings-in-file;
+    in property <InstallInfo> install-info;
+    in property <bool> install-busy;
+    in property <string> install-confirm-title;
+    in property <string> install-confirm-text;
+    in property <bool> install-confirm-destructive;
+    property <bool> install-confirm-visible;
+    in property <bool> install-result-ok;
+    in property <string> install-result-text;
+    in property <bool> install-offer-restart;
+    property <bool> install-result-visible;
+    callback install-refresh();
+    callback install-act(int);
+    callback install-confirm();
+    callback install-choose();
+    callback install-restart();
+    callback show-install-confirm();
+    callback show-install-result();
+    show-install-confirm => { root.install-confirm-visible = true; }
+    show-install-result => { root.install-result-visible = true; }
+    // "Start a file…": the file browser, filled by the Rust code.
+    in-out property <bool> files-visible;
+    in property <string> files-location;
+    in property <[FileRow]> files-rows;
+    in-out property <int> files-current;
+    in property <string> files-message;
+    in property <string> files-path;
+    in property <bool> files-picking;
+    pure callback files-find(string) -> int;
+    callback files-go(string) -> bool;
+    callback open-browser();
+    callback files-open(int);
+    callback files-up();
+    callback files-add(int);
+    // Starting any file is a setting: locked like the Settings screen.
+    callback ask-browse();
+    // Asks for the settings' password, to unlock `purpose` (password-for).
+    function ask-password(purpose: int) {
+        root.password-for = purpose;
+        root.password-wrong = false;
+        root.password-visible = true;
+    }
+    ask-browse => {
+        if !root.settings-unlocked {
+            root.ask-password(3);
+            return;
+        }
+        root.open-browser();
+    }
+
+    // The boot picker shows the "More…" level.
+    in property <bool> more-level;
+    // Editing the kernel options of entry `options-entry` (E).
+    in-out property <bool> options-visible;
+    in property <string> options-text;
+    in property <string> options-title;
+    in property <int> options-entry;
+    callback edit-options(int);
+    callback boot-with-options(int, string);
+
+    // The firmware clock, on the System screen.
+    in property <string> date-time-text;
+    in property <bool> clock-settable;
+    property <bool> can-change-time: clock-settable && settings-access != 1;
+    in-out property <bool> time-dialog-visible;
+    in property <[int]> time-fields: [1, 1, 2026, 0, 0];
+    property <int> time-field;
+    callback open-time-dialog();
+    callback time-step(int, int);
+    // A number typed in a field.
+    callback time-set(int, int);
+    callback apply-time();
+
+    // Slingshot's version, shown on the System screen.
+    in property <string> app-version: Platform.uses-mock-data ? "0.0" : "";
+    in property <string> clock: Platform.uses-mock-data ? "Sample date · 12:00" : "";
+    in property <string> firmware-line: Platform.uses-mock-data ? "Sample data for the live preview" : "";
+
+    // Boot picker
+    in property <[BootEntry]> entries: Platform.uses-mock-data ? Mock.entries : [];
+    in property <int> default-entry;
+    in-out property <int> focused-entry;
+    in property <int> countdown: Platform.uses-mock-data ? 7 : -1;
+    in property <int> countdown-total: 10;
+    // A system hibernated (`resume-known`: it's the default entry).
+    in property <bool> hibernated;
+    in property <bool> resume-known;
+    // Continuous progress of the countdown, from 1 (just started) to 0 (boot).
+    // Measured from when the countdown started, so the ring and the progress
+    // bar reach 0 exactly when the entry starts.
+    property <duration> countdown-start;
+    property <float> countdown-progress: root.countdown >= 0
+        ? clamp(1 - (animation-tick() - root.countdown-start) / (root.countdown-total * 1s), 0, 1)
+        : 1;
+    changed countdown => {
+        if root.countdown == root.countdown-total {
+            root.countdown-start = animation-tick();
+        }
+    }
+    in property <bool> firmware-setup-supported: Platform.uses-mock-data;
+    // "Starting Arch Linux…", "Restarting…": over everything while it happens.
+    in property <string> starting-title;
+    // The Boot screen's Restart and Shut down buttons.
+    in property <bool> power-buttons: Platform.uses-mock-data;
+    callback power-off(/* shut down */ bool);
+    // F12 saves the log next to Slingshot (the firmware keeps one).
+    in property <bool> can-save-log;
+    callback save-log();
+
+    // Splash screen
+    in-out property <bool> splash-visible;
+    in property <image> splash-image;
+    // Behind the boot menu (slingshot.toml), and its index in
+    // `picture-names`.
+    in property <image> wallpaper;
+    in-out property <int> wallpaper-picture;
+    callback wallpaper-picture-selected(int);
+    callback add-wallpaper-picture();
+    // The splash picture, as an index in `picture-names`.
+    in-out property <int> splash-picture;
+    callback splash-picture-selected(int);
+    in-out property <string> splash-text;
+    in property <bool> splash-name: true;
+    in property <bool> splash-picture-shown: true;
+    in property <bool> splash-hint: true;
+    callback splash-text-entered(string);
+    callback splash-shown(string, bool);
+
+    // System info
+    in property <[InfoItem]> info-items: Platform.uses-mock-data ? Mock.info-items : [];
+    in property <[MemorySegment]> memory: Platform.uses-mock-data ? Mock.memory : [];
+    in property <BatteryInfo> battery: Platform.uses-mock-data ? Mock.battery : {};
+    in property <string> pointer-status: Platform.uses-mock-data ? "Pointer: sample data" : "";
+
+    // Settings
+    in-out property <int> theme-index;
+    in-out property <int> startup-index;
+    // The default entry: 0 as set (slingshot.toml, systemd-boot), 1 the
+    // one started last.
+    in-out property <int> default-index;
+    in-out property <int> timeout-seconds;
+    in property <string> mode-label: Platform.uses-mock-data ? "Sample resolution" : "";
+    in property <bool> mode-is-current: Platform.uses-mock-data;
+    // How many modes the display has, and the largest.
+    in property <int> mode-count;
+    in property <string> mode-max;
+    in property <[BootEntry]> order: Platform.uses-mock-data ? Mock.order : [];
+    in property <bool> order-dirty;
+    in property <bool> order-changed-from-original;
+    // Seconds left before a new resolution is reverted, or -1.
+    in property <int> revert-countdown: -1;
+    in-out property <bool> confirm-save-visible;
+    in-out property <bool> confirm-reset-visible;
+    in property <string> status-message;
+
+    callback boot(int);
+    callback firmware-setup();
+    // Any key press or pointer activity: stops the auto-boot countdown.
+    callback user-activity();
+    callback screen-changed(int);
+    callback theme-selected(int);
+    callback accent-selected(int);
+    callback startup-selected(int);
+    callback default-selected(int);
+    callback timeout-changed(int);
+    callback previous-mode();
+    callback next-mode();
+    callback apply-mode();
+    callback keep-mode();
+    callback revert-mode();
+    callback move-entry(int, int);
+    callback restore-order();
+    callback save-order();
+    callback reset-settings();
+
+    title: root.simulated ? @tr("Slingshot (simulator)") : @tr("Slingshot");
+    background: Theme.background;
+    default-font-family: "Inter Variable";
+    default-font-size: 14px;
+    min-width: 1024px;
+    min-height: 640px;
+
+    // The next screen, or the previous one.
+    // Boot and System are always there; Settings unless hidden; Install
+    // only in `slingshot config`.
+    function screen-available(s: int) -> bool {
+        return s == 0 || s == 1 || (s == 2 && root.settings-access != 1) || (s == 3 && root.install-available);
+    }
+
+    function step-screen(back: bool) {
+        let d = back ? 3 : 1;
+        let a = mod(root.screen + d, 4);
+        let b = mod(a + d, 4);
+        root.go-to(root.screen-available(a) ? a : root.screen-available(b) ? b : mod(b + d, 4));
+    }
+
+    function go-to(s: int) {
+        // Choosing a screen (a tab, F1 to F4) means someone is there: stop
+        // the countdown, also when Settings first asks for its password.
+        root.user-activity();
+        if !root.screen-available(s) {
+            return;
+        }
+        if s == 2 && !root.settings-unlocked {
+            root.ask-password(0);
+            return;
+        }
+        if s != root.screen {
+            // The tabs' order: Boot, System, Settings, Install.
+            root.transition-direction = s > root.screen ? 1 : -1;
+            root.transition-start = animation-tick();
+            root.transitioning = root.animate-screens;
+            transition-timer.restart();
+            root.screen = s;
+            root.screen-changed(s);
+        }
+    }
+
+    // Shows screen `s` (or the next or previous one), with the keyboard
+    // focus in it.
+    function show-screen(s: int) {
+        root.go-to(s);
+        root.enter-screen();
+    }
+    function show-next-screen(back: bool) {
+        root.step-screen(back);
+        root.enter-screen();
+    }
+
+    // The keyboard focus into the screen shown: the entry chosen, the
+    // section's first setting, the clock's button; else nothing has it but
+    // the window's shortcuts.
+    function enter-screen() {
+        if root.screen == 0 {
+            boot-screen.focus-entry(root.focused-entry);
+        } else if root.screen == 1 && root.can-change-time {
+            system-screen.enter();
+        } else if root.screen == 2 {
+            settings.enter();
+        } else if root.screen == 3 {
+            install.enter();
+        } else {
+            keys.focus();
+        }
+    }
+
+    // Switching screens: the new one slides in from the side its tab is
+    // on, and fades in. Only animates while it happens (the software
+    // renderer redraws the whole screen each frame).
+    property <bool> transitioning;
+    // Off when the whole screen can't be redrawn fast enough (the software
+    // renderer on a 4K screen): the new screen then shows at once.
+    in property <bool> animate-screens: true;
+    property <duration> transition-start;
+    property <int> transition-direction: 1;
+    property <float> transition-progress: root.transitioning
+        ? clamp((animation-tick() - root.transition-start) / 240ms, 0, 1) : 1;
+    // Ease out (cubic).
+    property <float> transition-eased: 1 - pow(1 - root.transition-progress, 3);
+    property <length> screen-shift: (1 - root.transition-eased) * root.transition-direction * 40px;
+    property <float> screen-opacity: 0.25 + 0.75 * root.transition-eased;
+    transition-timer := Timer {
+        interval: 240ms;
+        running: root.transitioning;
+        triggered => { root.transitioning = false; }
+    }
+
+    // Customizing an entry is a setting: locked like the Settings screen.
+    function ask-customize(i: int) {
+        if root.settings-access == 1 || i < 0 || i >= root.entries.length {
+            return;
+        }
+        if !root.settings-unlocked {
+            root.password-entry = i;
+            root.ask-password(2);
+            return;
+        }
+        root.customize(i);
+    }
+    property <int> password-entry;
+
+    // Editing the kernel options (E) is a setting too, and can be off
+    // (`options-editor`: slingshot.toml, Secure Boot, loader.conf).
+    in property <bool> options-editor;
+    out property <bool> can-edit-options: options-editor && settings-access != 1;
+    function ask-edit-options(i: int) {
+        if !root.can-edit-options || i < 0 || i >= root.entries.length {
+            return;
+        }
+        if !root.settings-unlocked {
+            root.password-entry = i;
+            root.ask-password(4);
+            return;
+        }
+        root.edit-options(i);
+    }
+
+    // Changing the clock is a setting: locked like the Settings screen.
+    function ask-change-time() {
+        if !root.can-change-time {
+            return;
+        }
+        if !root.settings-unlocked {
+            root.ask-password(1);
+            return;
+        }
+        root.time-field = 0;
+        root.open-time-dialog();
+    }
+
+
+    // Language and keyboard layout: "Automatic (…)" first.
+    in property <[string]> language-names;
+    in-out property <int> language-index;
+    in property <[string]> keyboard-names;
+    in-out property <int> keyboard-index;
+    callback language-selected(int);
+    callback keyboard-selected(int);
+    function select-language(i: int) {
+        if i != root.language-index {
+            root.language-index = i;
+            root.language-selected(i);
+        }
+    }
+    function select-keyboard(i: int) {
+        if i != root.keyboard-index {
+            root.keyboard-index = i;
+            root.keyboard-selected(i);
+        }
+    }
+
+    function select-theme(i: int) {
+        Theme.restyling = true;
+        root.theme-index = i;
+        Theme.theme-index = i;
+        root.theme-selected(i);
+    }
+
+    function select-accent(i: int) {
+        Theme.restyling = true;
+        Theme.accent-index = i;
+        root.accent-selected(i);
+    }
+
+    // The wallpaper, behind everything, as it is: the panels over it are
+    // frosted glass, which keeps the text readable. Explicit geometry: its
+    // size must not size the window. Not under the opaque splash screen,
+    // nor are the top bar and the footer.
+    if root.wallpaper.width > 0 && !root.splash-visible: Image {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        source: root.wallpaper;
+        image-fit: cover;
+    }
+
+
+    // The window's keys, for whatever has the keyboard focus (and when
+    // nothing has it): the screens' shortcuts, Escape, and the arrows,
+    // which move the focus like Tab where the element doesn't use them.
+    // The dialogs are popups: their keys stay in them.
+    keys := FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            // On the splash screen, Enter starts the entry right away; any
+            // other key only opens the menu.
+            let on-splash = root.splash-visible;
+            root.user-activity();
+            if on-splash {
+                root.splash-visible = false;
+                if event.text == Key.Return && root.entries.length > 0 {
+                    root.boot(root.default-entry);
+                } else {
+                    root.enter-screen();
+                }
+                return accept;
+            }
+            if root.starting-title != "" {
+                return accept;
+            }
+            // Ctrl or Alt with ← →: the previous or next screen, before the
+            // controls take the arrows (and in Settings, where Page Up and
+            // Page Down change sections).
+            if (event.modifiers.control || event.modifiers.alt)
+                && (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                root.show-next-screen(event.text == Key.LeftArrow);
+                return accept;
+            }
+            reject
+        }
+        key-pressed(event) => {
+            // Page Up / Page Down, Ctrl+Tab / Ctrl+Shift+Tab, or 1 2 3,
+            // switch screens (in Settings, Page Up / Page Down go from
+            // section to section: the screen handles them first).
+            if event.text == Key.PageDown || event.text == Key.PageUp {
+                root.show-next-screen(event.text == Key.PageUp);
+                return accept;
+            }
+            if (event.text == Key.Tab || event.text == Key.Backtab) && event.modifiers.control {
+                root.show-next-screen(event.text == Key.Backtab || event.modifiers.shift);
+                return accept;
+            }
+            // 1 to 4, or F1 to F4: the screens.
+            let s = event.text == "1" || event.text == Key.F1 ? 0
+                : event.text == "2" || event.text == Key.F2 ? 1
+                : event.text == "3" || event.text == Key.F3 ? 2
+                : event.text == "4" || event.text == Key.F4 ? 3 : -1;
+            if s >= 0 {
+                root.show-screen(s);
+                return accept;
+            }
+            if event.text == Key.F12 && root.can-save-log {
+                root.save-log();
+                return accept;
+            }
+            if event.text == Key.Escape {
+                if root.screen == 0 && root.more-level {
+                    // The "Back" card.
+                    root.boot(0);
+                } else {
+                    root.show-screen(0);
+                }
+                return accept;
+            }
+            if event.text == Key.F10 && root.firmware-setup-supported {
+                // Leaving Settings saves them.
+                root.go-to(0);
+                root.firmware-setup();
+                return accept;
+            }
+            if event.text == Key.UpArrow || event.text == Key.LeftArrow {
+                Focus.move(false);
+                return accept;
+            }
+            if event.text == Key.DownArrow || event.text == Key.RightArrow {
+                Focus.move(true);
+                return accept;
+            }
+            reject
+        }
+
+    VerticalLayout {
+        top-bar := TopBar {
+            visible: !root.splash-visible;
+            badge: root.badge;
+            clock: root.clock;
+            screen: root.screen;
+            settings-access: root.settings-access;
+            install-available: root.install-available;
+            go-to(s) => { root.show-screen(s); }
+            step(back) => { root.step-screen(back); }
+            enter => { root.enter-screen(); }
+        }
+
+        // Screens
+        Rectangle {
+            vertical-stretch: 1;
+            boot-screen := BootScreen {
+                // Not drawn under the opaque splash screen.
+                visible: root.screen == 0 && !root.splash-visible;
+                x: root.screen-shift;
+                opacity: root.screen-opacity;
+                entries: root.entries;
+                default-entry: root.default-entry;
+                focused-entry <=> root.focused-entry;
+                countdown: root.countdown;
+                hibernated: root.hibernated;
+                resume-known: root.resume-known;
+                progress: root.countdown-progress;
+                active: root.screen == 0 && !root.splash-visible && !root.modal;
+                power-buttons: root.power-buttons;
+                boot(i) => { root.boot(i); }
+                customize(i) => { root.ask-customize(i); }
+                edit-options(i) => { root.ask-edit-options(i); }
+                leave-up => { top-bar.focus-tab(); }
+                pointer-activity => { root.user-activity(); }
+                power(shut-down) => { root.power-off(shut-down); }
+            }
+            system-screen := SystemScreen {
+                visible: root.screen == 1;
+                x: root.screen-shift;
+                opacity: root.screen-opacity;
+                items: root.info-items;
+                memory: root.memory;
+                app-version: root.app-version;
+                battery: root.battery;
+                active: root.screen == 1;
+                date-time-text: root.date-time-text;
+                can-change-time: root.can-change-time;
+                change-time => { root.ask-change-time(); }
+            }
+            install := InstallScreen {
+                visible: root.screen == 3;
+                x: root.screen-shift;
+                opacity: root.screen-opacity;
+                info: root.install-info;
+                busy: root.install-busy;
+                act(i) => { root.install-act(i); }
+                choose-program => { root.install-choose(); }
+                refresh => { root.install-refresh(); }
+            }
+            settings := SettingsScreen {
+                settings-in-file: root.settings-in-file;
+                visible: root.screen == 2;
+                x: root.screen-shift;
+                opacity: root.screen-opacity;
+                theme-index <=> root.theme-index;
+                startup-index <=> root.startup-index;
+                default-index <=> root.default-index;
+                picture-names: root.picture-names;
+                splash-picture <=> root.splash-picture;
+                splash-text <=> root.splash-text;
+                splash-name: root.splash-name;
+                splash-picture-shown: root.splash-picture-shown;
+                splash-hint: root.splash-hint;
+                splash-text-entered(t) => { root.splash-text-entered(t); }
+                splash-shown(which, shown) => { root.splash-shown(which, shown); }
+                splash-preview: root.splash-image;
+                splash-picture-selected(i) => { root.splash-picture-selected(i); }
+                wallpaper-picture <=> root.wallpaper-picture;
+                wallpaper-preview: root.wallpaper;
+                wallpaper-picture-selected(i) => { root.wallpaper-picture-selected(i); }
+                add-wallpaper-picture => { root.add-wallpaper-picture(); }
+                add-splash-picture => { root.add-splash-picture(); }
+                timeout-seconds <=> root.timeout-seconds;
+                mode-label: root.mode-label;
+                mode-is-current: root.mode-is-current;
+                mode-count: root.mode-count;
+                mode-max: root.mode-max;
+                order: root.order;
+                order-dirty: root.order-dirty;
+                order-changed-from-original: root.order-changed-from-original;
+                theme-selected(i) => { root.select-theme(i); }
+                accent-selected(i) => { root.select-accent(i); }
+                startup-selected(i) => { root.startup-selected(i); }
+                default-selected(i) => { root.default-selected(i); }
+                timeout-changed(s) => { root.timeout-changed(s); }
+                previous-mode => { root.previous-mode(); }
+                next-mode => { root.next-mode(); }
+                apply-mode => { root.apply-mode(); }
+                move-entry(a, b) => { root.move-entry(a, b); }
+                restore-order => { root.restore-order(); }
+                save-order => { root.confirm-save-visible = true; }
+                reset-settings => { root.confirm-reset-visible = true; }
+                leave-up => { top-bar.focus-tab(); }
+                language-names: root.language-names;
+                language-index: root.language-index;
+                keyboard-names: root.keyboard-names;
+                keyboard-index: root.keyboard-index;
+                language-selected(i) => { root.select-language(i); }
+                keyboard-selected(i) => { root.select-keyboard(i); }
+            }
+        }
+
+        Footer {
+            visible: !root.splash-visible;
+            screen: root.screen;
+            status-message: root.status-message;
+            firmware-line: root.firmware-line;
+            pointer-status: root.pointer-status;
+            settings-access: root.settings-access;
+            power-focus: boot-screen.power-focus;
+            entry-editable: root.can-edit-options && root.entries.length > 0 && root.entries[root.focused-entry].editable;
+            entry-customizable: root.entries.length > 0 && root.entries[root.focused-entry].customizable;
+            settings-section: settings.section;
+            can-save-log: root.can-save-log;
+        }
+    }
+
+    }
+
+    // A dialog is open.
+    property <bool> modal: root.unlock-visible || root.error-visible || root.install-confirm-visible || root.install-result-visible
+        || root.confirm-save-visible || root.cust-visible || root.options-visible || root.files-visible || root.password-visible
+        || root.time-dialog-visible || root.confirm-reset-visible || root.revert-countdown >= 0;
+    ModalPopup {
+        shown: root.unlock-visible;
+        UnlockDialog {
+            detail: root.unlock-detail;
+            counter: root.unlock-counter;
+            browsing: root.unlock-browsing;
+            entry: root.unlock-entry;
+            entry-title: root.unlock-title;
+            checking: root.unlock-checking;
+            wrong: root.unlock-wrong;
+            error: root.unlock-error;
+            clear-request: root.unlock-clear-request;
+            typing => { root.unlock-wrong = false; }
+            submit(text) => { root.unlock-submit(text); }
+            skip => { root.unlock-skip(); }
+            cancel => { root.unlock-cancel(); }
+        }
+    }
+
+    ModalPopup {
+        shown: root.error-visible;
+        Dialog {
+            title: root.error-title;
+            message: root.error-text;
+            cancel-text: "";
+            accept-text: @tr("OK");
+            cancel => { root.error-visible = false; }
+            accept => { root.error-visible = false; }
+        }
+    }
+
+    ModalPopup {
+        shown: root.install-confirm-visible;
+        Dialog {
+            title: root.install-confirm-title;
+            message: @tr("These commands will run as root (your password is asked for):\n\n") + root.install-confirm-text;
+            cancel-text: @tr("Cancel");
+            accept-text: root.install-busy ? @tr("Running…") : root.install-confirm-destructive ? @tr("Remove") : @tr("Do it");
+            highlighted: 0;
+            cancel => { root.install-confirm-visible = false; }
+            accept => {
+                root.install-confirm-visible = false;
+                root.install-confirm();
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.install-result-visible;
+        Dialog {
+            title: root.install-result-ok ? @tr("Done") : @tr("It didn't work");
+            message: root.install-result-text;
+            cancel-text: root.install-offer-restart ? @tr("Restart now") : "";
+            accept-text: @tr("Close");
+            cancel => {
+                root.install-result-visible = false;
+                root.install-restart();
+            }
+            accept => { root.install-result-visible = false; }
+        }
+    }
+
+    ModalPopup {
+        shown: root.confirm-save-visible;
+        Dialog {
+            title: @tr("Save the new boot order?");
+            message: @tr("This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen.");
+            cancel-text: @tr("Cancel");
+            accept-text: @tr("Save");
+            // "Cancel" first.
+            highlighted: 0;
+            cancel => { root.confirm-save-visible = false; }
+            accept => {
+                root.confirm-save-visible = false;
+                root.save-order();
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.cust-visible;
+        CustomizeDialog {
+            entry-title: root.cust-entry-title;
+            linux: root.cust-linux;
+            options-placeholder: root.cust-options-placeholder;
+            title-text <=> root.cust-title;
+            options-text <=> root.cust-options;
+            more <=> root.cust-more;
+            default-entry <=> root.cust-default;
+            icon <=> root.cust-icon;
+            picture <=> root.cust-picture;
+            picture-names: root.picture-names;
+            picture-preview: root.cust-picture-preview;
+            has-picture-preview: root.cust-has-picture-preview;
+            picture-changed(i) => { root.cust-picture-changed(i); }
+            add-picture => { root.cust-add-picture(); }
+            cancel => { root.cust-visible = false; }
+            save => {
+                root.cust-visible = false;
+                root.save-customize(root.cust-entry);
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.options-visible;
+        OptionsDialog {
+            entry-title: root.options-title;
+            initial-text: root.options-text;
+            cancel => { root.options-visible = false; }
+            submit(text) => {
+                root.options-visible = false;
+                root.boot-with-options(root.options-entry, text);
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.files-visible;
+        FileDialog {
+            location: root.files-location;
+            rows: root.files-rows;
+            current <=> root.files-current;
+            message: root.files-message;
+            path: root.files-path;
+            picking: root.files-picking;
+            find(text) => { return root.files-find(text); }
+            go(path) => { return root.files-go(path); }
+            open(i) => { root.files-open(i); }
+            up => { root.files-up(); }
+            add(i) => { root.files-add(i); }
+            close => { root.files-visible = false; }
+        }
+    }
+
+    ModalPopup {
+        shown: root.password-visible;
+        PasswordDialog {
+            wrong: root.password-wrong;
+            typing => { root.password-wrong = false; }
+            cancel => { root.password-visible = false; }
+            submit(text) => {
+                if root.check-password(text) {
+                    root.password-visible = false;
+                    root.settings-unlocked = true;
+                    if root.password-for == 1 {
+                        root.ask-change-time();
+                    } else if root.password-for == 2 {
+                        root.ask-customize(root.password-entry);
+                    } else if root.password-for == 3 {
+                        root.ask-browse();
+                    } else if root.password-for == 4 {
+                        root.ask-edit-options(root.password-entry);
+                    } else {
+                        root.show-screen(2);
+                    }
+                } else {
+                    self.open();
+                    root.password-wrong = true;
+                }
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.time-dialog-visible;
+        TimeDialog {
+            fields: root.time-fields;
+            current: root.time-field;
+            select(i) => { root.time-field = i; }
+            step(i, d) => { root.time-step(i, d); }
+            set(i, v) => { root.time-set(i, v); }
+            cancel => { root.time-dialog-visible = false; }
+            apply => { root.apply-time(); }
+        }
+    }
+
+    ModalPopup {
+        shown: root.confirm-reset-visible;
+        Dialog {
+            title: @tr("Reset all settings?");
+            message: @tr("Theme, accent color, startup screen, timeout and resolution go back to their defaults. The boot order isn't changed.");
+            cancel-text: @tr("Cancel");
+            accept-text: @tr("Reset");
+            // "Cancel" first.
+            highlighted: 0;
+            cancel => { root.confirm-reset-visible = false; }
+            accept => {
+                root.confirm-reset-visible = false;
+                root.reset-settings();
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: root.revert-countdown >= 0;
+        Dialog {
+            title: @tr("Keep this resolution?");
+            message: @tr("Going back to the previous resolution in {} s.", root.revert-countdown);
+            cancel-text: @tr("Revert");
+            accept-text: @tr("Keep");
+            // "Revert" first: Enter twice must not keep a mode that may not display.
+            highlighted: 0;
+            cancel => { root.revert-mode(); }
+            accept => { root.keep-mode(); }
+        }
+    }
+
+    if root.splash-visible: SplashScreen {
+        image: root.splash-image;
+        text: root.splash-text;
+        show-name: root.splash-name;
+        show-picture: root.splash-picture-shown;
+        show-hint: root.splash-hint;
+        target-title: root.entries.length > 0 ? root.entries[root.default-entry].title : "";
+        entry: root.entries.length > 0 ? root.entries[root.default-entry] : { kind: "linux" };
+        countdown: root.countdown;
+        progress: root.countdown-progress;
+        dismissed => {
+            root.user-activity();
+            root.splash-visible = false;
+        }
+    }
+
+    if root.starting-title != "": Rectangle {
+        // Like the splash screen: the wallpaper as it is, glass on it.
+        background: Theme.background;
+        if Theme.frosted: Image {
+            width: 100%;
+            height: 100%;
+            source: Theme.backdrop;
+            image-fit: cover;
+        }
+        TouchArea { scroll-event => { EventResult.accept } }
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                alignment: center;
+                Panel {
+                    on-backdrop: true;
+                    tint: Theme.frosted ? Theme.surface : transparent;
+                    stroke: Theme.frosted ? Theme.border : transparent;
+                    border-radius: 28px;
+                    HorizontalLayout {
+                        padding: 28px;
+                        padding-left: 36px;
+                        padding-right: 40px;
+                        spacing: 18px;
+                        Spinner {
+                            size: 30px;
+                            thickness: 2.5px;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: root.starting-title;
+                            font-size: 26px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Glyphs are only embedded for font weights that appear as literals.
+    // Weight 500 is only used in conditional bindings, so mention it here.
+    Text {
+        visible: false;
+        text: " ";
+        font-weight: 500;
+    }
+    // Glyphs are only embedded for characters in string literals (plus
+    // ASCII). These can appear in text built at runtime.
+    Text {
+        visible: false;
+        text: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~●•×·…–—°©®™ÄÖÜäöüßÀÂÇÈÉÊËÎÏÔÙÛàâçèéêëîïôùûÿñÑ“”‘’«»";
+    }
+    // The translations' letters (the Rust side's aren't seen by the
+    // compiler): scripts/update-translations.py writes this line.
+    Text {
+        visible: false;
+        text: "«°·»ÀÄÇÉÖÜßàäçèéêôöùûüœ’“”„…←↑→↓、。一三上下不丢个中为主久么义之也二于五产什仅仍从他代令以件任份休会但何余你使例保信倒值健充先入全六共关其内册再写出分列则利到制前剩功加动包区单卡即卸压原参及发取变只可台号同名后启周命和器四回固国图在地坏壁处备复外多大失头夹如始字存它安完定容密将小尝局层屏已布常幕年并序应度康开式强当径待循德志态恢息意成或户所才打执找拔拖拟择括持按损据排接提支改效数文断新方旁无日时星是显暂更替最月有期未本机条板查标栏核检模橙次正此步段每求池没法注浅消深添源满焦然片牙状率环班理生用电画界留的盘目相眠知短码确磁示种秒称移程稍空立符第等签管箭类粉系紫纸线络统继续网置美者而耗聚能脑自色若英菜蓝藏行被装西要观视解言计认论设试询该语误请读调败足路跳身载输辨边过运返这进适选通都配酸里重量钟钥铅锁错键闭问间除隐青面顶项顺题首驱高默（），：；？"; // translations' glyphs
+    }
+
+    // The colors repainted at once after a theme or accent change: the
+    // animations back after it (Theme.restyling).
+    Timer {
+        interval: 300ms;
+        running: Theme.restyling;
+        triggered => { Theme.restyling = false; }
+    }
+
+    // Keep the std-widgets palette (used by AboutSlint) in sync with the theme.
+    property <bool> dark-theme: Theme.dark;
+    changed dark-theme => {
+        Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // Frost (the cards' blurred wallpaper) places it by the window's size.
+    changed width => { Theme.window-width = self.width; }
+    changed height => { Theme.window-height = self.height; }
+
+    init => {
+        Palette.color-scheme = Theme.dark ? ColorScheme.dark : ColorScheme.light;
+        Theme.window-width = self.width;
+        Theme.window-height = self.height;
+        keys.focus();
+        if !root.splash-visible {
+            root.enter-screen();
+        }
+    }
+}

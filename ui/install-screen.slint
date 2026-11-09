@@ -1,0 +1,245 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The Install screen: only in `slingshot config` on the desktop. It shows
+// what scripts/slingshot-setup says about this computer, and runs its
+// commands (src/desktop/install.rs).
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import { Button, Panel } from "widgets.slint";
+import { InfoRow } from "system-screen.slint";
+
+export struct InstallInfo {
+    // The status has been read.
+    known: bool,
+    // Why it couldn't be read (efibootmgr missing, no ESP…).
+    error: string,
+    esp: string,
+    installed: bool,
+    file: string,
+    // The Boot#### number, or "".
+    entry: string,
+    // In the boot order: "first", "later" or "none".
+    order: string,
+    systemd-boot: bool,
+    systemd-boot-entry: bool,
+    secure-boot: bool,
+    // The slingshot.efi to install ("" if none was found).
+    program: string,
+}
+
+// A card of the right column: a title with its icon, then the contents.
+component Card inherits Panel {
+    in property <string> title;
+    in property <string> icon;
+    VerticalLayout {
+        padding: 22px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 10px;
+            Icon {
+                kind: root.icon;
+                size: 18px;
+                thickness: 2px;
+                color: Theme.accent;
+            }
+            Text {
+                text: root.title;
+                font-size: 17px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+        @children
+    }
+}
+
+export component InstallScreen inherits Rectangle {
+    in property <InstallInfo> info;
+    in property <bool> busy;
+    // The script's commands, in install.rs `Action::ALL` order: 0 install,
+    // 1 try, 2 make default, 3 undefault, 4 systemd-boot entry, 5 uninstall.
+    callback act(int);
+    callback choose-program();
+    callback refresh();
+
+    out property <bool> ready: root.info.known && root.info.error == "" && !root.busy;
+    // What each focus item can do now.
+    out property <bool> can-install: root.ready && root.info.program != "";
+    out property <bool> can-start: root.ready && root.info.entry != "";
+    out property <bool> has-sd-item: root.info.systemd-boot && !root.info.systemd-boot-entry;
+    out property <bool> can-uninstall: root.ready && (root.info.installed || root.info.entry != "");
+
+    // Entering the screen: the keyboard focus on its first button.
+    public function enter() {
+        choose.focus();
+    }
+
+    // Laid out like the System screen.
+    HorizontalLayout {
+        padding-top: 32px;
+        padding-left: 64px;
+        padding-right: 64px;
+        padding-bottom: 20px;
+        spacing: 28px;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 18px;
+            alignment: start;
+
+            Panel {
+                VerticalLayout {
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        Text {
+                            text: @tr("This computer");
+                            font-size: 22px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            height: 64px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    if !root.info.known: InfoRow { icon: "computer"; label: @tr("Reading…"); }
+                    if root.info.known && root.info.error != "": InfoRow {
+                        icon: "shield-off";
+                        warn: true;
+                        label: root.info.error;
+                    }
+                    if root.info.known && root.info.error == "": VerticalLayout {
+                        InfoRow {
+                            icon: "disc";
+                            label: @tr("EFI System Partition");
+                            title: root.info.esp;
+                        }
+                        InfoRow {
+                            icon: "app";
+                            label: @tr("Slingshot");
+                            title: root.info.installed ? @tr("Installed") : @tr("Not installed");
+                            detail: root.info.installed ? root.info.file : "";
+                            good: root.info.installed;
+                        }
+                        InfoRow {
+                            icon: "firmware";
+                            label: @tr("Firmware entry");
+                            title: root.info.entry != "" ? @tr("Boot") + root.info.entry : @tr("None");
+                            good: root.info.entry != "";
+                        }
+                        InfoRow {
+                            icon: "play";
+                            label: @tr("Starts");
+                            title: root.info.entry == "" ? @tr("Never")
+                                : root.info.order == "first" ? @tr("On every boot") : @tr("Only when chosen");
+                            detail: root.info.entry == "" ? ""
+                                : root.info.order == "first" ? @tr("First in the boot order") : @tr("Once, or from the firmware's boot menu");
+                            good: root.info.order == "first";
+                        }
+                        if root.info.systemd-boot: InfoRow {
+                            icon: "list";
+                            label: "systemd-boot";
+                            title: @tr("Found");
+                            detail: root.info.systemd-boot-entry ? @tr("Slingshot is in its menu too") : @tr("Its entries are cards in Slingshot");
+                        }
+                        InfoRow {
+                            icon: root.info.secure-boot ? "shield-on" : "shield-off";
+                            label: @tr("Secure Boot");
+                            title: root.info.secure-boot ? @tr("On") : @tr("Off");
+                            detail: root.info.secure-boot ? @tr("The firmware only starts Slingshot once it is signed") : "";
+                            warn: root.info.secure-boot;
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                Text {
+                    text: @tr("Each step first shows what it will change, then asks for your password.");
+                    font-size: 13px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        VerticalLayout {
+            width: 420px;
+            spacing: 18px;
+            alignment: start;
+
+            Card {
+                title: root.info.installed ? @tr("Update") : @tr("Install");
+                icon: "disc";
+                Text {
+                    text: root.info.program != "" ? root.info.program : @tr("Slingshot's boot program (slingshot.efi) wasn't found: choose it.");
+                    font-size: 14px;
+                    color: root.info.program != "" ? Theme.text : Theme.text-muted;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    choose := Button {
+                        text: @tr("Choose…");
+                        clicked => { root.choose-program(); }
+                    }
+                    Button {
+                        text: root.info.installed ? @tr("Update") : @tr("Install");
+                        primary: true;
+                        enabled: root.can-install;
+                        clicked => { root.act(0); }
+                    }
+                }
+                Text {
+                    text: @tr("Copies it to the boot partition and adds it to the computer's boot menu. Nothing starts differently yet.");
+                    font-size: 13px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                title: @tr("Start Slingshot");
+                icon: "play";
+                VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Button {
+                        text: @tr("Once, on the next restart");
+                        enabled: root.can-start;
+                        clicked => { root.act(1); }
+                    }
+                    Button {
+                        text: root.info.order == "first" ? @tr("Not on every boot") : @tr("On every boot");
+                        enabled: root.can-start;
+                        clicked => { root.act(root.info.order == "first" ? 3 : 2); }
+                    }
+                    if root.has-sd-item: Button {
+                        text: @tr("Also in systemd-boot's menu");
+                        enabled: root.ready && root.info.installed;
+                        clicked => { root.act(4); }
+                    }
+                }
+                Text {
+                    text: @tr("Once: the restart after that goes back to normal, whatever happens. On every boot: Slingshot starts your previous default after its countdown.");
+                    font-size: 13px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: @tr("Uninstall…");
+                    danger: true;
+                    enabled: root.can-uninstall;
+                    clicked => { root.act(5); }
+                }
+            }
+        }
+    }
+}

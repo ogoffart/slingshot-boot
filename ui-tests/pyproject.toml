@@ -1,0 +1,16 @@
+[project]
+name = "slingshot-ui-tests"
+version = "0"
+requires-python = ">=3.10"
+dependencies = ["pytest", "slint-testing"]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "slint-private"
+url = "https://testing.slint.dev/simple/"
+explicit = true
+
+[tool.uv.sources]
+slint-testing = { index = "slint-private" }

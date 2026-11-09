@@ -1,0 +1,1280 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import { BootEntry, Button, Focus, Panel, PicturePicker, Segment, SegmentedControl, TextField, Toggle } from "widgets.slint";
+
+component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: touch.pressed ? Theme.surface-strong : touch.has-hover && enabled ? Theme.surface-strong.with-alpha(0.6) : transparent;
+    opacity: enabled ? 1 : 0.35;
+
+    Icon {
+        kind: root.icon;
+        size: 18px;
+        thickness: 2px;
+        color: Theme.text-soft;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A row of the boot order list. Dragging it (anywhere but the buttons)
+// moves it: the row follows the pointer, `shift` moves the others aside.
+component OrderRow inherits Rectangle {
+    in property <BootEntry> entry;
+    in property <int> position;
+    in property <int> count;
+    // The number shown: where the row is, or will be while dragging.
+    in property <int> shown-position: position;
+    // How far the row is moved aside while another row is dragged.
+    in property <length> shift;
+    callback move-up();
+    callback move-down();
+    callback drag-started();
+    // The pointer's vertical distance from where the drag started.
+    callback dragged(length);
+    callback dropped();
+    out property <bool> has-focus: fs.has-focus;
+
+    property <bool> dragging;
+    property <length> drag-dy;
+
+    forward-focus: fs;
+    height: 50px;
+    z: dragging ? 1 : 0;
+    accessible-role: list-item;
+    accessible-label: entry.title;
+    accessible-item-selectable: true;
+    accessible-item-selected: fs.has-focus;
+    accessible-item-index: position;
+    accessible-item-count: count;
+
+    touch := TouchArea {
+        mouse-cursor: root.dragging ? grabbing : grab;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                fs.focus();
+            }
+            if event.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                root.drag-dy = 0;
+                root.dropped();
+            }
+        }
+        moved => {
+            if !self.pressed {
+                return;
+            }
+            let dy = self.mouse-y - self.pressed-y;
+            if !root.dragging && abs(dy) > 4px {
+                root.dragging = true;
+                root.drag-started();
+            }
+            if root.dragging {
+                root.drag-dy = dy;
+                root.dragged(dy);
+            }
+        }
+    }
+
+    card := Rectangle {
+        y: root.dragging ? root.drag-dy : root.shift;
+        animate y {
+            duration: root.dragging ? 0ms : 150ms;
+            easing: ease-out;
+        }
+        border-radius: Theme.radius;
+        background: root.dragging ? Theme.surface-strong : fs.has-focus ? Theme.focus-fill : Theme.surface-raised;
+        border-width: fs.has-focus || root.dragging ? 2px : 1px;
+        border-color: fs.has-focus || root.dragging ? Theme.accent : Theme.border;
+        drop-shadow-blur: 16px;
+        // Transparent: not drawn (a blur of 0 still is).
+        drop-shadow-color: root.dragging ? #0006 : transparent;
+        animate background, border-color { duration: Theme.restyling ? 0ms : 120ms; }
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 8px;
+            spacing: 14px;
+            VerticalLayout {
+                alignment: center;
+                Icon {
+                    kind: "grip";
+                    size: 16px;
+                    thickness: 2.6px;
+                    color: fs.has-focus ? Theme.badge-text : Theme.grey;
+                }
+            }
+            Text {
+                width: 20px;
+                text: root.shown-position + 1;
+                font-size: 14px;
+                color: fs.has-focus ? Theme.badge-text : Theme.text-muted;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.entry.title;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                text: root.entry.subtitle;
+                font-size: 13px;
+                color: fs.has-focus ? Theme.badge-text : Theme.text-muted;
+                vertical-alignment: center;
+                overflow: elide;
+                max-width: 200px;
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: "chevron-up";
+                enabled: root.position > 0;
+                clicked => { root.move-up(); }
+            }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: "chevron-down";
+                enabled: root.position < root.count - 1;
+                clicked => { root.move-down(); }
+            }
+        }
+    }
+    // Alt + ↑ ↓ move the row (the focus goes with it).
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.modifiers.alt && event.text == Key.UpArrow {
+                if root.position > 0 {
+                    root.move-up();
+                }
+                return accept;
+            }
+            if event.modifiers.alt && event.text == Key.DownArrow {
+                if root.position < root.count - 1 {
+                    root.move-down();
+                }
+                return accept;
+            }
+            // The rows are a column: ← → don't move the focus.
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// A swatch per color of `Theme.accents`.
+component AccentPicker inherits Rectangle {
+    out property <bool> has-focus: fs.has-focus;
+    callback activated(int);
+    property <int> last: Theme.has-wallpaper-accent ? 5 : Theme.accents.length - 1;
+
+    forward-focus: fs;
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+    accessible-role: radio-group;
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
+        for color[i] in Theme.accents: Segment {
+            width: 36px;
+            accessible-label: Theme.accent-names[i];
+            selected: i == Theme.accent-index;
+            clicked => {
+                fs.focus();
+                root.activated(i);
+            }
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: self.width / 2;
+                background: color;
+                border-width: i == Theme.accent-index ? 2px : 0px;
+                border-color: Theme.text-strong;
+            }
+        }
+        // The wallpaper's color: a square swatch, to tell it apart.
+        if Theme.has-wallpaper-accent: Segment {
+            width: 36px;
+            accessible-label: @tr("Wallpaper");
+            selected: Theme.accent-index == 5;
+            clicked => {
+                fs.focus();
+                root.activated(5);
+            }
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 5px;
+                background: Theme.wallpaper-accent;
+                border-width: Theme.accent-index == 5 ? 2px : 0px;
+                border-color: Theme.text-strong;
+            }
+        }
+    }
+    // ← → choose.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                let next = clamp(Theme.accent-index + (event.text == Key.RightArrow ? 1 : -1), 0, root.last);
+                if next != Theme.accent-index {
+                    root.activated(next);
+                }
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+component SettingLabel inherits Text {
+    font-size: 14px;
+    font-weight: 600;
+    color: Theme.text-soft;
+}
+
+// ‹ a value › : steps through choices.
+component StepPicker inherits Rectangle {
+    in property <string> text;
+    in property <bool> can-previous: true;
+    in property <bool> can-next: true;
+    out property <bool> has-focus: fs.has-focus;
+    callback step(int);
+    // Enter, when `accepts-enter` (the resolution picker applies it).
+    in property <bool> accepts-enter;
+    callback accepted();
+    forward-focus: fs;
+    height: 48px;
+    border-radius: Theme.radius;
+    background: Theme.surface;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border-strong;
+    HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        IconButton {
+            y: 2px;
+            icon: "chevron-left";
+            opacity: root.can-previous ? 1 : 0.35;
+            clicked => {
+                fs.focus();
+                root.step(-1);
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: 15px;
+            color: Theme.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        IconButton {
+            y: 2px;
+            icon: "chevron-right";
+            opacity: root.can-next ? 1 : 0.35;
+            clicked => {
+                fs.focus();
+                root.step(1);
+            }
+        }
+    }
+    // ← → step, Enter accepts.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                root.step(event.text == Key.LeftArrow ? -1 : 1);
+                return accept;
+            }
+            if event.text == Key.Return && root.accepts-enter {
+                root.accepted();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// A number of seconds, 0 being "Never": typed (digits, Backspace) or
+// stepped (← →, the arrows).
+component SecondsField inherits Rectangle {
+    in property <int> value;
+    in property <int> maximum: 255;
+    out property <bool> has-focus: fs.has-focus;
+    callback changed(int);
+    // The digits typed since the field got the focus or was stepped.
+    property <string> typed;
+    function set(v: int) {
+        root.changed(clamp(v, 0, root.maximum));
+    }
+    function step(d: int) {
+        root.typed = "";
+        root.set(root.value + d);
+    }
+    forward-focus: fs;
+    height: 48px;
+    border-radius: Theme.radius;
+    background: Theme.surface;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border-strong;
+    accessible-role: spinbox;
+    accessible-value: root.value;
+    HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        IconButton {
+            y: 2px;
+            icon: "chevron-left";
+            opacity: root.value > 0 ? 1 : 0.35;
+            clicked => {
+                fs.focus();
+                root.step(-1);
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.value == 0 && root.typed == "" ? @tr("Never") : @tr("{} s", root.value);
+            font-size: 15px;
+            color: Theme.text;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        IconButton {
+            y: 2px;
+            icon: "chevron-right";
+            opacity: root.value < root.maximum ? 1 : 0.35;
+            clicked => {
+                fs.focus();
+                root.step(1);
+            }
+        }
+    }
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        focus-changed-event => { root.typed = ""; }
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                root.step(event.text == Key.LeftArrow ? -1 : 1);
+                return accept;
+            }
+            if event.text >= "0" && event.text <= "9" && event.text.character-count == 1 {
+                root.typed = root.typed.character-count >= 3 ? event.text : root.typed + event.text;
+                root.set(root.typed.to-float());
+                return accept;
+            }
+            if event.text == Key.Backspace {
+                root.typed = root.value < 10 ? "" : "\{floor(root.value / 10)}";
+                root.set(root.typed.to-float());
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// A section in the sidebar.
+component SectionTab inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> selected;
+    out property <bool> has-focus: fs.has-focus;
+    callback clicked;
+    // ↑ ↓: the previous or next section (-1, 1); →: into the section.
+    callback step(int) -> bool;
+
+    forward-focus: fs;
+    height: 46px;
+    border-radius: 10px;
+    background: root.selected ? Theme.surface-strong : touch.has-hover ? Theme.surface-strong.with-alpha(0.5) : transparent;
+    border-width: fs.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    // The selected one: a bar of the accent color.
+    if root.selected: Rectangle {
+        x: 0;
+        width: 3px;
+        height: 22px;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 12px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon;
+                size: 19px;
+                thickness: 2px;
+                color: root.selected ? Theme.accent : Theme.text-muted;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-size: 15px;
+            font-weight: root.selected ? 600 : 400;
+            color: root.selected ? Theme.text : Theme.text-soft;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    // Enter or Space: shows the section.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            // At the first or last tab, ↑ ↓ stay: the arrows don't leave
+            // the tabs (← → neither: Enter goes into the section).
+            if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                root.step(event.text == Key.UpArrow ? -1 : 1);
+                return accept;
+            }
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// A section of the screen: it gives the focus to its first element
+// (`take-focus`) when shown, and when asked again (`request` changes), if
+// `pending` is its `index`.
+// A section of settings. ↑ ↓ go from setting to setting (Tab still goes
+// from control to control): `step` moves the focus to the previous or next
+// setting and says whether there was one; past the first or the last,
+// `leave` shows the section before or after.
+component Section inherits FocusScope {
+    // Which section this is: only the one asked for answers, not the one
+    // shown before, still there until the `if` is evaluated again.
+    in property <int> index;
+    in property <int> request;
+    in-out property <int> pending;
+    // Entering from the next section (↑): at the last setting.
+    in property <bool> at-end;
+    in property <length> spacing;
+    in property <LayoutAlignment> alignment: stretch;
+    callback take-focus(bool);
+    callback step(int) -> bool;
+    callback leave(int) -> bool;
+    focus-on-click: false;
+    focus-on-tab-navigation: false;
+    function take() {
+        if root.pending == root.index {
+            root.pending = -1;
+            root.take-focus(root.at-end);
+        }
+    }
+    init => { self.take(); }
+    changed request => { self.take(); }
+    key-pressed(event) => {
+        if !event.modifiers.alt && !event.modifiers.control && !event.modifiers.shift
+            && (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+            let d = event.text == Key.UpArrow ? -1 : 1;
+            if root.step(d) || root.leave(d) {
+                return accept;
+            }
+        }
+        reject
+    }
+    VerticalLayout {
+        spacing: root.spacing;
+        alignment: root.alignment;
+        @children
+    }
+}
+
+export component SettingsScreen inherits Rectangle {
+    in-out property <int> theme-index;
+    in-out property <int> startup-index;
+    in-out property <int> default-index;
+    // The splash picture: an index in `picture-names` ("None" first).
+    in property <[string]> picture-names;
+    in-out property <int> splash-picture;
+    in-out property <int> wallpaper-picture;
+    in property <image> wallpaper-preview;
+    in property <image> splash-preview;
+    // The splash screen's text and its "Press any key" line, saved in
+    // slingshot.toml (the text when Enter is pressed or the field is left).
+    in-out property <string> splash-text;
+    in property <bool> splash-name: true;
+    in property <bool> splash-picture-shown: true;
+    in property <bool> splash-hint: true;
+    callback splash-text-entered(string);
+    // "name", "picture" or "hint", and whether it's shown now.
+    callback splash-shown(string, bool);
+    in-out property <int> timeout-seconds;
+    in property <string> mode-label;
+    in property <bool> mode-is-current;
+    in property <int> mode-count;
+    in property <string> mode-max;
+    in property <[BootEntry]> order;
+    in property <bool> order-dirty;
+    in property <bool> order-changed-from-original;
+    // "Automatic (…)" first.
+    in property <[string]> language-names;
+    in property <int> language-index;
+    in property <[string]> keyboard-names;
+    in property <int> keyboard-index;
+
+    callback theme-selected(int);
+    callback accent-selected(int);
+    callback startup-selected(int);
+    callback default-selected(int);
+    callback splash-picture-selected(int);
+    callback wallpaper-picture-selected(int);
+    callback add-wallpaper-picture();
+    // Where the settings are kept: slingshot.toml (`slingshot config`) or NVRAM.
+    in property <bool> settings-in-file;
+    callback add-splash-picture();
+    callback timeout-changed(int);
+    callback previous-mode();
+    callback next-mode();
+    callback apply-mode();
+    callback move-entry(int, int);
+    callback restore-order();
+    callback save-order();
+    callback reset-settings();
+    // ↑ above the first setting: the top bar (not the sidebar's tabs).
+    callback leave-up();
+    callback language-selected(int);
+    callback keyboard-selected(int);
+
+    // Drag and drop in the boot order: the dragged row, and where it goes.
+    property <length> row-pitch: 58px; // row height + spacing
+    property <int> drag-from: -1;
+    property <length> drag-dy;
+    property <int> drag-to: drag-from < 0 ? -1 : clamp(drag-from + round(drag-dy / row-pitch), 0, order.length - 1);
+
+    // The sections, in the sidebar's order (and the items').
+    property <[{icon: string, title: string, about: string}]> sections: [
+        { icon: "palette", title: @tr("Appearance"), about: @tr("How the boot menu looks, and the screen resolution. Applied right away.") },
+        { icon: "play", title: @tr("Startup"), about: @tr("What shows first, and when the default entry starts by itself.") },
+        { icon: "keyboard", title: @tr("Language and keyboard"), about: @tr("The language of the menus, and how the keys type (passphrases too).") },
+        { icon: "list", title: @tr("Boot order"), about: @tr("Drag the entries, or use the arrows or Alt + ↑ ↓. Saved to the firmware only when you confirm.") },
+    ];
+    // The section shown.
+    in-out property <int> section: 0;
+    // The width of the pickers: the same in every section.
+    property <length> control-width: 520px;
+    // Asks the section shown (its index; -1: none) to put the keyboard focus
+    // on its first element: when it's shown from the sidebar or Page Up/Down,
+    // or when the screen is entered.
+    property <int> pending-focus: -1;
+    property <int> focus-request;
+    public function show-section(i: int) {
+        root.section = clamp(i, 0, root.sections.length - 1);
+        root.enter();
+    }
+    public function enter() {
+        root.enter-at-end = false;
+        root.focus-section();
+    }
+    // ↑ past the first setting or ↓ past the last: the section before (at
+    // its last setting) or after; at the ends, the top bar or "Reset all
+    // settings" (the arrows don't go to the sidebar's tabs).
+    function leave-section(d: int) -> bool {
+        let next = root.section + d;
+        if next < 0 {
+            root.leave-up();
+            return true;
+        }
+        if next >= root.sections.length {
+            reset-button.focus();
+            return true;
+        }
+        root.section = next;
+        root.tab-focus = -1;
+        root.enter-at-end = d < 0;
+        root.focus-section();
+        true
+    }
+    property <bool> enter-at-end;
+    function focus-section() {
+        // The boot order's rows are made with the section, and may be made
+        // before its `take-focus` runs: they read `row-focus` when made.
+        if root.section == 3 {
+            root.row-focus = root.enter-at-end ? -1 : 0;
+        }
+        root.pending-focus = root.section;
+        root.focus-request += 1;
+    }
+    // The sidebar tab to give the focus to (↑ ↓ on the tabs).
+    property <int> tab-focus;
+    property <int> tab-request;
+    // The boot order row to give the focus to when the rows are made again
+    // (the list changes when a row moves).
+    property <int> row-focus: -1;
+    property <int> row-request;
+
+    // Page Up / Page Down: the previous or next section.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if event.text == Key.PageUp || event.text == Key.PageDown {
+                root.show-section(root.section + (event.text == Key.PageDown ? 1 : -1));
+                return accept;
+            }
+            reject
+        }
+
+    HorizontalLayout {
+        padding-top: 24px;
+        padding-bottom: 24px;
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 20px;
+        // The sidebar.
+        Panel {
+            width: 280px;
+            VerticalLayout {
+                padding-top: 24px;
+                padding-bottom: 20px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 4px;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    Text {
+                        text: @tr("Settings");
+                        font-size: 26px;
+                        font-weight: 600;
+                        color: Theme.text;
+                    }
+                }
+                Rectangle { height: 14px; }
+                for s[i] in root.sections: tab := SectionTab {
+                    icon: s.icon;
+                    text: s.title;
+                    selected: root.section == i;
+                    clicked => { root.show-section(i); }
+                    // ↑ ↓ on the tabs show the sections as the focus moves.
+                    step(d) => {
+                        let next = i + d;
+                        if next < 0 || next >= root.sections.length {
+                            return false;
+                        }
+                        root.section = next;
+                        root.tab-focus = next;
+                        root.tab-request += 1;
+                        true
+                    }
+                    property <int> request: root.tab-request;
+                    changed request => {
+                        if root.tab-focus == i {
+                            self.focus();
+                        }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 12px;
+                    padding-bottom: 12px;
+                    Text {
+                        text: root.settings-in-file ? @tr("Settings are saved in slingshot.toml, next to Slingshot")
+                            : @tr("Settings are kept in this computer's firmware, not on a disk");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+                // ↑ goes back to the last setting; ↓ ← → stay.
+                FocusScope {
+                    focus-on-click: false;
+                    focus-on-tab-navigation: false;
+                    key-pressed(event) => {
+                        if event.text == Key.UpArrow {
+                            root.section = root.sections.length - 1;
+                            root.tab-focus = -1;
+                            root.enter-at-end = true;
+                            root.focus-section();
+                            return accept;
+                        }
+                        event.text == Key.DownArrow || event.text == Key.LeftArrow || event.text == Key.RightArrow ? accept : reject
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        reset-button := Button {
+                            text: @tr("Reset all settings");
+                            danger: true;
+                            clicked => { root.reset-settings(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // The section, not too wide to read.
+        Panel {
+            horizontal-stretch: 1;
+            max-width: 920px;
+        VerticalLayout {
+            padding-top: 28px;
+            padding-bottom: 24px;
+            padding-left: 40px;
+            padding-right: 40px;
+            spacing: 26px;
+
+            VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.sections[root.section].title;
+                    font-size: 22px;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+                Text {
+                    text: root.sections[root.section].about;
+                    font-size: 14px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            if root.section == 0: Section {
+                index: 0;
+                at-end: root.enter-at-end;
+                leave(d) => { root.leave-section(d) }
+                // The focus on the first element when asked.
+                request: root.focus-request;
+                pending <=> root.pending-focus;
+                take-focus(at-end) => {
+                    if at-end {
+                        mode-picker.focus();
+                    } else {
+                        theme-picker.focus();
+                    }
+                }
+                step(d) => {
+                    let n = (mode-picker.has-focus || mode-apply.has-focus ? 3
+                        : wallpaper-picker.has-focus ? 2
+                        : accent-picker.has-focus ? 1 : 0) + d;
+                    if n == 0 {
+                        theme-picker.focus();
+                    } else if n == 1 {
+                        accent-picker.focus();
+                    } else if n == 2 {
+                        wallpaper-picker.focus();
+                    } else if n == 3 {
+                        mode-picker.focus();
+                    } else {
+                        return false;
+                    }
+                    true
+                }
+                spacing: 24px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Theme"); }
+                    HorizontalLayout {
+                        alignment: start;
+                        theme-picker := SegmentedControl {
+                            width: root.control-width;
+                            options: Theme.theme-names;
+                            current <=> root.theme-index;
+                            activated(i) => {
+                                root.theme-selected(i);
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Accent color"); }
+                    HorizontalLayout {
+                        alignment: start;
+                        accent-picker := AccentPicker {
+                            activated(i) => {
+                                root.accent-selected(i);
+                            }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Wallpaper"); }
+                    HorizontalLayout {
+                        alignment: start;
+                        wallpaper-picker := PicturePicker {
+                            width: root.control-width;
+                            names: root.picture-names;
+                            none-text: @tr("No wallpaper");
+                            current <=> root.wallpaper-picture;
+                            preview: root.wallpaper-preview;
+                            has-preview: root.wallpaper-preview.width > 0;
+                            activated(i) => { root.wallpaper-picture-selected(i); }
+                            add => { root.add-wallpaper-picture(); }
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Screen resolution"); }
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: start;
+                        mode-picker := StepPicker {
+                            width: root.control-width;
+                            text: root.mode-label + (root.mode-is-current ? @tr("  (current)") : "");
+                            step(d) => {
+                                if d < 0 {
+                                    root.previous-mode();
+                                } else {
+                                    root.next-mode();
+                                }
+                            }
+                            accepts-enter: true;
+                            accepted => {
+                                if !root.mode-is-current {
+                                    root.apply-mode();
+                                }
+                            }
+                        }
+                        // ← → stay: the picker before it takes them.
+                        FocusScope {
+                            focus-on-click: false;
+                            focus-on-tab-navigation: false;
+                            key-pressed(event) => {
+                                event.text == Key.LeftArrow || event.text == Key.RightArrow ? accept : reject
+                            }
+                            mode-apply := Button {
+                                text: @tr("Apply");
+                                enabled: !root.mode-is-current;
+                                clicked => { root.apply-mode(); }
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.mode-count > 0 ? @tr("{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it.", root.mode-count, root.mode-max)
+                            : @tr("Applied right away. Reverts after 10 s unless you keep it.");
+                        font-size: 13px;
+                        color: Theme.text-muted;
+                    }
+                }
+            }
+
+            if root.section == 1: Section {
+                index: 1;
+                at-end: root.enter-at-end;
+                leave(d) => { root.leave-section(d) }
+                // The focus on the first element when asked.
+                request: root.focus-request;
+                pending <=> root.pending-focus;
+                take-focus(at-end) => {
+                    if at-end {
+                        timeout-picker.focus();
+                    } else {
+                        startup-picker.focus();
+                    }
+                }
+                // What the splash screen shows is under "At startup, show":
+                // what isn't the two others is the first setting. Its
+                // controls go one by one, like Tab.
+                step(d) => {
+                    if root.startup-index == 1 && !timeout-picker.has-focus
+                        && !(default-picker.has-focus && d > 0) && !(startup-picker.has-focus && d < 0) {
+                        Focus.move(d > 0);
+                        return true;
+                    }
+                    let n = (timeout-picker.has-focus ? 2 : default-picker.has-focus ? 1 : 0) + d;
+                    if n == 0 {
+                        startup-picker.focus();
+                    } else if n == 1 {
+                        default-picker.focus();
+                    } else if n == 2 {
+                        timeout-picker.focus();
+                    } else {
+                        return false;
+                    }
+                    true
+                }
+                spacing: 24px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("At startup, show"); }
+                    startup-picker := SegmentedControl {
+                        max-width: root.control-width;
+                        options: [@tr("Boot menu"), @tr("Splash screen")];
+                        current <=> root.startup-index;
+                        activated(i) => {
+                            root.startup-selected(i);
+                        }
+                    }
+                    if root.startup-index == 1: PicturePicker {
+                        max-width: root.control-width;
+                        names: root.picture-names;
+                        current <=> root.splash-picture;
+                        preview: root.splash-preview;
+                        has-preview: root.splash-preview.width > 0;
+                        add => { root.add-splash-picture(); }
+                        activated(i) => { root.splash-picture-selected(i); }
+                    }
+                    if root.startup-index == 1: Rectangle {
+                        max-width: root.control-width;
+                        height: 48px;
+                        border-radius: Theme.radius;
+                        background: Theme.surface;
+                        border-width: splash-text-input.has-focus ? 2px : 1px;
+                        border-color: splash-text-input.has-focus ? Theme.accent : Theme.border-strong;
+                        // Under the field: a click on the text places the cursor.
+                        TouchArea { clicked => { splash-text-input.focus(); } }
+                        splash-text-input := TextField {
+                            x: 14px;
+                            width: parent.width - 28px;
+                            text <=> root.splash-text;
+                            placeholder: @tr("A text instead of the entry's name");
+                            accepted(text) => { root.splash-text-entered(text); }
+                            arrow(down) => {
+                                Focus.move(down);
+                                true
+                            }
+                            changed has-focus => {
+                                if !self.has-focus {
+                                    root.splash-text-entered(self.text);
+                                }
+                            }
+                        }
+                    }
+                    // ← → from toggle to toggle, stopping at the ends.
+                    if root.startup-index == 1: FocusScope {
+                        focus-on-click: false;
+                        focus-on-tab-navigation: false;
+                        key-pressed(event) => {
+                            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                                let right = event.text == Key.RightArrow;
+                                if !(right ? hint-toggle.has-focus : name-toggle.has-focus) {
+                                    Focus.move(right);
+                                }
+                                return accept;
+                            }
+                            reject
+                        }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        name-toggle := Toggle {
+                            text: @tr("Name");
+                            checked: root.splash-name;
+                            clicked => { root.splash-shown("name", !root.splash-name); }
+                        }
+                        Toggle {
+                            text: @tr("Picture");
+                            checked: root.splash-picture-shown;
+                            clicked => { root.splash-shown("picture", !root.splash-picture-shown); }
+                        }
+                        hint-toggle := Toggle {
+                            text: @tr("Key hint");
+                            checked: root.splash-hint;
+                            clicked => { root.splash-shown("hint", !root.splash-hint); }
+                        }
+                    }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("The default entry"); }
+                    default-picker := SegmentedControl {
+                        max-width: root.control-width;
+                        options: [@tr("The one set as default"), @tr("The last one started")];
+                        current <=> root.default-index;
+                        activated(i) => {
+                            root.default-selected(i);
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Start the default entry after"); }
+                    HorizontalLayout {
+                        spacing: 16px;
+                        alignment: start;
+                        timeout-picker := SecondsField {
+                            width: 200px;
+                            value: root.timeout-seconds;
+                            changed(v) => {
+                                root.timeout-seconds = v;
+                                root.timeout-changed(v);
+                            }
+                        }
+                        Text {
+                            text: @tr("Type the seconds, or use ← →. 0: never.");
+                            font-size: 13px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            if root.section == 2: Section {
+                index: 2;
+                at-end: root.enter-at-end;
+                leave(d) => { root.leave-section(d) }
+                // The focus on the first element when asked.
+                request: root.focus-request;
+                pending <=> root.pending-focus;
+                take-focus(at-end) => {
+                    if at-end {
+                        keyboard-picker.focus();
+                    } else {
+                        language-picker.focus();
+                    }
+                }
+                step(d) => {
+                    let n = (keyboard-picker.has-focus ? 1 : 0) + d;
+                    if n == 0 {
+                        language-picker.focus();
+                    } else if n == 1 {
+                        keyboard-picker.focus();
+                    } else {
+                        return false;
+                    }
+                    true
+                }
+                spacing: 24px;
+                alignment: start;
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Language"); }
+                    language-picker := StepPicker {
+                        max-width: root.control-width;
+                        text: root.language-names[root.language-index];
+                        can-previous: root.language-index > 0;
+                        can-next: root.language-index < root.language-names.length - 1;
+                        step(d) => {
+                            root.language-selected(clamp(root.language-index + d, 0, root.language-names.length - 1));
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Keyboard layout"); }
+                    keyboard-picker := StepPicker {
+                        max-width: root.control-width;
+                        text: root.keyboard-names[root.keyboard-index];
+                        can-previous: root.keyboard-index > 0;
+                        can-next: root.keyboard-index < root.keyboard-names.length - 1;
+                        step(d) => {
+                            root.keyboard-selected(clamp(root.keyboard-index + d, 0, root.keyboard-names.length - 1));
+                        }
+                    }
+                }
+            }
+
+            if root.section == 3: Section {
+                index: 3;
+                at-end: root.enter-at-end;
+                leave(d) => { root.leave-section(d) }
+                vertical-stretch: 1;
+                spacing: 16px;
+                // The focus on the first row when asked (the rows take it
+                // when they're made), or on the buttons without rows.
+                request: root.focus-request;
+                pending <=> root.pending-focus;
+                take-focus(at-end) => {
+                    if at-end && self.focus-buttons() {
+                        return;
+                    }
+                    if root.order.length > 0 {
+                        root.row-focus = at-end ? root.order.length - 1 : 0;
+                        root.row-request += 1;
+                    }
+                }
+                // The buttons, when one can be pressed (a disabled one
+                // doesn't take the focus): whether one took it.
+                function focus-buttons() -> bool {
+                    if restore.enabled {
+                        restore.focus();
+                    } else if save-order.enabled {
+                        save-order.focus();
+                    } else {
+                        return false;
+                    }
+                    true
+                }
+                // Row by row, then the buttons.
+                step(d) => {
+                    if restore.has-focus || save-order.has-focus {
+                        if d > 0 || root.order.length == 0 {
+                            return false;
+                        }
+                        root.row-focus = root.order.length - 1;
+                        root.row-request += 1;
+                        return true;
+                    }
+                    let n = root.row-focus + d;
+                    if n < 0 {
+                        return false;
+                    }
+                    if n >= root.order.length {
+                        return self.focus-buttons();
+                    }
+                    root.row-focus = n;
+                    root.row-request += 1;
+                    true
+                }
+                    // Scrolls when there are more entries than room (many
+                    // firmware have a dozen): the list must not grow the screen.
+                    // Not interactive: dragging a row moves it, the wheel scrolls.
+                    TouchArea {
+                        min-height: 0;
+                        preferred-height: rows.preferred-height;
+                        max-height: rows.preferred-height;
+                        scroll-event(event) => {
+                            list.content-y = clamp(list.content-y + event.delta-y, min(0px, list.height - rows.preferred-height), 0px);
+                            accept
+                        }
+                        list := Flickable {
+                            interactive: false;
+                            content-height: rows.preferred-height;
+                            rows := VerticalLayout {
+                                spacing: root.row-pitch - 50px;
+                                for entry[i] in root.order: order-row := OrderRow {
+                                    entry: entry;
+                                    position: i;
+                                    count: root.order.length;
+                                    shown-position: i == root.drag-from ? root.drag-to
+                                        : self.shift < 0 ? i - 1 : self.shift > 0 ? i + 1 : i;
+                                    shift: root.drag-from < 0 || i == root.drag-from ? 0px
+                                        : root.drag-from < i && i <= root.drag-to ? -root.row-pitch
+                                        : root.drag-to <= i && i < root.drag-from ? root.row-pitch
+                                        : 0px;
+                                    // The focus on this row, when it's made (the
+                                    // list was changed) or asked.
+                                    property <int> request: root.row-request;
+                                    init => {
+                                        if root.row-focus == i {
+                                            self.focus();
+                                        }
+                                    }
+                                    changed request => {
+                                        if root.row-focus == i {
+                                            self.focus();
+                                        }
+                                    }
+                                    changed has-focus => {
+                                        if self.has-focus {
+                                            root.row-focus = i;
+                                            // Keeps it in view.
+                                            let top = i * root.row-pitch;
+                                            let bottom = top + 50px;
+                                            if top < -list.content-y {
+                                                list.content-y = -top;
+                                            } else if bottom > -list.content-y + list.height {
+                                                list.content-y = list.height - bottom;
+                                            }
+                                        }
+                                    }
+                                    drag-started => {
+                                        root.drag-from = i;
+                                        root.drag-dy = 0;
+                                    }
+                                    dragged(dy) => { root.drag-dy = dy; }
+                                    dropped => {
+                                        let from = root.drag-from;
+                                        let to = root.drag-to;
+                                        root.drag-from = -1;
+                                        root.row-focus = to;
+                                        if to != from {
+                                            root.move-entry(from, to);
+                                        }
+                                    }
+                                    // The focus goes with the row.
+                                    move-up => {
+                                        root.row-focus = i - 1;
+                                        root.move-entry(i, i - 1);
+                                    }
+                                    move-down => {
+                                        root.row-focus = i + 1;
+                                        root.move-entry(i, i + 1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                HorizontalLayout {
+                    alignment: end;
+                    vertical-stretch: 0;
+                    spacing: 12px;
+                    padding-top: 4px;
+                    restore := Button {
+                        text: @tr("Restore original order");
+                        enabled: root.order-changed-from-original;
+                        clicked => { root.restore-order(); }
+                    }
+                    save-order := Button {
+                        text: @tr("Save to firmware…");
+                        primary: true;
+                        enabled: root.order-dirty;
+                        clicked => { root.save-order(); }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+            if root.section != 4: Rectangle { vertical-stretch: 1; }
+        }
+        }
+        // What's left past the section's widest.
+        Rectangle { horizontal-stretch: 0.001; }
+    }
+    }
+}

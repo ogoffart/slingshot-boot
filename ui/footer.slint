@@ -1,0 +1,72 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { Frost, KeyChip, MadeWithSlint } from "widgets.slint";
+
+// The footer: a status line, the keys of the screen shown, "Made with Slint".
+export component Footer inherits Rectangle {
+    in property <int> screen;
+    // A message for a while, else what the screen's status line says.
+    in property <string> status-message;
+    in property <string> firmware-line;
+    in property <string> pointer-status;
+    in property <int> settings-access;
+    // The Boot screen's keyboard focus: the power buttons (0, 1) or the
+    // cards (-1), and what the focused card allows.
+    in property <int> power-focus;
+    in property <bool> entry-editable;
+    in property <bool> entry-customizable;
+    // F12 saves the log (the firmware keeps one).
+    in property <bool> can-save-log;
+    // The Settings section shown (3: the boot order).
+    in property <int> settings-section;
+
+    height: 60px;
+    if Theme.frosted: Frost { tint: Theme.background; }
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.divider;
+    }
+    // Like the top bar: status on the left, key hints centered (under
+    // the tabs), "Made with Slint" on the right (under the clock).
+    status := Text {
+        x: 40px;
+        width: (parent.width - hints.preferred-width) / 2 - 60px;
+        height: parent.height;
+        text: root.status-message != "" ? root.status-message
+            : root.screen == 0 ? root.firmware-line
+            // System: the pointer's diagnostics are in the log (F12), not
+            // for everyone to read.
+            : root.screen == 1 ? ""
+            : root.screen == 3 ? @tr("Each step asks for your password")
+            : "";  // Settings says where they're kept, in its sidebar.
+        font-size: 13px;
+        color: root.status-message != "" ? Theme.text : Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    hints := HorizontalLayout {
+        x: (parent.width - self.preferred-width) / 2;
+        width: self.preferred-width;
+        height: parent.height;
+        spacing: 20px;
+        if root.screen == 0: KeyChip { key: Theme.style == 3 ? "↑ ↓" : "← →"; label: @tr("Select"); }
+        if root.screen == 0: KeyChip { key: @tr("Enter"); label: root.power-focus == 0 ? @tr("Restart") : root.power-focus == 1 ? @tr("Shut down") : @tr("Start"); }
+        if root.screen == 0 && root.power-focus < 0 && root.entry-editable: KeyChip { key: "E"; label: @tr("Options"); }
+        if root.screen == 0 && root.power-focus < 0 && root.settings-access != 1 && root.entry-customizable: KeyChip { key: "C"; label: @tr("Customize"); }
+        if root.screen == 2: KeyChip { key: "↑ ↓"; label: @tr("Move"); }
+        if root.screen == 2 && root.settings-section != 3: KeyChip { key: "← →"; label: @tr("Change"); }
+        if root.screen == 2 && root.settings-section == 3: KeyChip { key: @tr("Alt ↑ ↓"); label: @tr("Reorder"); }
+        if root.screen == 2: KeyChip { key: @tr("PgUp PgDn"); label: @tr("Section"); }
+        if root.screen != 1: KeyChip { key: @tr("Tab"); label: @tr("Focus"); }
+        if root.screen == 1 && root.can-save-log: KeyChip { key: "F12"; label: @tr("Save log"); }
+        if root.screen != 0: KeyChip { key: @tr("Esc"); label: @tr("Back to boot"); }
+    }
+    made-with := MadeWithSlint {
+        x: parent.width - 40px - self.preferred-width;
+        width: self.preferred-width;
+        height: parent.height;
+    }
+}

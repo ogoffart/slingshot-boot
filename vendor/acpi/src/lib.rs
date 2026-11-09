@@ -1,0 +1,651 @@
+//! `acpi` is a Rust library for interacting with the Advanced Configuration and Power Interface, a
+//! complex framework for power management and device discovery and configuration. ACPI is used on
+//! modern x64, as well as some ARM and RISC-V platforms. An operating system needs to interact with
+//! ACPI to correctly set up a platform's interrupt controllers, perform power management, and fully
+//! support many other platform capabilities.
+//!
+//! This crate provides a limited API that can be used without an allocator, for example for use
+//! from a bootloader. This API will allow you to search for the RSDP, enumerate over the available
+//! tables, and interact with the tables using their raw structures. All other functionality is
+//! behind an `alloc` feature (enabled by default) and requires an allocator.
+//!
+//! With an allocator, this crate also provides higher-level interfaces to the static tables, as
+//! well as a dynamic interpreter for AML - the bytecode format encoded in the DSDT and SSDT
+//! tables.
+//!
+//! ### Usage
+//! To use the library, you will need to provide an implementation of the [`Handler`] trait,
+//! which allows the library to make requests such as mapping a particular region of physical
+//! memory into the virtual address space.
+//!
+//! Next, you'll need to get the physical address of either the RSDP, or the RSDT/XSDT. The method
+//! for doing this depends on the platform you're running on and how you were booted. If you know
+//! the system was booted via the BIOS, you can use [`Rsdp::search_for_on_bios`]. UEFI provides a
+//! separate mechanism for getting the address of the RSDP.
+//!
+//! You then need to construct an instance of [`AcpiTables`], which can be done in a few ways
+//! depending on how much information you have:
+//! * Use [`AcpiTables::from_rsdp`] if you have the physical address of the RSDP
+//! * Use [`AcpiTables::from_rsdt`] if you have the physical address of the RSDT/XSDT
+//!
+//! Once you have an [`AcpiTables`], you can search for relevant tables, or use the higher-level
+//! interfaces, such as [`PowerProfile`], or [`HpetInfo`].
+//!
+//! If you have the `aml` feature enabled then you can construct an
+//! [AML interpreter](`crate::aml::Interpreter`) by first constructing an
+//! [`AcpiPlatform`](platform::AcpiPlatform) and then the interpreter:
+//!
+//! ```ignore,rust
+//! let mut acpi_handler = YourHandler::new(/*args*/);
+//! let acpi_tables = unsafe { AcpiTables::from_rsdp(acpi_handler.clone(), rsdp_addr) }.unwrap();
+//! let platform = AcpiPlatform::new(acpi_tables, acpi_handler).unwrap();
+//! let interpreter = Interpreter::new_from_platform(&platform).unwrap();
+//! ```
+
+#![no_std]
+#![cfg_attr(feature = "platform", feature(allocator_api, allocator_ext))]
+
+#[cfg_attr(test, macro_use)]
+#[cfg(test)]
+extern crate std;
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+pub mod address;
+#[cfg(feature = "aml")]
+pub mod aml;
+pub mod physical_mapping;
+#[cfg(feature = "platform")]
+pub mod platform;
+pub mod registers;
+pub mod rsdp;
+pub mod sdt;
+
+pub use pci_types::PciAddress;
+pub use physical_mapping::{PhysicalMapping, RawPhysicalMapping};
+pub use sdt::{fadt::PowerProfile, hpet::HpetInfo, madt::MadtError};
+
+use crate::sdt::{SdtHeader, Signature};
+use core::mem;
+use log::warn;
+use rsdp::Rsdp;
+
+/// `AcpiTables` represents a platform's of ACPI static tables, enumerated from the RSDT/XSDT. It
+/// can be used to access a table with a specific signature, or to enumerate over each of the tables.
+pub struct AcpiTables<H: Handler> {
+    rsdt_mapping: PhysicalMapping<H, SdtHeader>,
+    rsdt_entry_size: usize,
+    handler: H,
+    pub quirks: AcpiQuirks,
+}
+
+unsafe impl<H> Send for AcpiTables<H> where H: Handler + Send {}
+unsafe impl<H> Sync for AcpiTables<H> where H: Handler + Send {}
+
+impl<H> AcpiTables<H>
+where
+    H: Handler,
+{
+    /// Construct an `AcpiTables` from the **physical** address of the RSDP.
+    ///
+    /// # Safety
+    /// The address of the RSDP must be valid.
+    pub unsafe fn from_rsdp(handler: H, rsdp_address: usize) -> Result<AcpiTables<H>, AcpiError> {
+        unsafe { Self::from_rsdp_with_quirks(handler, rsdp_address, AcpiQuirks::default()) }
+    }
+
+    /// Construct an `AcpiTables` from the **physical** address of the RSDP.
+    ///
+    /// # Safety
+    /// The address of the RSDP must be valid.
+    pub unsafe fn from_rsdp_with_quirks(
+        handler: H,
+        rsdp_address: usize,
+        quirks: AcpiQuirks,
+    ) -> Result<AcpiTables<H>, AcpiError> {
+        let rsdp_mapping =
+            unsafe { PhysicalMapping::<_, Rsdp>::new(rsdp_address, mem::size_of::<Rsdp>(), handler.clone()) };
+
+        /*
+         * If the address given does not have a correct RSDP signature, the user has probably given
+         * us an invalid address, and we should not continue. We're more lenient with other errors
+         * as it's probably a real RSDP and the firmware developers are just lazy.
+         */
+        match rsdp_mapping.validate() {
+            Ok(()) => (),
+            Err(AcpiError::RsdpIncorrectSignature) => return Err(AcpiError::RsdpIncorrectSignature),
+            Err(AcpiError::RsdpInvalidOemId) | Err(AcpiError::RsdpInvalidChecksum) => {
+                warn!("RSDP has invalid checksum or OEM ID. Continuing.");
+            }
+            Err(_) => (),
+        }
+
+        /*
+         * Decide whether we should use the RSDT, with 32-bit entries, or the XSDT, with 64-bit
+         * entries. We use the XSDT if the RSDP revision is 2 or greater, and the XSDT address is
+         * not null.
+         *
+         * Note that the spec does not define expected behaviour here particularly well - it claims
+         * that the extended RSDP fields are available for all ACPI versions after 1.0 (suggesting
+         * `revision > 0`), but also defines these fields as only valid when `revision > 1`. We have
+         * therefore chosen behaviour that matches other ACPI libraries.
+         */
+        let (rsdt_address, rsdt_entry_size) =
+            if rsdp_mapping.revision() > 1 && rsdp_mapping.xsdt_address() != 0 && !quirks.ignore_xsdt {
+                (rsdp_mapping.xsdt_address() as usize, 8)
+            } else {
+                (rsdp_mapping.rsdt_address() as usize, 4)
+            };
+
+        unsafe { Self::from_rsdt_with_quirks(handler, rsdt_address, rsdt_entry_size, quirks) }
+    }
+
+    /// Construct an `AcpiTables` from the **physical** address of the RSDT/XSDT, and the revision
+    /// found in the RSDP.
+    ///
+    /// # Safety
+    /// The address of the RSDT must be valid.
+    pub unsafe fn from_rsdt(
+        handler: H,
+        rsdt_address: usize,
+        rsdt_entry_size: usize,
+    ) -> Result<AcpiTables<H>, AcpiError> {
+        unsafe { Self::from_rsdt_with_quirks(handler, rsdt_address, rsdt_entry_size, AcpiQuirks::default()) }
+    }
+
+    /// Construct an `AcpiTables` from the **physical** address of the RSDT/XSDT, and the revision
+    /// found in the RSDP.
+    ///
+    /// # Safety
+    /// The address of the RSDT must be valid.
+    pub unsafe fn from_rsdt_with_quirks(
+        handler: H,
+        rsdt_address: usize,
+        rsdt_entry_size: usize,
+        quirks: AcpiQuirks,
+    ) -> Result<AcpiTables<H>, AcpiError> {
+        let rsdt_mapping =
+            unsafe { PhysicalMapping::<_, SdtHeader>::new(rsdt_address, size_of::<SdtHeader>(), handler.clone()) };
+
+        let rsdt_length = rsdt_mapping.length;
+        let rsdt_mapping =
+            unsafe { PhysicalMapping::<_, SdtHeader>::new(rsdt_address, rsdt_length as usize, handler.clone()) };
+        Ok(Self { rsdt_mapping, rsdt_entry_size, handler, quirks })
+    }
+
+    /// Iterate over the **physical** addresses of the SDTs.
+    pub fn table_entries(&self) -> impl Iterator<Item = usize> {
+        let mut table_entries_ptr =
+            unsafe { self.rsdt_mapping.as_ptr().byte_add(size_of::<SdtHeader>()) }.cast::<u8>();
+        let mut num_entries =
+            (self.rsdt_mapping.raw().region_length().saturating_sub(mem::size_of::<SdtHeader>()))
+                / self.rsdt_entry_size;
+
+        core::iter::from_fn(move || {
+            if num_entries > 0 {
+                unsafe {
+                    let entry = if self.rsdt_entry_size == 4 {
+                        table_entries_ptr.cast::<u32>().read_unaligned() as usize
+                    } else {
+                        table_entries_ptr.cast::<u64>().read_unaligned() as usize
+                    };
+                    table_entries_ptr = table_entries_ptr.byte_add(self.rsdt_entry_size);
+                    num_entries -= 1;
+
+                    Some(entry)
+                }
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Iterate over the headers of each SDT, along with their **physical** addresses.
+    pub fn table_headers(&self) -> impl Iterator<Item = (usize, SdtHeader)> {
+        self.table_entries().map(|table_phys_address| {
+            let mapping = unsafe {
+                PhysicalMapping::<_, SdtHeader>::new(
+                    table_phys_address,
+                    mem::size_of::<SdtHeader>(),
+                    &self.handler,
+                )
+            };
+            (table_phys_address, *mapping)
+        })
+    }
+
+    /// Find all tables with the signature `T::SIGNATURE`.
+    pub fn find_tables<T>(&self) -> impl Iterator<Item = PhysicalMapping<H, T>>
+    where
+        T: AcpiTable,
+    {
+        self.table_entries().filter_map(|table_phys_address| {
+            let header_mapping = unsafe {
+                PhysicalMapping::<_, SdtHeader>::new(
+                    table_phys_address,
+                    mem::size_of::<SdtHeader>(),
+                    &self.handler,
+                )
+            };
+            if header_mapping.signature == T::SIGNATURE {
+                // Extend the mapping to the entire table
+                let length = header_mapping.length;
+                drop(header_mapping);
+                Some(unsafe {
+                    PhysicalMapping::<_, T>::new(table_phys_address, length as usize, self.handler.clone())
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Find the first table with the signature `T::SIGNATURE`.
+    pub fn find_table<T>(&self) -> Option<PhysicalMapping<H, T>>
+    where
+        T: AcpiTable,
+    {
+        self.find_tables().next()
+    }
+
+    pub fn dsdt(&self) -> Result<AmlTable, AcpiError> {
+        let Some(fadt) = self.find_table::<sdt::fadt::Fadt>() else {
+            Err(AcpiError::TableNotFound(Signature::FADT))?
+        };
+        let phys_address = fadt.dsdt_address()?;
+        let header = unsafe {
+            PhysicalMapping::<_, SdtHeader>::new(phys_address, mem::size_of::<SdtHeader>(), &self.handler)
+        };
+        Ok(AmlTable { phys_address, length: header.length, revision: header.revision })
+    }
+
+    pub fn ssdts(&self) -> impl Iterator<Item = AmlTable> {
+        self.table_headers().filter_map(|(phys_address, header)| {
+            if header.signature == Signature::SSDT {
+                Some(AmlTable { phys_address, length: header.length, revision: header.revision })
+            } else {
+                None
+            }
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AmlTable {
+    /// The physical address of the start of the table. Add `mem::size_of::<SdtHeader>()` to this
+    /// to get the physical address of the start of the AML stream.
+    pub phys_address: usize,
+    /// The length of the table, including the header.
+    pub length: u32,
+    pub revision: u8,
+}
+
+/// All types representing ACPI tables should implement this trait.
+///
+/// ### Safety
+/// The table's memory is naively interpreted, so you must be careful in providing a type that
+/// correctly represents the table's structure. Regardless of the provided type's size, the region mapped will
+/// be the size specified in the SDT's header. If a table's definition may be larger than a valid
+/// SDT's size, [`ExtendedField`](sdt::ExtendedField) should be used to define fields that may or
+/// may not exist.
+pub unsafe trait AcpiTable {
+    const SIGNATURE: Signature;
+
+    fn header(&self) -> &SdtHeader;
+
+    fn validate(&self) -> Result<(), AcpiError> {
+        unsafe { self.header().validate(Self::SIGNATURE) }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum AcpiError {
+    NoValidRsdp,
+    RsdpIncorrectSignature,
+    RsdpInvalidOemId,
+    RsdpInvalidChecksum,
+
+    SdtInvalidSignature(Signature),
+    SdtInvalidOemId(Signature),
+    SdtInvalidTableId(Signature),
+    SdtInvalidChecksum(Signature),
+    SdtInvalidCreatorId(Signature),
+
+    TableNotFound(Signature),
+    InvalidFacsAddress,
+    InvalidDsdtAddress,
+    InvalidMadt(MadtError),
+    InvalidGenericAddress,
+
+    Timeout,
+
+    #[cfg(feature = "aml")]
+    Aml(aml::AmlError),
+
+    /// This is emitted to signal that the library does not support the requested behaviour. This
+    /// should eventually never be emitted.
+    LibUnimplemented,
+
+    /// This can be returned by the host (user of the library) to signal that required behaviour
+    /// has not been implemented. This will cause the error to be propagated back to the host if an
+    /// operation that requires that behaviour is performed.
+    HostUnimplemented,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct AcpiQuirks {
+    /// When initializing a set of `AcpiTables` from an RSDP, ignore the `revision` field of the
+    /// RSDP and always use the RSDT address with 32-bit entries. This can be used to override a
+    /// firmware that has an invalid RSDP.
+    pub ignore_xsdt: bool,
+}
+
+/// A `Handle` is an opaque reference to an object that is managed by the host on behalf of this
+/// library.
+///
+/// The library will treat the value of a handle as entirely opaque. You may manage handles
+/// however you wish, and the same value can be used to refer to objects of different types, if
+/// desired.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct Handle(pub u32);
+
+/// An implementation of this trait must be provided to allow `acpi` to perform operations that
+/// interface with the underlying hardware and other systems in your host implementation. This
+/// interface is designed to be flexible to allow usage of the library from a variety of settings.
+///
+/// Depending on your usage of this library, not all functionality may be required. If you do not
+/// provide certain functionality, you should return [`AcpiError::HostUnimplemented`]. The library
+/// will attempt to propagate this error back to the host if an operation cannot be performed
+/// without that functionality.
+///
+/// The `Handler` must be cheaply clonable (e.g. a reference, `Arc`, marker struct, etc.) as a copy
+/// of the handler is stored in various structures, such as in each [`PhysicalMapping`] to
+/// facilitate unmapping.
+pub trait Handler: Clone {
+    /// Given a physical address and a size, map a region of physical memory that contains `T` (note: the passed
+    /// size may be larger than `size_of::<T>()`). The address is not neccessarily page-aligned, so the
+    /// implementation may need to map more than `size` bytes. The virtual address the region is mapped to does not
+    /// matter, as long as it is accessible to `acpi`. Refer to the fields on [`PhysicalMapping`] to understand how
+    /// to produce one properly.
+    ///
+    /// ## Safety
+    ///
+    /// - `physical_address` must point to a valid `T` in physical memory.
+    /// - `size` must be at least `size_of::<T>()`.
+    unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> RawPhysicalMapping<T>;
+
+    /// Unmap the given physical mapping. This is called when a [`PhysicalMapping`] is dropped, you should **not** manually call this.
+    ///
+    /// # Safety
+    ///
+    /// `region` must denote a physical mapping _currently allocated_ via this handler.
+    unsafe fn unmap_physical_region<T>(&self, region: RawPhysicalMapping<T>);
+
+    // TODO: maybe we should map stuff ourselves in the AML interpreter and do this internally?
+    // Maybe provide a hook for tracing the IO / emit trace events ourselves if we do do that?
+    fn read_u8(&self, address: usize) -> u8;
+    fn read_u16(&self, address: usize) -> u16;
+    fn read_u32(&self, address: usize) -> u32;
+    fn read_u64(&self, address: usize) -> u64;
+
+    fn write_u8(&self, address: usize, value: u8);
+    fn write_u16(&self, address: usize, value: u16);
+    fn write_u32(&self, address: usize, value: u32);
+    fn write_u64(&self, address: usize, value: u64);
+
+    // TODO: would be nice to provide defaults that just do the actual port IO on x86?
+    fn read_io_u8(&self, port: u16) -> u8;
+    fn read_io_u16(&self, port: u16) -> u16;
+    fn read_io_u32(&self, port: u16) -> u32;
+
+    fn write_io_u8(&self, port: u16, value: u8);
+    fn write_io_u16(&self, port: u16, value: u16);
+    fn write_io_u32(&self, port: u16, value: u32);
+
+    fn read_pci_u8(&self, address: PciAddress, offset: u16) -> u8;
+    fn read_pci_u16(&self, address: PciAddress, offset: u16) -> u16;
+    fn read_pci_u32(&self, address: PciAddress, offset: u16) -> u32;
+
+    fn write_pci_u8(&self, address: PciAddress, offset: u16, value: u8);
+    fn write_pci_u16(&self, address: PciAddress, offset: u16, value: u16);
+    fn write_pci_u32(&self, address: PciAddress, offset: u16, value: u32);
+
+    /// Returns a monotonically-increasing value of nanoseconds.
+    fn nanos_since_boot(&self) -> u64;
+
+    /// Stall for at least the given number of **microseconds**. An implementation should not relinquish control of
+    /// the processor during the stall, and for this reason, firmwares should not stall for periods of more than
+    /// 100 microseconds.
+    fn stall(&self, microseconds: u64);
+
+    /// Sleep for at least the given number of **milliseconds**. An implementation may round to the closest sleep
+    /// time supported, and should relinquish the processor.
+    fn sleep(&self, milliseconds: u64);
+
+    #[cfg(feature = "aml")]
+    fn create_mutex(&self) -> Handle;
+
+    /// Acquire the mutex referred to by the given handle. `timeout` is a millisecond timeout value
+    /// with the following meaning:
+    ///    - `0` - try to acquire the mutex once, in a non-blocking manner. If the mutex cannot be
+    ///      acquired immediately, return `Err(AmlError::MutexAcquireTimeout)`
+    ///    - `1-0xfffe` - try to acquire the mutex for at least `timeout` milliseconds.
+    ///    - `0xffff` - try to acquire the mutex indefinitely. Should not return `MutexAcquireTimeout`.
+    ///
+    /// AML mutexes are **reentrant** - that is, a thread may acquire the same mutex more than once
+    /// without causing a deadlock.
+    ///
+    /// Note: The ACPI specification says: "A Mutex must be totally released before an invocation
+    /// completes." - this crate does not enforce that, and it also does not forcibly release
+    /// mutexes when the top-level called method exits.
+    #[cfg(feature = "aml")]
+    fn acquire(&self, mutex: Handle, timeout: u16) -> Result<(), aml::AmlError>;
+
+    /// Release the mutex referred to by the given handle.
+    ///
+    /// AML mutexes are reentrant - this function should release only one acquisition of the mutex.
+    ///
+    /// In correctly written AML code, the number of Acquire statements (which cause the interpreter
+    /// to call [`acquire`](Self::acquire) must equal the number of Release statements (which causes
+    /// this function to be called).
+    ///
+    /// According to the ACPI spec: "It is fatal to release ownership on a Mutex unless it is
+    /// currently owned" - this crate does not specify what a Handler should do in this case.
+    #[cfg(feature = "aml")]
+    fn release(&self, mutex: Handle);
+
+    #[cfg(feature = "aml")]
+    fn breakpoint(&self) {}
+
+    #[cfg(feature = "aml")]
+    fn handle_debug(&self, _object: &aml::object::Object) {}
+
+    #[cfg(feature = "aml")]
+    fn handle_fatal_error(&self, fatal_type: u8, fatal_code: u32, fatal_arg: u64) {
+        log::error!(
+            "Fatal error while executing AML (encountered DefFatalOp). fatal_type = {}, fatal_code = {}, fatal_arg = {}",
+            fatal_type,
+            fatal_code,
+            fatal_arg
+        );
+    }
+}
+
+impl<H: Handler> Handler for &H {
+    #[inline]
+    unsafe fn map_physical_region<T>(&self, physical_address: usize, size: usize) -> RawPhysicalMapping<T> {
+        unsafe { (**self).map_physical_region(physical_address, size) }
+    }
+
+    #[inline]
+    unsafe fn unmap_physical_region<T>(&self, region: RawPhysicalMapping<T>) {
+        unsafe { (**self).unmap_physical_region(region) }
+    }
+
+    #[inline]
+    fn read_u8(&self, address: usize) -> u8 {
+        (**self).read_u8(address)
+    }
+
+    #[inline]
+    fn read_u16(&self, address: usize) -> u16 {
+        (**self).read_u16(address)
+    }
+
+    #[inline]
+    fn read_u32(&self, address: usize) -> u32 {
+        (**self).read_u32(address)
+    }
+
+    #[inline]
+    fn read_u64(&self, address: usize) -> u64 {
+        (**self).read_u64(address)
+    }
+
+    #[inline]
+    fn write_u8(&self, address: usize, value: u8) {
+        (**self).write_u8(address, value)
+    }
+
+    #[inline]
+    fn write_u16(&self, address: usize, value: u16) {
+        (**self).write_u16(address, value)
+    }
+
+    #[inline]
+    fn write_u32(&self, address: usize, value: u32) {
+        (**self).write_u32(address, value)
+    }
+
+    #[inline]
+    fn write_u64(&self, address: usize, value: u64) {
+        (**self).write_u64(address, value)
+    }
+
+    #[inline]
+    fn read_io_u8(&self, port: u16) -> u8 {
+        (**self).read_io_u8(port)
+    }
+
+    #[inline]
+    fn read_io_u16(&self, port: u16) -> u16 {
+        (**self).read_io_u16(port)
+    }
+
+    #[inline]
+    fn read_io_u32(&self, port: u16) -> u32 {
+        (**self).read_io_u32(port)
+    }
+
+    #[inline]
+    fn write_io_u8(&self, port: u16, value: u8) {
+        (**self).write_io_u8(port, value)
+    }
+
+    #[inline]
+    fn write_io_u16(&self, port: u16, value: u16) {
+        (**self).write_io_u16(port, value)
+    }
+
+    #[inline]
+    fn write_io_u32(&self, port: u16, value: u32) {
+        (**self).write_io_u32(port, value)
+    }
+
+    #[inline]
+    fn read_pci_u8(&self, address: PciAddress, offset: u16) -> u8 {
+        (**self).read_pci_u8(address, offset)
+    }
+
+    #[inline]
+    fn read_pci_u16(&self, address: PciAddress, offset: u16) -> u16 {
+        (**self).read_pci_u16(address, offset)
+    }
+
+    #[inline]
+    fn read_pci_u32(&self, address: PciAddress, offset: u16) -> u32 {
+        (**self).read_pci_u32(address, offset)
+    }
+
+    #[inline]
+    fn write_pci_u8(&self, address: PciAddress, offset: u16, value: u8) {
+        (**self).write_pci_u8(address, offset, value)
+    }
+
+    #[inline]
+    fn write_pci_u16(&self, address: PciAddress, offset: u16, value: u16) {
+        (**self).write_pci_u16(address, offset, value)
+    }
+
+    #[inline]
+    fn write_pci_u32(&self, address: PciAddress, offset: u16, value: u32) {
+        (**self).write_pci_u32(address, offset, value)
+    }
+
+    #[inline]
+    fn nanos_since_boot(&self) -> u64 {
+        (**self).nanos_since_boot()
+    }
+
+    #[inline]
+    fn stall(&self, microseconds: u64) {
+        (**self).stall(microseconds)
+    }
+
+    #[inline]
+    fn sleep(&self, milliseconds: u64) {
+        (**self).sleep(milliseconds)
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn create_mutex(&self) -> Handle {
+        (**self).create_mutex()
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn acquire(&self, mutex: Handle, timeout: u16) -> Result<(), aml::AmlError> {
+        (**self).acquire(mutex, timeout)
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn release(&self, mutex: Handle) {
+        (**self).release(mutex)
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn breakpoint(&self) {
+        (**self).breakpoint()
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn handle_debug(&self, object: &aml::object::Object) {
+        (**self).handle_debug(object)
+    }
+
+    #[inline]
+    #[cfg(feature = "aml")]
+    fn handle_fatal_error(&self, fatal_type: u8, fatal_code: u32, fatal_arg: u64) {
+        (**self).handle_fatal_error(fatal_type, fatal_code, fatal_arg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[allow(dead_code)]
+    fn test_physical_mapping_send_sync() {
+        fn test_send_sync<T: Send>() {}
+        fn caller<H: Handler + Send, T: Send>() {
+            test_send_sync::<PhysicalMapping<H, T>>();
+        }
+    }
+}

@@ -1,0 +1,197 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! App settings and their encoding (stored in NVRAM on UEFI).
+
+#[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
+const VERSION: u8 = 6;
+
+/// The themes, in the order of `Theme.theme-names` (and slingshot.toml's
+/// names).
+pub const THEMES: [&str; 2] = ["dark", "light"];
+
+/// How the boot entries are drawn (`Theme.style`), in its order.
+pub const STYLES: [&str; 4] = ["cards", "colorful", "flat", "classic"];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Settings {
+    /// Index in `THEMES`.
+    pub theme: u8,
+    /// Index in `STYLES`.
+    pub style: u8,
+    /// Index in `Theme.accents`.
+    pub accent: u8,
+    /// Show the splash screen at startup instead of the boot menu.
+    pub splash: bool,
+    /// The default entry is the one started last.
+    pub remember_last: bool,
+    pub timeout: u16,
+    /// Preferred resolution, (0, 0) if none.
+    pub mode: (u16, u16),
+    /// 0: automatic (slingshot.toml's, else the firmware's), else an index
+    /// in `languages()` plus 1.
+    pub language: u8,
+    /// 0: automatic (keymap.txt, else slingshot.toml's), else an index in
+    /// `keymap::LAYOUTS` plus 1.
+    pub keyboard: u8,
+}
+
+/// The languages to choose from: English, then the translations.
+pub fn languages() -> impl Iterator<Item = &'static str> {
+    core::iter::once("en").chain(crate::tr::languages())
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            theme: 0,
+            style: 0,
+            accent: 0,
+            splash: false,
+            remember_last: false,
+            timeout: 10,
+            mode: (0, 0),
+            language: 0,
+            keyboard: 0,
+        }
+    }
+}
+
+/// Settings saved from the Settings screen, with the defaults (built-in,
+/// then slingshot.toml) they were chosen over: `stamp(defaults)`. When the
+/// file's defaults change after that (edited on the desktop), the file
+/// wins: the most recent change counts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Saved {
+    pub settings: Settings,
+    /// `None` when the defaults don't matter (the desktop's, saved in the
+    /// file itself).
+    pub base: Option<u32>,
+}
+
+impl Saved {
+    /// The saved settings if the defaults are still those they were chosen
+    /// over.
+    pub fn over(self, defaults: &Settings) -> Option<Settings> {
+        self.base.is_none_or(|b| b == stamp(defaults)).then_some(self.settings)
+    }
+}
+
+/// A checksum of `defaults` (FNV-1a of their encoding).
+pub fn stamp(defaults: &Settings) -> u32 {
+    // The language and the keyboard aren't defaults from slingshot.toml:
+    // they don't count.
+    defaults.body()[..9]
+        .iter().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193))
+}
+
+impl Settings {
+    fn body(&self) -> [u8; 11] {
+        let t = self.timeout.min(255) as u8;
+        let [w0, w1] = self.mode.0.to_le_bytes();
+        let [h0, h1] = self.mode.1.to_le_bytes();
+        // The splash and "remember the last one" share a byte (bits 0 and 1).
+        let startup = self.splash as u8 | (self.remember_last as u8) << 1;
+        [self.theme, t, startup, w0, w1, h0, h1, self.accent, self.style, self.language, self.keyboard]
+    }
+}
+
+// The encoding is only used by the UEFI build (NVRAM).
+#[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
+impl Saved {
+    pub fn encode(&self) -> [u8; 16] {
+        let mut data = [0; 16];
+        data[0] = VERSION;
+        data[1..12].copy_from_slice(&self.settings.body());
+        data[12..].copy_from_slice(&self.base.unwrap_or(0).to_le_bytes());
+        data
+    }
+
+    /// `None` for anything else than what `encode` writes (another
+    /// version's: the defaults then).
+    pub fn decode(data: &[u8]) -> Option<Self> {
+        if data.len() != 16 || data[0] != VERSION {
+            return None;
+        }
+        let (style, language, keyboard) = (data[9], data[10], data[11]);
+        let settings = Settings {
+            theme: if usize::from(data[1]) < THEMES.len() { data[1] } else { 0 },
+            accent: data[8],
+            style: if (style as usize) < STYLES.len() { style } else { 0 },
+            timeout: data[2] as u16,
+            splash: data[3] & 1 != 0,
+            remember_last: data[3] & 2 != 0,
+            mode: (u16::from_le_bytes([data[4], data[5]]), u16::from_le_bytes([data[6], data[7]])),
+            // Out of range (a language since removed): automatic.
+            language: if usize::from(language) <= languages().count() { language } else { 0 },
+            keyboard: if usize::from(keyboard) <= crate::parse::keymap::LAYOUTS.len() { keyboard } else { 0 },
+        };
+        Some(Saved { settings, base: Some(u32::from_le_bytes([data[12], data[13], data[14], data[15]])) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip() {
+        let s = Saved {
+            settings: Settings {
+                theme: 1,
+                style: 2,
+                accent: 3,
+                splash: true,
+                remember_last: true,
+                timeout: 30,
+                mode: (1920, 1200),
+                language: 2,
+                keyboard: 3,
+            },
+            base: Some(0x0403_0201),
+        };
+        assert_eq!(s.encode(), [6, 1, 30, 3, 0x80, 0x07, 0xb0, 0x04, 3, 2, 2, 3, 1, 2, 3, 4]);
+        assert_eq!(Saved::decode(&s.encode()), Some(s));
+    }
+
+    #[test]
+    fn the_language_and_keyboard_dont_change_the_stamp() {
+        let d = Settings { style: 1, ..Settings::default() };
+        assert_eq!(stamp(&d), stamp(&Settings { language: 2, keyboard: 3, ..d }));
+        let mut data = Saved { settings: Settings { language: 99, keyboard: 99, ..d }, base: None }.encode();
+        let s = Saved::decode(&data).unwrap().settings;
+        assert_eq!((s.language, s.keyboard), (0, 0), "unknown: automatic");
+        data[10] = 1;
+        assert_eq!(Saved::decode(&data).unwrap().settings.language, 1);
+    }
+
+    #[test]
+    fn the_style_changes_the_stamp() {
+        let d = Settings::default();
+        assert_ne!(stamp(&Settings { style: 3, ..d }), stamp(&d));
+    }
+
+    #[test]
+    fn long_timeouts_are_capped() {
+        let s = Saved { settings: Settings { timeout: 1000, ..Settings::default() }, base: None };
+        assert_eq!(Saved::decode(&s.encode()).unwrap().settings.timeout, 255);
+    }
+
+    #[test]
+    fn the_file_wins_when_its_defaults_change() {
+        let defaults = Settings::default();
+        let chosen = Settings { theme: 1, ..defaults };
+        let saved = Saved { settings: chosen, base: Some(stamp(&defaults)) };
+        assert_eq!(saved.over(&defaults), Some(chosen));
+        let edited = Settings { timeout: 3, ..defaults };
+        assert_eq!(saved.over(&edited), None, "slingshot.toml changed since: its defaults count");
+        assert_eq!(Saved { base: None, ..saved }.over(&edited), Some(chosen), "no defaults recorded: the saved settings");
+    }
+
+    #[test]
+    fn rejects_other_data() {
+        assert_eq!(Saved::decode(&[]), None);
+        assert_eq!(Saved::decode(&[6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), None, "too short");
+        assert_eq!(Saved::decode(&[5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), None, "another version");
+    }
+}

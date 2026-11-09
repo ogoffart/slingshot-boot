@@ -1,0 +1,1162 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// The modal dialogs of AppWindow: confirmations, the clock, kernel options,
+// customizing an entry, and the Settings password. AppWindow shows each in a
+// PopupWindow: Tab stays in it, and the focus goes back where it was when it
+// closes. Each takes the keyboard focus when it's made (`init`); ← → and
+// ↑ ↓ move it like Tab where the element doesn't use them.
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import { BootEntry, Button, EntryGlyph, Focus, IconPicker, Panel, PicturePicker, SegmentedControl, Spinner, TextField, Toggle } from "widgets.slint";
+
+// What every dialog is in: the screen dimmed behind it (clicks and the wheel
+// stop there), and a card `card-width` by `card-height` with the dialog's
+// elements. Escape calls `escape`; ← → move the focus like Tab where the
+// element doesn't use them, unless `arrows` is off.
+component DialogFrame inherits Rectangle {
+    in property <length> card-width;
+    in property <length> card-height;
+    in property <bool> arrows: true;
+    // A screen of its own rather than over the screen: the blurred
+    // wallpaper (or the plain background), and a glass card.
+    in property <bool> full;
+    callback escape();
+
+    background: root.full ? Theme.background : #000000a0;
+    if root.full && Theme.frosted: Image {
+        width: 100%;
+        height: 100%;
+        source: Theme.backdrop;
+        image-fit: cover;
+    }
+    TouchArea { scroll-event => { EventResult.accept } }
+
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.escape();
+                return accept;
+            }
+            if root.arrows && (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                Focus.move(event.text == Key.RightArrow);
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            width: root.card-width;
+            height: root.card-height;
+            background: root.full ? transparent : Theme.surface;
+            border-color: root.full ? transparent : Theme.border-strong;
+            border-width: 1px;
+            border-radius: Theme.radius-card;
+            if root.full: Panel {
+                width: 100%;
+                height: 100%;
+                on-backdrop: true;
+                border-radius: 28px;
+            }
+            @children
+        }
+    }
+}
+
+export component Dialog inherits DialogFrame {
+    in property <string> title;
+    in property <string> message;
+    in property <string> cancel-text;
+    in property <string> accept-text;
+    // The button with the focus at first: 0 cancel, 1 accept.
+    in property <int> highlighted: 1;
+    callback cancel();
+    callback accept();
+
+    card-width: 520px;
+    card-height: layout.preferred-height;
+    // Escape cancels, or closes with one button.
+    escape => {
+        if root.cancel-text != "" {
+            root.cancel();
+        } else {
+            root.accept();
+        }
+    }
+
+    init => {
+        if root.highlighted == 0 && root.cancel-text != "" {
+            cancel-button.focus();
+        } else {
+            accept-button.focus();
+        }
+    }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text {
+            text: root.title;
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Text {
+            text: root.message;
+            font-size: 15px;
+            color: Theme.text-soft;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            padding-top: 10px;
+            // No cancel button without its text.
+            cancel-button := Button {
+                visible: root.cancel-text != "";
+                width: root.cancel-text != "" ? self.preferred-width : 0px;
+                text: root.cancel-text;
+                clicked => { root.cancel(); }
+            }
+            accept-button := Button {
+                text: root.accept-text;
+                primary: true;
+                clicked => { root.accept(); }
+            }
+        }
+    }
+}
+
+// Sets the firmware clock: day, month, year, hour, minute. ← → choose a
+// field, ↑ ↓ change it.
+export component TimeDialog inherits DialogFrame {
+    in property <[int]> fields: [1, 1, 2026, 0, 0];
+    in property <int> current;
+    callback select(int);
+    callback step(int, int);
+    // A typed number for a field.
+    callback set(int, int);
+    callback cancel();
+    callback apply();
+
+    // The digits typed in the current field so far: shown instead of its
+    // value, set when the field is full or left.
+    property <string> typed;
+    // The digits a field holds, and its largest value.
+    pure function digits(i: int) -> int { i == 2 ? 4 : 2 }
+    pure function largest(i: int) -> int { [31, 12, 2099, 23, 59][i] }
+    function commit() {
+        if root.typed != "" {
+            root.set(root.current, root.typed.to-float());
+            root.typed = "";
+        }
+    }
+    function go(i: int) {
+        root.commit();
+        root.select(i);
+    }
+    function type-digit(d: string) {
+        root.typed += d;
+        // Full, or no further digit could fit (4 for a day: not 40), or a
+        // year in two digits (26, not 20…): on to the next field.
+        if root.typed.character-count >= root.digits(root.current)
+            || root.typed.to-float() * 10 > root.largest(root.current)
+            || (root.current == 2 && root.typed.character-count == 2 && root.typed != "20") {
+            let field = root.current;
+            root.commit();
+            root.select(min(4, field + 1));
+        }
+    }
+
+    card-width: 560px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    init => { fields-scope.focus(); }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 16px;
+        Text {
+            text: @tr("Date and time");
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        // The fields: ← → choose one, ↑ ↓ change it, Enter sets the clock.
+        fields-scope := FocusScope {
+            key-pressed(event) => {
+                if event.text >= "0" && event.text <= "9" && event.text.character-count == 1 {
+                    root.type-digit(event.text);
+                } else if event.text == Key.Backspace {
+                    // The last digit typed (as a number: no leading zero to keep).
+                    root.typed = root.typed.to-float() < 10 ? "" : "\{floor(root.typed.to-float() / 10)}";
+                } else if event.text == Key.LeftArrow {
+                    root.go(max(0, root.current - 1));
+                } else if event.text == Key.RightArrow {
+                    root.go(min(4, root.current + 1));
+                } else if event.text == Key.UpArrow {
+                    root.typed = "";
+                    root.step(root.current, 1);
+                } else if event.text == Key.DownArrow {
+                    root.typed = "";
+                    root.step(root.current, -1);
+                } else if event.text == Key.Return {
+                    root.commit();
+                    root.apply();
+                } else {
+                    return reject;
+                }
+                accept
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 6px;
+                for field[i] in root.fields: HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        spacing: 2px;
+                        Rectangle {
+                            height: 26px;
+                            Icon { kind: "chevron-up"; size: 16px; color: Theme.text-soft; }
+                            TouchArea { clicked => { root.go(i); root.step(i, 1); } }
+                        }
+                        Rectangle {
+                            width: i == 2 ? 92px : 64px;
+                            height: 52px;
+                            border-radius: Theme.radius;
+                            background: i == root.current ? Theme.focus-fill : Theme.surface-raised;
+                            border-width: i == root.current && fields-scope.has-focus ? 2px : 1px;
+                            border-color: i == root.current && fields-scope.has-focus ? Theme.accent : Theme.border;
+                            Text {
+                                text: i == root.current && root.typed != "" ? root.typed
+                                    : i == 2 ? field : (field < 10 ? "0" : "") + field;
+                                font-size: 26px;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+                            TouchArea {
+                                clicked => {
+                                    root.go(i);
+                                    fields-scope.focus();
+                                }
+                                scroll-event(e) => {
+                                    root.go(i);
+                                    root.step(i, e.delta-y > 0 ? 1 : -1);
+                                    accept
+                                }
+                            }
+                        }
+                        Rectangle {
+                            height: 26px;
+                            Icon { kind: "chevron-down"; size: 16px; color: Theme.text-soft; }
+                            TouchArea { clicked => { root.go(i); root.step(i, -1); } }
+                        }
+                    }
+                    if i < 4: Text {
+                        text: i < 2 ? "/" : i == 2 ? "   " : ":";
+                        font-size: 26px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+        Text {
+            text: @tr("Type the numbers, or use ← → and ↑ ↓. This sets the computer's clock: Windows reads it as local time, Linux usually as UTC.");
+            font-size: 14px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            Button {
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
+            }
+            Button {
+                text: @tr("Set");
+                primary: true;
+                clicked => { root.commit(); root.apply(); }
+            }
+        }
+    }
+}
+
+// Edits the kernel options of an entry, for one start.
+export component OptionsDialog inherits DialogFrame {
+    in property <string> entry-title;
+    // The options, as they are.
+    in property <string> initial-text;
+    callback cancel();
+    callback submit(string);
+
+    card-width: 760px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text {
+            text: @tr("Start {} with", root.entry-title);
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+            overflow: elide;
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: Theme.radius;
+            background: Theme.surface-raised;
+            border-width: 2px;
+            border-color: Theme.accent;
+            input := TextField {
+                x: 14px;
+                width: parent.width - 28px;
+                accepted(text) => { root.submit(text); }
+            }
+        }
+        Text {
+            text: @tr("The kernel options, for this start only. Enter starts, Esc cancels.");
+            font-size: 14px;
+            color: Theme.text-muted;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            padding-top: 6px;
+            Button {
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
+            }
+            Button {
+                text: @tr("Start");
+                primary: true;
+                clicked => { root.submit(input.text); }
+            }
+        }
+    }
+
+    init => {
+        input.text = root.initial-text;
+        input.focus();
+        input.set-selection-offsets(root.initial-text.character-count, root.initial-text.character-count);
+    }
+}
+
+// A field's name, in the Customize dialog.
+component FieldLabel inherits Text {
+    width: 120px;
+    font-size: 14px;
+    color: Theme.text-soft;
+    vertical-alignment: center;
+}
+
+// Customizes an entry of the boot menu; saved in slingshot.toml.
+export component CustomizeDialog inherits DialogFrame {
+    in property <string> entry-title;
+    in property <bool> linux;
+    in property <string> options-placeholder;
+    in-out property <string> title-text;
+    in-out property <string> options-text;
+    in-out property <bool> more;
+    in-out property <bool> default-entry;
+    // 0 = the entry's own, else 1 + an index in `config::ICONS`.
+    in-out property <int> icon;
+    // "None", then the pictures next to Slingshot; `picture` indexes it.
+    in property <[string]> picture-names;
+    in-out property <int> picture;
+    in property <image> picture-preview;
+    in property <bool> has-picture-preview;
+    callback cancel();
+    callback save();
+    callback picture-changed(int);
+    callback add-picture();
+
+    card-width: 720px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    init => {
+        title-input.focus();
+        title-input.set-selection-offsets(root.title-text.character-count, root.title-text.character-count);
+    }
+
+    // ↑ ↓ go from field to field, in the text fields too.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                Focus.move(event.text == Key.DownArrow);
+                return accept;
+            }
+            reject
+        }
+
+        layout := VerticalLayout {
+            padding: 28px;
+            spacing: 14px;
+            title := Text {
+                text: @tr("Customize {}", root.entry-title);
+                font-size: 20px;
+                font-weight: 600;
+                color: Theme.text;
+                overflow: elide;
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                FieldLabel { text: @tr("Title"); }
+                Rectangle {
+                    height: 42px;
+                    border-radius: Theme.radius;
+                    background: Theme.surface-raised;
+                    border-width: title-input.has-focus ? 2px : 1px;
+                    border-color: title-input.has-focus ? Theme.accent : Theme.border;
+                    // Under the field: a click on the text places the cursor.
+                    TouchArea { clicked => { title-input.focus(); } }
+                    title-input := TextField {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text <=> root.title-text;
+                        placeholder: root.entry-title;
+                        accepted => { root.save(); }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                FieldLabel { text: @tr("Shown"); }
+                SegmentedControl {
+                    options: [@tr("On the main row"), @tr("Under More…")];
+                    current: root.more ? 1 : 0;
+                    activated(i) => { root.more = i == 1; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                padding-left: 132px;
+                Toggle {
+                    text: @tr("The default entry");
+                    checked: root.default-entry;
+                    clicked => { root.default-entry = !root.default-entry; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                FieldLabel { text: @tr("Icon"); }
+                icons := IconPicker {
+                    current: root.icon;
+                    // A picture shows instead of the icon.
+                    opacity: root.picture > 0 ? 0.5 : 1;
+                    activated(i) => { root.icon = i; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                FieldLabel { text: @tr("Picture"); }
+                PicturePicker {
+                    names: root.picture-names;
+                    current <=> root.picture;
+                    preview: root.picture-preview;
+                    has-preview: root.has-picture-preview;
+                    add => { root.add-picture(); }
+                    activated(i) => { root.picture-changed(i); }
+                }
+            }
+            // Not an `if`: the tests find options-input (it's invisible,
+            // so Tab skips it).
+            HorizontalLayout {
+                visible: root.linux;
+                height: root.linux ? 42px : 0px;
+                spacing: 12px;
+                FieldLabel { text: @tr("Kernel options"); }
+                Rectangle {
+                    height: 42px;
+                    border-radius: Theme.radius;
+                    background: Theme.surface-raised;
+                    border-width: options-input.has-focus ? 2px : 1px;
+                    border-color: options-input.has-focus ? Theme.accent : Theme.border;
+                    TouchArea { clicked => { options-input.focus(); } }
+                    options-input := TextField {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        text <=> root.options-text;
+                        placeholder: root.options-placeholder;
+                        font-size: 14px;
+                        accepted => { root.save(); }
+                    }
+                }
+            }
+            Text {
+                text: @tr("Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder.");
+                font-size: 13px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 12px;
+                Button {
+                    text: @tr("Cancel");
+                    clicked => { root.cancel(); }
+                }
+                Button {
+                    text: @tr("Save");
+                    primary: true;
+                    clicked => { root.save(); }
+                }
+            }
+        }
+    }
+}
+
+// Asks for the Settings password (`settings.password` in slingshot.toml).
+export component PasswordDialog inherits DialogFrame {
+    in property <bool> wrong;
+    callback cancel();
+    callback submit(string);
+    callback typing();
+
+    card-width: 440px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text {
+            text: @tr("Settings are locked");
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: Theme.radius;
+            background: Theme.surface-raised;
+            border-width: 2px;
+            border-color: root.wrong ? Theme.danger : Theme.accent;
+            input := TextField {
+                x: 14px;
+                width: parent.width - 28px;
+                input-type: password;
+                placeholder: @tr("Password");
+                font-size: 16px;
+                accepted(text) => { root.submit(text); }
+                edited => { root.typing(); }
+            }
+        }
+        Text {
+            text: root.wrong ? @tr("Wrong password.") : @tr("Enter the password to change the settings.");
+            font-size: 14px;
+            color: root.wrong ? Theme.danger : Theme.text-muted;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            padding-top: 6px;
+            Button {
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
+            }
+            Button {
+                text: @tr("Unlock");
+                primary: true;
+                clicked => { root.submit(input.text); }
+            }
+        }
+    }
+
+    // Again after a wrong password.
+    public function open() {
+        input.text = "";
+        input.focus();
+    }
+    init => { root.open(); }
+}
+
+
+// An icon button inside a text field (show the passphrase, the layout).
+component FieldButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    callback clicked();
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    border-width: 2px;
+    border-color: fs.has-focus ? Theme.accent : transparent;
+    background: touch.has-hover ? Theme.surface-strong : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    Icon {
+        kind: root.icon;
+        size: 20px;
+        color: Theme.text-muted;
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    fs := FocusScope {
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == " " {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
+// Asks for the passphrase of an encrypted disk the entry being started
+// needs. Slingshot checks it (`checking`: a second or two, with a spinner),
+// then Linux starts with the disk open. "Skip" starts it without: the
+// initrd asks then.
+export component UnlockDialog inherits DialogFrame {
+    // Which disk it is (and its name, when it has a real one).
+    in property <string> detail;
+    // "Disk 1 of 2", when the entry needs several.
+    in property <string> counter;
+    in property <bool> checking;
+    in property <bool> wrong;
+    // Why it couldn't be checked ("" when it could).
+    in property <string> error;
+    // Unlocking it to see its files (the file browser), not to start Linux.
+    in property <bool> browsing;
+    // The entry being started (not `browsing`): a screen of its own, with
+    // its logo and name.
+    in property <BootEntry> entry;
+    in property <string> entry-title;
+    callback boot-menu();
+    callback submit(string);
+    callback skip();
+    callback cancel();
+    callback typing();
+
+    // After a wrong passphrase (`clear-request` changes): empty, ready for
+    // another try.
+    in property <int> clear-request;
+    property <bool> show;
+
+    // Over the file browser (`browsing`), which already dims the screen:
+    // lighter. Starting an entry: a screen of its own.
+    full: !root.browsing;
+    background: root.full ? Theme.background : root.browsing ? #00000050 : #000000a0;
+    card-width: root.full ? 500px : 440px;
+    card-height: layout.preferred-height;
+    escape => { root.cancel(); }
+
+    init => {
+        input.text = "";
+        root.show = false;
+        input.focus();
+    }
+    changed clear-request => {
+        input.text = "";
+        input.focus();
+    }
+
+    // While the passphrase is checked: Tab, and Escape to cancel.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        capture-key-pressed(event) => {
+            if root.checking && event.text == Key.Escape {
+                root.cancel();
+                return accept;
+            }
+            if root.checking && event.text != Key.Tab && event.text != Key.Backtab {
+                return accept;
+            }
+            reject
+        }
+        layout := VerticalLayout {
+            padding: 32px;
+            padding-top: 28px;
+            spacing: 0px;
+            // Starting an entry: its logo and name, then what to unlock.
+            if root.full: HorizontalLayout {
+                alignment: center;
+                padding-top: 8px;
+                Rectangle {
+                    width: 120px;
+                    height: 120px;
+                    border-radius: self.width / 2;
+                    background: Theme.icon-well;
+                    EntryGlyph {
+                        entry: root.entry;
+                        icon-size: 56px;
+                        image-size: 78px;
+                        icon-color: Theme.text-strong;
+                    }
+                    // A lock on the logo.
+                    Rectangle {
+                        x: parent.width - self.width + 4px;
+                        y: parent.height - self.height + 4px;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: self.width / 2;
+                        background: Theme.focus-well;
+                        border-width: 3px;
+                        border-color: Theme.surface;
+                        Icon {
+                            kind: "lock";
+                            size: 18px;
+                            color: Theme.accent;
+                        }
+                    }
+                }
+            }
+            if root.full: Rectangle { height: 18px; }
+            if root.full: Text {
+                text: root.entry-title;
+                font-size: 26px;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+            // The lock, what to unlock and which disk it is.
+            if !root.full: HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 52px;
+                    height: 52px;
+                    border-radius: self.width / 2;
+                    background: Theme.focus-well;
+                    Icon {
+                        kind: "lock";
+                        size: 24px;
+                        color: Theme.accent;
+                    }
+                }
+            }
+            if !root.full: Rectangle { height: 14px; }
+            Text {
+                text: @tr("Unlock the encrypted disk");
+                font-size: root.full ? 15px : 20px;
+                font-weight: root.full ? 400 : 600;
+                color: root.full ? Theme.text-soft : Theme.text;
+                horizontal-alignment: center;
+                overflow: elide;
+            }
+            Rectangle { height: root.full ? 2px : 4px; }
+            Text {
+                text: root.counter == "" ? root.detail : root.counter + " · " + root.detail;
+                font-size: 13px;
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Rectangle { height: 22px; }
+            // The passphrase, with show/hide.
+            Rectangle {
+                height: 48px;
+                border-radius: Theme.radius;
+                background: Theme.surface-raised;
+                border-width: 2px;
+                border-color: root.wrong || root.error != "" ? Theme.danger
+                    : input.has-focus ? Theme.accent : Theme.border-strong;
+                animate border-color { duration: Theme.restyling ? 0ms : 120ms; }
+                input := TextField {
+                    x: 14px;
+                    width: parent.width - 14px - buttons.width - 8px;
+                    input-type: root.show ? text : password;
+                    placeholder: @tr("Passphrase");
+                    font-size: 16px;
+                    enabled: !root.checking;
+                    accepted(text) => {
+                        if !root.checking {
+                            root.submit(text);
+                        }
+                    }
+                    edited => { root.typing(); }
+                }
+                buttons := HorizontalLayout {
+                    x: parent.width - self.width - 6px;
+                    width: self.preferred-width;
+                    height: 36px;
+                    y: (parent.height - self.height) / 2;
+                    spacing: 2px;
+                    FieldButton {
+                        icon: root.show ? "eye-off" : "eye";
+                        label: root.show ? @tr("Hide the passphrase") : @tr("Show the passphrase");
+                        clicked => {
+                            root.show = !root.show;
+                            input.focus();
+                        }
+                    }
+                }
+            }
+            // One quiet line: the check, or what went wrong.
+            HorizontalLayout {
+                padding-top: 10px;
+                spacing: 8px;
+                height: 32px;
+                alignment: start;
+                if root.checking: Spinner {
+                    size: 16px;
+                    y: (parent.height - self.height) / 2 + 5px;
+                }
+                Text {
+                    text: root.checking ? @tr("Checking the passphrase…")
+                        : root.error != "" ? root.error
+                        : root.wrong ? @tr("Incorrect passphrase. Try again.")
+                        : "";
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    color: root.checking ? Theme.text-soft
+                        : root.wrong || root.error != "" ? Theme.danger : Theme.text-muted;
+                }
+            }
+            Rectangle { height: 14px; }
+            HorizontalLayout {
+                spacing: 12px;
+                // Starting an entry: the boot menu apart, on the left.
+                alignment: root.full ? LayoutAlignment.stretch : LayoutAlignment.end;
+                // Starting an entry: back to the boot menu, as Escape does
+                // (Skip starts it anyway: Linux asks).
+                if root.full: Button {
+                    text: @tr("Cancel");
+                    enabled: !root.checking;
+                    clicked => { root.cancel(); }
+                }
+                if root.full: Rectangle { horizontal-stretch: 1; }
+                // While checking: Cancel, which stops the check.
+                Button {
+                    text: root.browsing || root.checking ? @tr("Cancel") : @tr("Skip");
+                    clicked => {
+                        if root.browsing || root.checking {
+                            root.cancel();
+                        } else {
+                            root.skip();
+                        }
+                    }
+                }
+                Button {
+                    text: @tr("Unlock");
+                    primary: true;
+                    enabled: !root.checking;
+                    clicked => { root.submit(input.text); }
+                }
+            }
+        }
+    }
+}
+
+// A row of the file browser: a disk, "..", a folder or an EFI program.
+export struct FileRow {
+    name: string,
+    detail: string,
+    // The icon.
+    kind: string,
+    // An EFI program: it can be started, or added to the boot menu.
+    file: bool,
+    // A partition the firmware can't read: shown, but can't be opened.
+    dim: bool,
+}
+
+// "Start a file…": the disks, then their folders and EFI programs.
+export component FileDialog inherits DialogFrame {
+    in property <string> location;
+    // The folder shown, as typed in the location field (empty: all disks).
+    in property <string> path;
+    in property <[FileRow]> rows;
+    in-out property <int> current;
+    // Shown under the rows: an empty folder, an error.
+    in property <string> message;
+    // Choosing a picture rather than starting a program.
+    in property <bool> picking;
+    callback open(int);
+    callback up();
+    callback add(int);
+    callback close();
+    // The first row whose name starts with the text: -1 none, -2 for keys
+    // that aren't text.
+    pure callback find(string) -> int;
+    // A path typed in the location field: false when it isn't there.
+    callback go(string) -> bool;
+
+    property <length> row-height: 54px;
+    property <bool> on-file: root.current >= 0 && root.current < root.rows.length && root.rows[root.current].file;
+    // What was typed to find a row, forgotten after a second.
+    property <string> typed;
+
+    card-width: min(root.width - 80px, 820px);
+    card-height: min(root.height - 80px, 620px);
+    // Escape closes, from anywhere in the dialog. The arrows are the list's.
+    escape => { root.close(); }
+    arrows: false;
+
+    function select(i: int) {
+        root.current = clamp(i, 0, root.rows.length - 1);
+        // Keeps the current row in view.
+        let top = root.current * root.row-height;
+        if top < -list.content-y {
+            list.content-y = -top;
+        } else if top + root.row-height > -list.content-y + list.height {
+            list.content-y = list.height - top - root.row-height;
+        }
+    }
+
+    init => {
+        root.typed = "";
+        path-input.text = root.path;
+        scope.focus();
+    }
+
+    function edit-path(start: string) {
+        path-input.text = start;
+        path-input.focus();
+        path-input.set-selection-offsets(start.character-count, start.character-count);
+    }
+
+    changed rows => {
+        list.content-y = 0;
+        root.typed = "";
+        path-input.text = root.path;
+        root.select(root.current);
+    }
+
+    typed-timer := Timer {
+        interval: 1s;
+        running: root.typed != "";
+        triggered => { root.typed = ""; }
+    }
+
+    // The list's keys.
+    function list-key(event: KeyEvent) -> EventResult {
+        if event.text == Key.Escape {
+            root.close();
+        } else if event.text == Key.UpArrow {
+            root.select(root.current - 1);
+        } else if event.text == Key.DownArrow {
+            root.select(root.current + 1);
+        } else if event.text == Key.PageUp {
+            root.select(root.current - 6);
+        } else if event.text == Key.PageDown {
+            root.select(root.current + 6);
+        } else if event.text == Key.Home {
+            root.select(0);
+        } else if event.text == Key.End {
+            root.select(root.rows.length - 1);
+        } else if event.text == Key.Return || event.text == Key.RightArrow {
+            root.open(root.current);
+        } else if event.text == Key.Backspace && root.typed != "" {
+            root.typed = "";
+        } else if event.text == Key.LeftArrow || event.text == Key.Backspace {
+            root.up();
+        } else if event.text == "+" && root.on-file && !root.picking {
+            root.add(root.current);
+        } else if event.text == "/" || event.text == "\\" {
+            root.edit-path(event.text);
+        } else if event.modifiers.control || event.modifiers.alt || event.modifiers.meta {
+            return reject;
+        } else {
+            // Type-ahead: jumps to the first row named so.
+            let found = root.find(root.typed + event.text);
+            if found == -2 {
+                return reject;
+            }
+            // A first letter again goes on to the next row with it.
+            if found >= 0 {
+                root.typed += event.text;
+                root.select(found);
+            } else if root.typed == "" {
+                return accept;
+            } else {
+                root.typed = "";
+                let again = root.find(event.text);
+                if again >= 0 {
+                    root.typed = event.text;
+                    root.select(again);
+                }
+            }
+            typed-timer.restart();
+        }
+        accept
+    }
+
+    VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: root.picking ? @tr("Choose a picture") : @tr("Start a file");
+                font-size: 20px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.location;
+                font-size: 14px;
+                color: Theme.text-muted;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+        // The location field: shows the folder, takes a path.
+        Rectangle {
+            height: 42px;
+            border-radius: Theme.radius;
+            background: Theme.surface-raised;
+            border-width: path-input.has-focus ? 2px : 1px;
+            border-color: path-input.has-focus ? Theme.accent : Theme.border;
+            path-scope := FocusScope {
+                focus-on-click: false;
+                focus-on-tab-navigation: false;
+                key-pressed(event) => {
+                    if event.text == Key.Escape || event.text == Key.DownArrow {
+                        path-input.text = root.path;
+                        scope.focus();
+                        return accept;
+                    }
+                    reject
+                }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 10px;
+                    Rectangle {
+                        width: 20px;
+                        Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            kind: "folder";
+                            size: 18px;
+                            color: Theme.text-soft;
+                        }
+                    }
+                    path-input := TextField {
+                        font-size: 14px;
+                        placeholder: @tr("Type a path, like \\EFI\\BOOT");
+                        accepted(text) => {
+                            if root.go(text) {
+                                scope.focus();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The list: a stop for Tab, with its keys.
+        scope := FocusScope {
+            vertical-stretch: 1;
+            key-pressed(event) => { return root.list-key(event); }
+            Rectangle {
+                border-radius: Theme.radius;
+                background: Theme.surface-raised;
+                border-width: scope.has-focus ? 2px : 0px;
+                border-color: Theme.accent;
+                clip: true;
+                // The mouse wheel (the Flickable isn't interactive: it
+                // only follows the keyboard). Around the rows: they get
+                // the clicks, the wheel comes up to here.
+                TouchArea {
+                    scroll-event(e) => {
+                        list.content-y = clamp(list.content-y + e.delta-y, min(0px, list.height - list.content-height), 0px);
+                        accept
+                    }
+                    list := Flickable {
+                        interactive: false;
+                        content-height: root.rows.length * root.row-height;
+                        for row[i] in root.rows: file-row := Rectangle {
+                            y: i * root.row-height;
+                            accessible-role: list-item;
+                            accessible-label: row.name;
+                            accessible-item-selectable: true;
+                            accessible-item-selected: i == root.current;
+                            height: root.row-height;
+                            background: i == root.current ? Theme.surface-strong : touch.has-hover ? Theme.surface : transparent;
+                            border-width: i == root.current ? 2px : 0px;
+                            border-color: Theme.accent;
+                            border-radius: Theme.radius;
+                            touch := TouchArea {
+                                clicked => {
+                                    root.current = i;
+                                    scope.focus();
+                                }
+                                double-clicked => { root.open(i); }
+                            }
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 16px;
+                                spacing: 14px;
+                                Rectangle {
+                                    width: 34px;
+                                    Icon {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        kind: row.kind;
+                                        size: 22px;
+                                        color: row.file ? Theme.accent : row.dim ? Theme.text-muted : Theme.text-soft;
+                                    }
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: row.name;
+                                    font-size: 15px;
+                                    font-weight: i == root.current ? 600 : 400;
+                                    color: row.dim ? Theme.text-muted : Theme.text;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: row.detail;
+                                    font-size: 13px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if root.message != "": Text {
+            text: root.message;
+            font-size: 14px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                horizontal-stretch: 1;
+                text: root.picking ? @tr("Type a name to find it · / types a path · Enter chooses") : @tr("Type a name to find it · / types a path · + adds to the menu");
+                font-size: 13px;
+                color: Theme.text-muted;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+            Button {
+                text: @tr("Close");
+                clicked => { root.close(); }
+            }
+            if !root.picking: Button {
+                text: @tr("Add to boot menu");
+                enabled: root.on-file;
+                clicked => { root.add(root.current); }
+            }
+            Button {
+                text: !root.on-file ? @tr("Open") : root.picking ? @tr("Choose") : @tr("Start");
+                primary: true;
+                clicked => { root.open(root.current); }
+            }
+        }
+    }
+}

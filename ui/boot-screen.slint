@@ -1,0 +1,615 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { BootEntry, CountdownRing, EntryGlyph, Frost, Button, Focus, Panel } from "widgets.slint";
+
+// An entry of the boot screen, card or row: the keyboard focus, the
+// pointer, and what screen readers (and the tests) see. Entry `index` takes
+// the focus when the screen asks (`focus-request`) and it's
+// `focused-entry`, or when it's made on the active screen.
+component BootItem inherits Rectangle {
+    in property <BootEntry> entry;
+    in property <bool> is-default;
+    in property <int> index;
+    in-out property <int> focused-entry;
+    in property <int> focus-request;
+    in property <bool> active;
+    // The keyboard focus: this is the entry Enter starts.
+    out property <bool> focused: fs.has-focus;
+    // Keys the entry doesn't handle itself (the boot screen's).
+    callback key(KeyEvent) -> EventResult;
+    callback hovered;
+    // The pointer is at (x, y) in the window: whether it moved (see BootScreen).
+    callback pointer-at(length, length) -> bool;
+    callback clicked;
+    callback right-clicked;
+
+    forward-focus: fs;
+    accessible-role: list-item;
+    accessible-label: root.entry.title;
+    accessible-description: root.entry.subtitle;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.focused;
+
+    // An entry that just appeared fades in (see BootEntry.arrived).
+    out property <bool> shown: !root.entry.arrived || !Theme.motion;
+    opacity: root.shown ? 1 : 0;
+    animate opacity { duration: 320ms; easing: ease-out; }
+    // Started once the first frame has it transparent.
+    Timer {
+        interval: 16ms;
+        running: !root.shown;
+        triggered => { root.shown = true; }
+    }
+
+    init => {
+        if root.active && root.index == root.focused-entry {
+            fs.focus();
+        }
+    }
+    changed focus-request => {
+        if root.index == root.focused-entry {
+            fs.focus();
+        }
+    }
+    changed focused => {
+        if root.focused {
+            root.focused-entry = root.index;
+        }
+    }
+
+    @children
+
+    TouchArea {
+        clicked => { root.clicked(); }
+        pointer-event(event) => {
+            // The pointer moving over it, not an entry made under a pointer
+            // standing still: after "More…" is clicked, Slint sends a move
+            // at the same place, and the focus is the Rust side's.
+            if event.kind == PointerEventKind.move
+                && root.pointer-at(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y)
+                && !fs.has-focus {
+                fs.focus();
+                root.hovered();
+            }
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.right-clicked();
+            }
+        }
+    }
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        width: 100%;
+        height: 100%;
+        focus-on-click: false;
+        key-pressed(event) => { return root.key(event); }
+    }
+}
+
+// The pill on the default entry; `on-accent`: over the focused row.
+component DefaultBadge inherits Rectangle {
+    in property <bool> on-accent;
+    // Room around the word.
+    in property <length> pad: 20px;
+    height: 22px;
+    width: label.preferred-width + root.pad;
+    border-radius: 11px;
+    background: root.on-accent ? #ffffff40 : Theme.badge-fill;
+    label := Text {
+        text: @tr("DEFAULT");
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+        color: root.on-accent ? Theme.on-accent : Theme.badge-text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component BootCard inherits BootItem {
+    in property <bool> counting;
+    in property <float> progress;
+
+    // Flat: no card, a soft glow behind the focused entry. Colorful: icons
+    // on colored tiles.
+    property <bool> flat: Theme.style == 2;
+    property <bool> colorful: Theme.style == 1;
+    // Raised when focused; an entry that just appeared rises into place.
+    property <length> focus-lift: root.focused ? -6px : 0px;
+    animate focus-lift { duration: 160ms; easing: ease-out; }
+    property <length> rise: root.shown ? 0px : 24px;
+    animate rise { duration: 320ms; easing: ease-out; }
+    property <length> lift: root.focus-lift + root.rise;
+
+    height: 288px;
+
+    Rectangle {
+        y: root.lift - 6px;
+        x: -6px;
+        width: parent.width + 12px;
+        height: parent.height + 12px;
+        border-radius: Theme.radius-card + 6px;
+        border-width: 6px;
+        border-color: root.focused && !root.flat ? Theme.accent.with-alpha(0.18) : transparent;
+        animate border-color { duration: Theme.restyling ? 0ms : 160ms; }
+    }
+
+    Rectangle {
+        y: root.lift;
+
+        if !root.flat: Frost {
+            border-radius: Theme.radius-card;
+            tint: root.focused ? Theme.focus-fill : Theme.surface;
+        }
+        if root.flat: Rectangle {
+            border-radius: Theme.radius-card;
+            background: root.focused ? Theme.accent.with-alpha(0.16) : transparent;
+            animate background { duration: Theme.restyling ? 0ms : 160ms; }
+        }
+
+        if root.is-default: DefaultBadge {
+            y: 16px;
+            x: (parent.width - self.width) / 2;
+        }
+
+        VerticalLayout {
+            alignment: start;
+            spacing: 18px;
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 48px;
+            padding-bottom: 20px;
+
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 112px;
+                    height: 112px;
+                    Rectangle {
+                        x: 5px;
+                        y: 5px;
+                        width: 102px;
+                        height: 102px;
+                        border-radius: self.width / 2;
+                        border-width: root.is-default && root.counting ? 5px : 0px;
+                        border-color: Theme.focus-track;
+                    }
+                    if root.is-default && root.counting: CountdownRing {
+                        width: 112px;
+                        height: 112px;
+                        progress: root.progress;
+                        ring-color: Theme.accent;
+                    }
+                    if !root.colorful: Rectangle {
+                        x: 14px;
+                        y: 14px;
+                        width: 84px;
+                        height: 84px;
+                        border-radius: 42px;
+                        background: root.focused ? Theme.focus-well : root.flat ? Theme.icon-well.with-alpha(0.7) : Theme.icon-well;
+                        animate background { duration: Theme.restyling ? 0ms : 160ms; }
+                        EntryGlyph {
+                            entry: root.entry;
+                            icon-size: 40px;
+                            image-size: 56px;
+                            icon-color: root.focused ? Theme.text-strong : Theme.icon;
+                        }
+                    }
+                    // Colorful: a tile in the kind's colors, like an app icon.
+                    if root.colorful: Rectangle {
+                        x: 17px;
+                        y: 17px;
+                        width: 78px;
+                        height: 78px;
+                        border-radius: 22px;
+                        background: root.entry.has-image ? Theme.icon-well
+                            : @linear-gradient(160deg, Theme.kind-light(root.entry.kind) 0%, Theme.kind-deep(root.entry.kind) 100%);
+                        EntryGlyph {
+                            entry: root.entry;
+                            icon-size: 40px;
+                            image-size: 56px;
+                            icon-color: #ffffff;
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.entry.title;
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    // At most two lines.
+                    height: 46px;
+                }
+                Text {
+                    text: root.entry.subtitle;
+                    font-size: 13px;
+                    color: root.focused ? Theme.badge-text : Theme.text-muted;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+        // Over the content (a parent's border is under its children).
+        if !root.flat: Rectangle {
+            border-radius: Theme.radius-card;
+            border-width: root.focused ? 2px : 1px;
+            border-color: root.focused ? Theme.accent : Theme.border;
+            animate border-color { duration: Theme.restyling ? 0ms : 160ms; }
+        }
+    }
+}
+
+// Classic: one row per entry in a list, the focused one highlighted.
+component BootRow inherits BootItem {
+    height: 56px;
+    border-radius: Theme.radius;
+    background: root.focused ? Theme.accent : transparent;
+    animate background { duration: Theme.restyling ? 0ms : 120ms; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 18px;
+        spacing: 14px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: root.focused ? #ffffff30 : Theme.icon-well;
+            EntryGlyph {
+                entry: root.entry;
+                icon-size: 20px;
+                image-size: 26px;
+                icon-color: root.focused ? Theme.on-accent : Theme.icon;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.title;
+            font-size: 17px;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+            color: root.focused ? Theme.on-accent : Theme.text;
+        }
+        if root.is-default: DefaultBadge {
+            y: (parent.height - self.height) / 2;
+            pad: 18px;
+            on-accent: root.focused;
+        }
+        Text {
+            width: min(self.preferred-width, 220px);
+            text: root.entry.subtitle;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            overflow: elide;
+            color: root.focused ? Theme.on-accent.with-alpha(0.75) : Theme.text-muted;
+        }
+    }
+}
+
+export component BootScreen inherits Rectangle {
+    in property <[BootEntry]> entries;
+    in property <int> default-entry;
+    in-out property <int> focused-entry;
+    // Remaining seconds of the auto-boot countdown, or -1 when stopped.
+    in property <int> countdown;
+    // A system hibernated: it must be started again (the default entry
+    // when `resume-known`, else Slingshot can't tell which one).
+    in property <bool> hibernated;
+    in property <bool> resume-known;
+    // The screen is shown, with nothing over it: the entry chosen takes the
+    // keyboard focus.
+    in property <bool> active;
+    callback boot(int);
+    // E: the kernel options of the entry, for this start.
+    callback edit-options(int);
+    // ↑ from the entries: the tab bar.
+    callback leave-up();
+    // Right click: customize the entry.
+    callback customize(int);
+    // The pointer moved over a card: the user is here, stop the countdown.
+    callback pointer-activity();
+
+    // The Restart and Shut down buttons under the cards.
+    in property <bool> power-buttons;
+    // Which of them has the keyboard focus: 0 Restart, 1 Shut down, -1 none
+    // (an entry has it).
+    out property <int> power-focus: restart.has-focus ? 0 : shut-down.has-focus ? 1 : -1;
+    callback power(/* shut down */ bool);
+
+    // From 1 to 0 over the countdown (computed by AppWindow).
+    in property <float> progress: 1;
+
+    // Where the pointer was last over an entry: a move to the same place
+    // doesn't take the focus.
+    property <length> pointer-x: -1px;
+    property <length> pointer-y: -1px;
+    function pointer-moved(x: length, y: length) -> bool {
+        if x == root.pointer-x && y == root.pointer-y {
+            return false;
+        }
+        root.pointer-x = x;
+        root.pointer-y = y;
+        true
+    }
+
+    // Gives the keyboard focus to entry `i` (it's made later when the
+    // entries just changed: it takes the focus then).
+    property <int> focus-request;
+    public function focus-entry(i: int) {
+        root.focused-entry = clamp(i, 0, max(0, root.entries.length - 1));
+        root.focus-request += 1;
+    }
+    public function focus-power() {
+        if root.power-buttons {
+            restart.focus();
+        }
+    }
+
+    // The keys of entry `i`: Enter starts it, C customizes it, E edits its
+    // options, the arrows go to the next one, Home and End to the ends.
+    function entry-key(i: int, event: KeyEvent) -> EventResult {
+        let classic = Theme.style == 3;
+        if event.text == Key.Return || event.text == " " {
+            root.boot(i);
+            return accept;
+        }
+        if event.text == "c" || event.text == "C" {
+            root.customize(i);
+            return accept;
+        }
+        if (event.text == "e" || event.text == "E") && root.entries[i].editable {
+            root.edit-options(i);
+            return accept;
+        }
+        if event.text == Key.Home {
+            root.focus-entry(0);
+            return accept;
+        }
+        if event.text == Key.End {
+            root.focus-entry(root.entries.length - 1);
+            return accept;
+        }
+        let back = classic ? event.text == Key.UpArrow : event.text == Key.LeftArrow;
+        let forward = classic ? event.text == Key.DownArrow : event.text == Key.RightArrow;
+        if back {
+            if i > 0 {
+                Focus.move(false);
+            } else if classic {
+                // Up from the first row: the tab bar.
+                root.leave-up();
+            }
+            return accept;
+        }
+        if forward {
+            if i < root.entries.length - 1 {
+                Focus.move(true);
+            } else if classic {
+                root.focus-power();
+            }
+            return accept;
+        }
+        if !classic && event.text == Key.DownArrow {
+            root.focus-power();
+            return accept;
+        }
+        if !classic && event.text == Key.UpArrow {
+            root.leave-up();
+            return accept;
+        }
+        reject
+    }
+
+    property <length> row-step: 56px + 4px;
+    property <length> list-height: max(0, root.entries.length * root.row-step - 4px);
+    property <length> card-gap: 20px;
+    property <length> available-width: self.width - 128px;
+    property <length> card-width: clamp((available-width - (entries.length - 1) * card-gap) / max(1, entries.length), 168px, 216px);
+    property <length> row-width: entries.length * card-width + max(0, entries.length - 1) * card-gap;
+    // When the cards don't fit, the row scrolls just enough to keep the
+    // focused card in view (so hovering a visible card never scrolls).
+    property <length> scroll: 0;
+    property <length> max-scroll: max(0, row-width + 24px - available-width);
+    function keep-focus-visible() {
+        if root.row-width <= root.available-width {
+            root.scroll = 0;
+            return;
+        }
+        let left = root.focused-entry * (root.card-width + root.card-gap);
+        let right = left + root.card-width + 24px;
+        if left < root.scroll {
+            root.scroll = max(0, left);
+        } else if right > root.scroll + root.available-width {
+            root.scroll = min(root.max-scroll, right - root.available-width);
+        }
+    }
+    changed focused-entry => {
+        root.keep-focus-visible();
+        // Chosen by the Rust side (the "More…" level, a USB stick): the
+        // keyboard focus goes there.
+        if root.active {
+            root.focus-request += 1;
+        }
+    }
+    changed available-width => { root.keep-focus-visible(); }
+    changed row-width => { root.keep-focus-visible(); }
+    init => { root.keep-focus-visible(); }
+
+    VerticalLayout {
+        // Positioned explicitly so the card width can depend on our width.
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        padding-left: 64px;
+        padding-right: 64px;
+        // No heading: the entries are the screen, centered (the keys are
+        // in the footer).
+        alignment: center;
+
+        // Only when there's something to say; the line keeps its place so
+        // that the entries don't move when the countdown stops.
+        // On a frosted pill: readable over any wallpaper.
+        Rectangle {
+            height: 34px;
+            if status.text != "": Panel {
+                x: (parent.width - self.width) / 2;
+                width: status.preferred-width + 32px;
+                height: 34px;
+                border-radius: 17px;
+                stroke: transparent;
+            }
+        status := Text {
+            text: root.entries.length == 0 ? @tr("No boot entries found in the firmware.")
+                : root.hibernated && root.resume-known && root.countdown >= 0
+                    ? @tr("Resuming {} in {} s. Press any key to stay here.", root.entries[root.default-entry].title, root.countdown)
+                : root.hibernated && root.resume-known
+                    ? @tr("{} is hibernated: start it to resume where you left off.", root.entries[root.default-entry].title)
+                : root.hibernated ? @tr("A system is hibernated: start it to resume where you left off.")
+                : root.countdown >= 0 ? @tr("{} starts in {} s. Press any key to stay here.", root.entries[root.default-entry].title, root.countdown)
+                : "";
+            font-size: 15px;
+            color: Theme.text-soft;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        }
+        Rectangle { height: 20px; }
+
+        // Classic: the entries in a frosted panel, scrolled to keep the
+        // focused one in view.
+        if Theme.style == 3: HorizontalLayout {
+            alignment: center;
+            Panel {
+                width: min(680px, root.width - 128px);
+                height: min(root.list-height + 16px, root.height - 260px);
+                border-radius: Theme.radius-card;
+                Flickable {
+                    x: 8px;
+                    y: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height - 16px;
+                    content-height: root.list-height;
+                    content-y: -clamp(root.focused-entry * root.row-step - (self.height - 56px) / 2, 0, max(0, root.list-height - self.height));
+                    animate content-y { duration: 160ms; easing: ease-out; }
+                    VerticalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        for entry[i] in root.entries: BootRow {
+                            entry: entry;
+                            index: i;
+                            is-default: i == root.default-entry;
+                            focused-entry <=> root.focused-entry;
+                            focus-request: root.focus-request;
+                            active: root.active;
+                            key(event) => { return root.entry-key(i, event); }
+                            hovered => { root.pointer-activity(); }
+                            pointer-at(x, y) => { return root.pointer-moved(x, y); }
+                            clicked => { root.boot(i); }
+                            right-clicked => { root.customize(i); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Room around the cards for the focus halo and the lift.
+        if Theme.style != 3: Flickable {
+            // The whole width (not the cards' preferred one): they're
+            // centered in it.
+            width: root.available-width;
+            height: 288px + 24px;
+            interactive: root.row-width > root.available-width;
+            content-width: max(root.row-width + 24px, self.width);
+            content-height: self.height;
+            content-x: -root.scroll;
+            animate content-x { duration: 220ms; easing: ease-out; }
+
+            HorizontalLayout {
+                x: root.row-width <= root.available-width ? (root.available-width - root.row-width) / 2 : 12px;
+                // Slides when a card comes or goes (not at startup).
+                animate x { duration: Theme.motion && Theme.cards-sliding ? 220ms : 0ms; easing: ease-out; }
+                y: 12px;
+                width: root.row-width;
+                height: 288px;
+                spacing: root.card-gap;
+                for entry[i] in root.entries: card := BootCard {
+                    width: root.card-width;
+                    entry: entry;
+                    index: i;
+                    is-default: i == root.default-entry;
+                    focused-entry <=> root.focused-entry;
+                    focus-request: root.focus-request;
+                    active: root.active;
+                    counting: root.countdown >= 0;
+                    progress: root.progress;
+                    key(event) => { return root.entry-key(i, event); }
+                    hovered => { root.pointer-activity(); }
+                    pointer-at(x, y) => { return root.pointer-moved(x, y); }
+                    clicked => { root.boot(i); }
+                    right-clicked => { root.customize(i); }
+                }
+            }
+        }
+
+        // Not an `if`: the buttons are focused by id. ↓ or → goes from
+        // Restart to Shut down, ↑ or ← back; ↑ from Restart, to the entry.
+        FocusScope {
+            visible: root.power-buttons;
+            height: root.power-buttons ? self.preferred-height : 0px;
+            focus-on-click: false;
+            focus-on-tab-navigation: false;
+            key-pressed(event) => {
+                if event.text == Key.UpArrow {
+                    if shut-down.has-focus {
+                        restart.focus();
+                    } else {
+                        root.focus-entry(root.focused-entry);
+                    }
+                    return accept;
+                }
+                if event.text == Key.DownArrow || event.text == Key.RightArrow {
+                    if restart.has-focus {
+                        shut-down.focus();
+                    }
+                    return accept;
+                }
+                if event.text == Key.LeftArrow {
+                    if shut-down.has-focus {
+                        restart.focus();
+                    }
+                    return accept;
+                }
+                reject
+            }
+            VerticalLayout {
+                padding-top: 28px;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 16px;
+                    restart := Button {
+                        icon: "restart";
+                        text: @tr("Restart");
+                        clicked => { root.power(false); }
+                    }
+                    shut-down := Button {
+                        icon: "power";
+                        text: @tr("Shut down");
+                        clicked => { root.power(true); }
+                    }
+                }
+            }
+        }
+    }
+}

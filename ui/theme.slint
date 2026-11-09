@@ -1,0 +1,103 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Colors and type sizes shared by every screen. `theme-index` and `accent-index`
+// are switched from the Settings screen and persisted by the Rust side.
+export global Theme {
+    // The themes offered in Settings (`THEMES` in settings.rs).
+    out property <[string]> theme-names: [@tr("Dark"), @tr("Light")];
+    in-out property <int> theme-index: 0;
+    // Set just before the theme or the accent changes (AppWindow clears it):
+    // the colors then change at once, rather than each element fading at
+    // its own pace. The color animations are for hovering and focus.
+    in-out property <bool> restyling;
+    // Whether full redraws are fast enough for motion (cards coming in,
+    // the row sliding); set from the measured redraw time.
+    in-out property <bool> motion: true;
+    // Set by Rust while cards come or go (a USB stick): only then does the
+    // row slide, not when the window gets its size at startup.
+    in-out property <bool> cards-sliding;
+    out property <bool> dark: theme-index != 1;
+    // The accent colors offered in Settings: blue, teal, violet, pink, orange.
+    out property <[color]> accents: [#5b8cff, #2fb6a3, #9b7bff, #ef6fa8, #e58a3a];
+    out property <[string]> accent-names: [@tr("Blue"), @tr("Teal"), @tr("Violet"), @tr("Pink"), @tr("Orange")];
+    in-out property <int> accent-index: 0;
+    // Index 5: the wallpaper's own color, when it has one.
+    in-out property <color> wallpaper-accent;
+    in-out property <bool> has-wallpaper-accent;
+    out property <color> accent: accent-index == 5 && has-wallpaper-accent ? wallpaper-accent
+        : accent-index >= 0 && accent-index < accents.length ? accents[accent-index] : accents[0];
+
+    // The wallpaper, blurred once (Rust), drawn behind the cards and bars at
+    // the same place as the wallpaper itself: frosted glass. The window's
+    // size, to place it.
+    in-out property <image> backdrop;
+    out property <bool> frosted: backdrop.width > 0;
+    in-out property <length> window-width;
+    in-out property <length> window-height;
+
+    // Per theme, in the order of `theme-names`.
+    out property <[color]> backgrounds:    [#0e1220, #f3f5fa];
+    out property <[color]> surfaces:       [#151a2b, #ffffff];
+    property <[color]> raised:         [#1b2136, #eef1f8];
+    property <[color]> strongs:        [#26304d, #dfe5f2];
+    property <[color]> wells:          [#1e2540, #e8edf7];
+    property <[color]> borders:        [#252c44, #d9dfeb];
+    property <[color]> borders-strong: [#2e3756, #c5cede];
+    property <[color]> dividers:       [#222943, #dde2ee];
+    property <[color]> texts:          [#e8ecf5, #141a2c];
+    property <[color]> texts-strong:   [#ffffff, #0b1020];
+    out property <[color]> texts-muted:    [#a7b0c4, #566079];
+    property <[color]> texts-soft:     [#c9d0e0, #3b4560];
+    property <int> t: theme-index >= 0 && theme-index < theme-names.length ? theme-index : 0;
+
+    out property <color> background: backgrounds[t];
+    out property <color> surface: surfaces[t];
+    out property <color> surface-raised: raised[t];
+    out property <color> surface-strong: strongs[t];
+    out property <color> icon-well: wells[t];
+    out property <color> border: borders[t];
+    out property <color> border-strong: borders-strong[t];
+    out property <color> divider: dividers[t];
+
+    out property <color> text: texts[t];
+    out property <color> text-strong: texts-strong[t];
+    out property <color> text-muted: texts-muted[t];
+    out property <color> text-soft: texts-soft[t];
+    out property <color> icon: texts-soft[t];
+
+    // Focus and selection, derived from the accent.
+    property <color> base: dark ? background : surface;
+    out property <color> focus-fill: accent.mix(base, dark ? 15% : 17%);
+    out property <color> focus-well: accent.mix(base, dark ? 28% : 30%);
+    out property <color> focus-track: accent.mix(base, dark ? 30% : 37%);
+    out property <color> badge-fill: accent.mix(base, dark ? 32% : 27%);
+    out property <color> badge-text: dark ? accent.mix(#ffffff, 30%) : accent.mix(#0b1020, 45%);
+    out property <color> on-accent: #0b1020;
+
+    out property <color> good: dark ? #4cc38a : #1e8a55;
+    out property <color> danger: dark ? #f29b8b : #b8402a;
+    out property <color> orange: #e58a3a;
+    out property <color> grey: #6b7390;
+
+    // How the boot entries are drawn (`STYLES` in settings.rs): cards,
+    // cards with colorful icons, flat (no cards), or a classic list.
+    in-out property <int> style: 0;
+
+    // Colorful: each kind of entry has its color, from light to deep.
+    public pure function kind-light(kind: string) -> color {
+        kind == "linux" ? #ffbf4d : kind == "windows" ? #56a8ff : kind == "usb" ? #b99bff
+            : kind == "network" ? #4fe0a6 : kind == "shell" ? #8b9ab3 : kind == "disc" ? #ff8cc6
+            : kind == "app" ? #45ddf0 : kind == "power" ? #ff8a80 : kind == "sliders" ? #a9b6cc
+            : kind == "folder" ? #ffd25e : #9aa3b8
+    }
+    public pure function kind-deep(kind: string) -> color {
+        kind == "linux" ? #e8711c : kind == "windows" ? #1c5fe0 : kind == "usb" ? #7039e0
+            : kind == "network" ? #0a9466 : kind == "shell" ? #3a465c : kind == "disc" ? #d6286f
+            : kind == "app" ? #0a89a8 : kind == "power" ? #d42f2f : kind == "sliders" ? #56637a
+            : kind == "folder" ? #e08a0b : #5d667d
+    }
+
+    out property <length> radius-card: 18px;
+    out property <length> radius: 12px;
+}

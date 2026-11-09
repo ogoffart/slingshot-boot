@@ -1,0 +1,390 @@
+// Copyright © Olivier Goffart
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Theme } from "theme.slint";
+import { Icon } from "icons.slint";
+import { InfoItem, MemorySegment, Button, BatteryInfo, Panel } from "widgets.slint";
+import { AboutSlint } from "std-widgets.slint";
+
+// A row of the machine's list: an icon, what it is, the value.
+export component InfoRow inherits Rectangle {
+    in property <string> icon;
+    in property <bool> good;
+    // Something to look at: the icon in orange.
+    in property <bool> warn;
+    in property <string> label;
+    in property <string> title;
+    in property <string> detail;
+
+    min-height: 60px;
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.divider;
+    }
+    @children
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 20px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 9px;
+                background: Theme.surface-strong;
+                Icon {
+                    kind: root.icon;
+                    size: 18px;
+                    thickness: 2px;
+                    color: root.good ? Theme.good : root.warn ? Theme.orange : Theme.accent;
+                }
+            }
+        }
+        Text {
+            min-width: 120px;
+            text: root.label;
+            font-size: 15px;
+            color: Theme.text-soft;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.title;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: right;
+                overflow: elide;
+            }
+            if root.detail != "": Text {
+                text: root.detail;
+                font-size: 13px;
+                color: Theme.text-muted;
+                horizontal-alignment: right;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// The charge level, with a gradient that moves right while charging and left
+// while discharging.
+component BatteryBar inherits Rectangle {
+    in property <float> level;
+    in property <int> direction;
+    in property <color> fill;
+    // Only animate while shown (animation-tick() redraws every frame).
+    in property <bool> animate;
+
+    height: 14px;
+    border-radius: self.height / 2;
+    background: Theme.surface-strong;
+
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.level, 0, 100) / 100;
+        border-radius: parent.border-radius;
+        background: root.fill;
+        clip: true;
+
+        if root.animate && root.direction != 0: Rectangle {
+            property <length> period: 96px;
+            property <float> phase: mod(animation-tick(), 1600ms) / 1600ms;
+            x: (root.direction > 0 ? phase - 1 : -phase) * period;
+            width: parent.width + 2 * period;
+            // Enough for the widest bar (a fixed count: `for` over a float
+            // expression generates Rust that doesn't compile).
+            for i in 24: Rectangle {
+                x: i * period;
+                width: period;
+                background: @linear-gradient(90deg, #ffffff00 0%, #ffffff60 50%, #ffffff00 100%);
+            }
+        }
+    }
+}
+
+// The battery's row: the level, the state, the bar, the measurements.
+component BatteryRow inherits Rectangle {
+    in property <BatteryInfo> info;
+    in property <bool> animate;
+    property <color> fill: info.low ? Theme.danger : info.direction > 0 ? Theme.good : Theme.accent;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.divider;
+    }
+    VerticalLayout {
+        padding-left: 18px;
+        padding-right: 20px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 9px;
+                    background: Theme.surface-strong;
+                    Icon {
+                        kind: root.info.direction > 0 ? "bolt" : "battery";
+                        size: 18px;
+                        thickness: 2px;
+                        color: root.fill;
+                    }
+                }
+            }
+            VerticalLayout {
+                min-width: 120px;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: @tr("Battery");
+                    font-size: 15px;
+                    color: Theme.text-soft;
+                }
+                // What it is: chemistry, model.
+                if root.info.identity != "": Text {
+                    text: root.info.identity;
+                    font-size: 12px;
+                    color: Theme.text-muted;
+                    overflow: elide;
+                    max-width: 200px;
+                }
+            }
+            // No bar when the level is unknown: an empty one would read as 0 %.
+            if root.info.level < 0: Rectangle { horizontal-stretch: 1; }
+            if root.info.level >= 0: VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                BatteryBar {
+                    height: 10px;
+                    level: root.info.level;
+                    direction: root.info.direction;
+                    fill: root.fill;
+                    animate: root.animate;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                min-width: 150px;
+                Text {
+                    text: (root.info.level >= 0 ? @tr("{} %", round(root.info.level)) + " · " : "") + root.info.state;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: root.info.low ? Theme.danger : Theme.text;
+                    horizontal-alignment: right;
+                }
+                Text {
+                    text: root.info.time-left != "" ? root.info.time-left : root.info.ac;
+                    font-size: 13px;
+                    color: Theme.text-muted;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+        // The measurements.
+        if root.info.facts.length > 0: HorizontalLayout {
+            padding-left: 48px;
+            spacing: 20px;
+            alignment: start;
+            for fact in root.info.facts: VerticalLayout {
+                spacing: 1px;
+                Text {
+                    text: fact.label;
+                    font-size: 11px;
+                    color: Theme.text-muted;
+                }
+                Text {
+                    text: fact.value;
+                    font-size: 13px;
+                    color: Theme.text-soft;
+                }
+            }
+        }
+    }
+}
+
+// The firmware clock, with its Change button.
+component ClockCard inherits Panel {
+    in property <string> text;
+    in property <bool> can-change;
+    // Changed to give the Change button the keyboard focus.
+    in property <int> focus-request;
+    callback change();
+    changed focus-request => {
+        if root.can-change {
+            change.focus();
+        }
+    }
+
+
+    VerticalLayout {
+        padding: 22px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 8px;
+            Icon {
+                kind: "clock";
+                size: 16px;
+                thickness: 2px;
+                color: Theme.text-muted;
+            }
+            Text {
+                text: @tr("Date and time");
+                font-size: 13px;
+                color: Theme.text-muted;
+                vertical-alignment: center;
+            }
+        }
+        Text {
+            text: root.text;
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+        change := Button {
+            visible: root.can-change;
+            height: root.can-change ? 44px : 0px;
+            text: @tr("Change…");
+            clicked => { root.change(); }
+        }
+    }
+}
+
+export component SystemScreen inherits Rectangle {
+    in property <[InfoItem]> items;
+    in property <[MemorySegment]> memory;
+    in property <string> app-version;
+    in property <BatteryInfo> battery;
+    // The screen is shown: the battery's gradient moves.
+    in property <bool> active;
+    // The firmware clock.
+    in property <string> date-time-text;
+    in property <bool> can-change-time;
+    callback change-time();
+    // Entering the screen: the keyboard focus on the Change button.
+    property <int> focus-request;
+    public function enter() {
+        root.focus-request += 1;
+    }
+
+    HorizontalLayout {
+        padding-top: 32px;
+        padding-left: 64px;
+        padding-right: 64px;
+        padding-bottom: 20px;
+        spacing: 28px;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 18px;
+            alignment: start;
+            Panel {
+                VerticalLayout {
+                    // As the rows' contents.
+                    HorizontalLayout {
+                        padding-left: 20px;
+                        Text {
+                            text: @tr("This machine");
+                            font-size: 22px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            height: 64px;
+                            vertical-alignment: center;
+                        }
+                    }
+                    for item[i] in root.items: InfoRow {
+                        icon: item.icon;
+                        good: item.good;
+                        label: item.label;
+                        title: item.title;
+                        detail: item.detail;
+                        // The memory: how it's used (the memory map).
+                        if item.icon == "memory" && root.memory.length > 0: Rectangle {
+                            x: 18px + 34px + 14px + 120px + 14px;
+                            width: parent.width * 0.26;
+                            height: 10px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 5px;
+                            clip: true;
+                            HorizontalLayout {
+                                spacing: 2px;
+                                for segment in root.memory: Rectangle {
+                                    horizontal-stretch: segment.weight;
+                                    min-width: 3px;
+                                    background: segment.color;
+                                }
+                            }
+                        }
+                    }
+                    if root.battery.present: BatteryRow {
+                        info: root.battery;
+                        animate: root.active;
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            width: root.width < 1200px ? 260px : 300px;
+            spacing: 16px;
+            alignment: start;
+            if root.date-time-text != "": ClockCard {
+                text: root.date-time-text;
+                can-change: root.can-change-time;
+                focus-request: root.focus-request;
+                change => { root.change-time(); }
+            }
+            Panel {
+                HorizontalLayout {
+                    padding: 18px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            kind: "power";
+                            size: 24px;
+                            thickness: 2px;
+                            color: Theme.accent;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: @tr("Slingshot");
+                            font-size: 16px;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        if root.app-version != "": Text {
+                            text: root.app-version;
+                            font-size: 13px;
+                            color: Theme.text-muted;
+                        }
+                    }
+                }
+            }
+            // The standard "About Slint" widget, quieter than the machine's
+            // details.
+            Panel {
+                VerticalLayout {
+                    alignment: center;
+                    padding: 8px;
+                    AboutSlint { opacity: 0.6; }
+                }
+            }
+        }
+    }
+}

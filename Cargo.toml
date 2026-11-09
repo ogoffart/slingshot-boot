@@ -1,0 +1,88 @@
+[package]
+name = "slingshot"
+description = "A graphical UEFI boot manager built with Slint"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "GPL-3.0-or-later"
+publish = false
+
+# One crate, two ways to run it:
+# - for the x86_64-unknown-uefi target: the real boot manager (`cargo build-uefi`)
+# - on a desktop: `slingshot config`, configuring this computer (`cargo run`), and
+#   a simulator in a window, with simulated firmware (`cargo run -- simulate`)
+
+[features]
+default = ["png", "jpeg", "luks", "battery", "touchpad"]
+# Picture formats (splash, wallpaper, entry pictures).
+png = ["dep:minipng"]
+jpeg = ["dep:zune-jpeg", "dep:zune-core"]
+# Unlocking LUKS2 volumes in Slingshot's UI (the passphrase is checked, then
+# handed to the kernel's initrd).
+luks = ["dep:argon2", "dep:hmac", "dep:aes", "dep:xts-mode", "dep:base64", "dep:serde_json"]
+# The battery's charge and state on the System screen, on x86 PCs: runs the
+# firmware's ACPI code (AML) in the `acpi` crate's interpreter. Without it,
+# only SMBIOS's static details. (The desktop reads Linux's sysfs either way.)
+battery = ["dep:acpi"]
+# Laptop touchpads on I2C (HID over I2C), such as the Framework's: a driver
+# for the I2C controller, found through ACPI at startup (x86 only). Tested on
+# a few machines.
+touchpad = ["battery"]
+# UEFI only: log to the QEMU debug console (I/O port 0x402).
+debugcon = []
+# Desktop only: lets the UI tests in ui-tests/ drive the simulator.
+system-testing = ["slint/system-testing", "slint/software-renderer-systemfonts"]
+
+[dependencies]
+slint = { git = "https://github.com/slint-ui/slint", rev = "b4448d86acb4329486e1515d8e35544cd081b9c4", default-features = false, features = ["compat-1-2", "renderer-software", "software-renderer-path", "libm"] }
+log = "0.4"
+libm = "0.2"
+# Decode the pictures (PNG and JPEG; no_std).
+minipng = { version = "1", optional = true }
+zune-jpeg = { version = "0.5", default-features = false, optional = true }
+zune-core = { version = "0.5", default-features = false, optional = true }
+# zeroize: Argon2 wipes what it derives from the passphrase.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"], optional = true }
+hmac = { version = "0.13", optional = true }
+aes = { version = "0.9", optional = true }
+xts-mode = { version = "0.6", default-features = false, optional = true }
+base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
+serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
+sha2 = { version = "0.11", default-features = false }
+toml = { version = "1", default-features = false, features = ["parse", "serde", "display"] }
+
+[target.'cfg(target_os = "uefi")'.dependencies]
+slint = { git = "https://github.com/slint-ui/slint", rev = "b4448d86acb4329486e1515d8e35544cd081b9c4", default-features = false, features = ["log", "unsafe-single-threaded"] }
+uefi = { version = "0.41", features = ["global_allocator", "alloc"] }
+uefi-raw = "0.17"
+
+[target.'cfg(all(target_os = "uefi", target_arch = "x86_64"))'.dependencies]
+# The batteries: runs the firmware's ACPI code (AML). 6.x panics on stores
+# into a package element; 7.0 is patched in vendor/acpi to build on stable.
+acpi = { version = "=7.0.0-pre1", default-features = false, features = ["aml"], optional = true }
+
+# Desktop: the same software renderer, in a winit window.
+[target.'cfg(not(target_os = "uefi"))'.dependencies]
+slint = { git = "https://github.com/slint-ui/slint", rev = "b4448d86acb4329486e1515d8e35544cd081b9c4", default-features = false, features = ["std", "backend-winit", "software-renderer-systemfonts"] }
+# `slingshot config`'s file dialogs (the desktop's own, through the XDG portal).
+rfd = "0.18"
+# `slingshot keymap`: the system's keyboard layout, for the firmware.
+xkbcommon = { version = "0.9", default-features = false }
+
+# acpi 7.0 for the stable compiler, argon2 with its lanes run on several
+# processors: see vendor/README.md.
+[patch.crates-io]
+acpi = { path = "vendor/acpi" }
+argon2 = { path = "vendor/argon2" }
+
+[build-dependencies]
+slint-build = { git = "https://github.com/slint-ui/slint", rev = "b4448d86acb4329486e1515d8e35544cd081b9c4", features = ["sdf-fonts"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1

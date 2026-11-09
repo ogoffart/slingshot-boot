@@ -1,0 +1,116 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (matching Cargo.toml's version) builds the release
+# files and makes a draft GitHub release with them: review it, then publish.
+#
+# Two jobs: `build` runs the code of every dependency (build scripts,
+# procedural macros, tests) with a read-only token that isn't left in the
+# checkout, and no cache (what an earlier run left can't get into the
+# release); `release` only uploads what `build` made, with the write token.
+# Actions are pinned by commit, not by a tag that can be moved.
+
+on:
+    push:
+        tags: ["v*"]
+    workflow_dispatch:
+
+permissions: {}
+
+jobs:
+    build:
+        # The oldest supported runner: the desktop program then runs on
+        # distributions with an older glibc too.
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+              with:
+                  persist-credentials: false
+            - uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97
+              with:
+                  toolchain: "1.97"
+                  targets: x86_64-unknown-uefi, aarch64-unknown-uefi
+                  # The x86 build with hardware floating point builds core.
+                  components: rust-src
+            - name: Install Linux dependencies
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install libfontconfig-dev libxkbcommon-dev
+            - name: Check the version
+              id: version
+              run: |
+                  version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+                      echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml's version $version"
+                      exit 1
+                  fi
+            - name: Test
+              run: |
+                  cargo test --release --locked
+                  scripts/test-setup.sh
+            - name: Build
+              run: |
+                  # The .efi files, reproducibly (docs/reproducible-builds.md):
+                  # dist/slingshot.efi (x86, with SSE2) and dist/slingshot-aarch64.efi.
+                  scripts/build-efi.sh --check
+                  cargo build --release --locked
+            - name: Package
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  name="slingshot-$VERSION-x86_64-linux"
+                  mkdir -p "dist/$name/licenses"
+                  cp target/release/slingshot dist/slingshot.efi \
+                     scripts/slingshot-setup README.md LICENSE "dist/$name/"
+                  cp -r docs assets/wallpapers "dist/$name/"
+                  # What the program carries: the logos' and the fonts' licenses.
+                  cp assets/os/SOURCES.md "dist/$name/licenses/logos.md"
+                  cp ui/fonts/LICENSE-*.txt "dist/$name/licenses/"
+                  strip "dist/$name/slingshot"
+                  tar -C dist -czf "dist/$name.tar.gz" "$name"
+                  # slingshot-aarch64.efi: 64-bit ARM, the program alone (docs/mac.md, docs/install-manually.md).
+                  (cd dist && sha256sum "$name.tar.gz" slingshot.efi slingshot-aarch64.efi > SHA256SUMS)
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+              with:
+                  name: release-files
+                  path: |
+                      dist/*.tar.gz
+                      dist/slingshot.efi
+                      dist/slingshot-aarch64.efi
+                      dist/SHA256SUMS
+
+    release:
+        needs: build
+        if: github.ref_type == 'tag'
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: write
+            # The provenance attestation: anyone can check with `gh
+            # attestation verify FILE --repo ogoffart/slingshot-boot` that
+            # this workflow built the file from the tag.
+            id-token: write
+            attestations: write
+        steps:
+            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+              with:
+                  name: release-files
+                  path: dist
+            - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+              with:
+                  subject-path: |
+                      dist/*.tar.gz
+                      dist/slingshot.efi
+                      dist/slingshot-aarch64.efi
+            - name: Draft the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  VERSION: ${{ needs.build.outputs.version }}
+              run: |
+                  gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes \
+                      --title "Slingshot $VERSION" \
+                      "dist/slingshot-$VERSION-x86_64-linux.tar.gz" dist/slingshot.efi dist/slingshot-aarch64.efi dist/SHA256SUMS

@@ -1,0 +1,3702 @@
+// Slingshot: these imports are for `new_from_platform`, behind the `platform` feature.
+#![cfg_attr(not(feature = "platform"), allow(unused_imports))]
+
+/*
+ * TODO:
+ *  - Field reads supporting custom handlers
+ *  - Locked fields
+ *  - Bank and index fields
+ *  - Run `_REG` on supported op region handlers
+ *  - Count operations performed and time
+ *  - Correct DefStore / DefCopyObject behaviour
+ *  - Load and LoadTable
+ *  - DefDataRegion
+ *  - Notify
+ *
+ *  - Method recursion depth?
+ *  - Loop timeouts
+ *  - Fuzzing and guarantee panic-free interpretation
+ */
+
+mod interrupt_model_used;
+mod match_expr;
+
+pub mod namespace;
+pub mod object;
+pub mod op_region;
+pub mod pci_routing;
+pub mod resource;
+
+use crate::{
+    AcpiError,
+    AmlTable,
+    Handle,
+    Handler,
+    PhysicalMapping,
+    registers::{FixedRegisters, Pm1ControlBit},
+    sdt::{SdtHeader, facs::Facs, fadt::Fadt},
+};
+use alloc::{
+    boxed::Box,
+    collections::btree_map::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
+use bit_field::BitField;
+use core::{
+    mem,
+    ptr,
+    slice,
+    str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
+};
+pub use interrupt_model_used::InterruptModelUsed;
+use log::{error, info, trace, warn};
+use match_expr::{MatchOp, do_match};
+use namespace::{AmlName, Namespace, NamespaceLevelKind};
+use object::{
+    DeviceStatus,
+    FieldFlags,
+    FieldUnit,
+    FieldUnitKind,
+    FieldUpdateRule,
+    MethodFlags,
+    Object,
+    ObjectToken,
+    ObjectType,
+    ReferenceKind,
+    WrappedObject,
+};
+use op_region::{OpRegion, RegionHandler, RegionSpace};
+use pci_types::PciAddress;
+use spinning_top::Spinlock;
+
+/// Helper macro to extract an expected set of [`Argument`]s from the given [`OpInFlight`]. Use
+/// like:
+/// ``` ignore,rust
+/// extract_args!(op => [Argument::Object(source), Argument::Object(target)]);
+/// extract_args!(op[0..2] => [Argument::Object(source), Argument::Namespace(name)]);
+/// ```
+macro_rules! extract_args {
+    ($op:ident => $args:tt) => {
+        let $args = &$op.arguments[..] else {
+            return Err(AmlError::InternalError(alloc::format!(
+                "Operation has invalid argument types: {}, in {}:{}",
+                stringify!($args),
+                file!(),
+                line!(),
+            )));
+        };
+    };
+    ($op:ident[$x:expr] => $args:tt) => {
+        let $args = &$op.arguments[$x] else {
+            return Err(AmlError::InternalError(alloc::format!(
+                "Operation has invalid argument types: {}, in {}:{}",
+                stringify!($args),
+                file!(),
+                line!(),
+            )));
+        };
+    };
+}
+
+/// `BaseInterpreter` implements a virtual machine for the dynamic AML bytecode. It can be used by a
+/// host operating system to load tables containing AML bytecode (generally the DSDT and SSDTs) and
+/// will then manage the AML namespace and all objects created during the life of the system.
+///
+/// [`Interpreter`] and [`NoSendInterpreter`] provide sensible partial specialisations of
+/// `BaseInterpreter` for the multi-threaded and single-threaded use cases.
+pub struct BaseInterpreter<H, R>
+where
+    H: Handler,
+    R: RegionHandler + ?Sized,
+{
+    handler: H,
+    pub namespace: Spinlock<Namespace>,
+    pub object_token: Spinlock<ObjectToken>,
+    integer_size: IntegerSize,
+    region_handlers: Spinlock<BTreeMap<RegionSpace, Box<R>>>,
+
+    global_lock_mutex: Handle,
+
+    /// How many times has the thread that owns the global lock acquired it? Zero should correspond
+    /// to [`global_lock_mutex`] being unlocked.
+    global_lock_acquisition_count: AtomicU64,
+
+    registers: Arc<FixedRegisters<H>>,
+    facs: Option<PhysicalMapping<H, Facs>>,
+}
+
+/// An Interpreter that does not enforce a requirement to be Send. This might be useful for
+/// uni-processor kernels, or operating systems where this crate runs in a single-threaded user-mode
+/// process.
+pub type NoSendInterpreter<H> = BaseInterpreter<H, dyn RegionHandler>;
+
+/// An Interpreter that is known to be Send + Sync. The version you should prefer by default.
+pub type Interpreter<H> = BaseInterpreter<H, dyn RegionHandler + Send + Sync>;
+
+/// The value returned by the `Revision` opcode.
+const INTERPRETER_REVISION: u64 = 1;
+
+/// The maximum number of times a name used as a package element may resolve to another such name
+/// before we give up. Real firmware doesn't chain these at all, but broken tables must not be able
+/// to make us loop forever.
+const MAX_NAME_PATH_INDIRECTIONS: usize = 8;
+
+// The following constants are public as they are referenced from the AmlError docs.
+/// How many nested function calls should we allow? This is a fairly arbitrary figure that could be
+/// changed with experience if it proves too small.
+///
+/// The interpreter doesn't allocate a stack frame on the processor stack for each AML method call,
+/// so we're not worried about overflowing the kernel or process stack. This is a basic way to
+/// ensure the AML is not stuck in an infinite recursion (which would deadlock the caller)
+pub const MAX_STACK_DEPTH: usize = 1000;
+
+/// The maximum length of time a single loop should be allowed to execute for, in nanoseconds.
+///
+/// This is a fairly arbitrary limit to protect against infinite loops and the risk of system
+/// deadlock.
+pub const LOOP_TIMEOUT_NS: u64 = 10_000_000_000;
+
+impl<H, R> BaseInterpreter<H, R>
+where
+    H: Handler,
+    R: RegionHandler + ?Sized,
+{
+    /// Construct a new [`Interpreter`]. This does not load any tables - if you have an
+    /// [`crate::AcpiTables`] already, construct an [`AcpiPlatform`] first and then use
+    /// [`Interpreter::new_from_platform`]
+    pub fn new(
+        handler: H,
+        dsdt_revision: u8,
+        registers: Arc<FixedRegisters<H>>,
+        facs: Option<PhysicalMapping<H, Facs>>,
+    ) -> Self {
+        info!("Initializing AML interpreter v{}", env!("CARGO_PKG_VERSION"));
+
+        let global_lock_mutex = handler.create_mutex();
+
+        BaseInterpreter {
+            handler,
+            namespace: Spinlock::new(Namespace::new(global_lock_mutex)),
+            object_token: Spinlock::new(unsafe { ObjectToken::create_interpreter_token() }),
+            integer_size: IntegerSize::from_revision(dsdt_revision),
+            region_handlers: Spinlock::new(BTreeMap::new()),
+            global_lock_mutex,
+            global_lock_acquisition_count: AtomicU64::new(0),
+            registers,
+            facs,
+        }
+    }
+
+    /// Construct a new [`Interpreter`] with the given [`AcpiPlatform`](crate::platform::AcpiPlatform).
+    #[cfg(feature = "platform")]
+    pub fn new_from_platform(platform: &crate::platform::AcpiPlatform<H>) -> Result<BaseInterpreter<H, R>, AcpiError> {
+        fn load_table<H, R>(interpreter: &BaseInterpreter<H, R>, table: AmlTable) -> Result<(), AcpiError>
+        where
+            H: Handler,
+            R: RegionHandler + ?Sized,
+        {
+            let mapping = unsafe {
+                PhysicalMapping::<_, SdtHeader>::new(
+                    table.phys_address,
+                    table.length as usize,
+                    &interpreter.handler,
+                )
+            };
+            let stream = unsafe {
+                slice::from_raw_parts(
+                    ptr::from_ref(&*mapping).byte_add(size_of::<SdtHeader>()) as *const u8,
+                    table.length as usize - mem::size_of::<SdtHeader>(),
+                )
+            };
+            interpreter.load_table(stream).map_err(AcpiError::Aml)?;
+            Ok(())
+        }
+
+        let registers = platform.registers.clone();
+        let facs = {
+            platform.tables.find_table::<Fadt>().and_then(|fadt| fadt.facs_address().ok()).map(
+                |facs_address| unsafe {
+                    PhysicalMapping::<_, Facs>::new(facs_address, mem::size_of::<Facs>(), platform.handler.clone())
+                },
+            )
+        };
+
+        let dsdt = platform.tables.dsdt()?;
+        let interpreter = BaseInterpreter::new(platform.handler.clone(), dsdt.revision, registers, facs);
+
+        if let Err(err) = load_table(&interpreter, dsdt) {
+            error!("Error while loading DSDT: {:?}. Continuing; this may cause downstream errors.", err);
+        }
+
+        for (i, ssdt) in platform.tables.ssdts().enumerate() {
+            if let Err(err) = load_table(&interpreter, ssdt) {
+                error!("Error while loading SSDT{}: {:?}. Continuing.", i, err);
+            }
+        }
+
+        Ok(interpreter)
+    }
+
+    /// Load the supplied byte stream as an AML table. This should be only the encoded AML stream -
+    /// not the header at the start of a table. If you've used [`Interpreter::new_from_platform`],
+    /// you'll likely not need to load any tables manually.
+    pub fn load_table(&self, stream: &[u8]) -> Result<(), AmlError> {
+        let context = unsafe { MethodContext::new_from_table(stream) };
+        self.do_execute_method(context)?;
+        Ok(())
+    }
+
+    /// Evaluate an object at the given path in the namespace. If the object is a method, this
+    /// invokes the method with the given set of arguments.
+    pub fn evaluate(&self, path: AmlName, args: Vec<WrappedObject>) -> Result<WrappedObject, AmlError> {
+        trace!("Invoking AML method: {}", path);
+
+        let object = self.namespace.lock().get(path.clone())?.clone();
+        match &*object {
+            Object::Method { .. } => {
+                self.namespace.lock().add_level(path.clone(), NamespaceLevelKind::MethodLocals)?;
+                let context = MethodContext::new_from_method(object, args, path)?;
+                self.do_execute_method(context)
+            }
+            Object::NativeMethod { f, .. } => f(&args),
+            _ => Ok(object),
+        }
+    }
+
+    pub fn evaluate_if_present(
+        &self,
+        path: AmlName,
+        args: Vec<WrappedObject>,
+    ) -> Result<Option<WrappedObject>, AmlError> {
+        match self.evaluate(path.clone(), args) {
+            Ok(result) => Ok(Some(result)),
+            Err(AmlError::ObjectDoesNotExist(not_present)) => {
+                if path == not_present {
+                    Ok(None)
+                } else {
+                    Err(AmlError::ObjectDoesNotExist(not_present))
+                }
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    pub fn install_region_handler(&self, space: RegionSpace, handler: Box<R>) {
+        let mut handlers = self.region_handlers.lock();
+        assert!(handlers.get(&space).is_none(), "Tried to install handler for same space twice!");
+        handlers.insert(space, handler);
+    }
+
+    /// Initialize the namespace - this should be called after all tables have been loaded and
+    /// operation region handlers registered. Specifically, it will call relevant `_STA`, `_INI`,
+    /// and `_REG` methods.
+    pub fn initialize_namespace(&self) {
+        /*
+         * This should match the initialization order of ACPICA and uACPI.
+         */
+        if let Err(err) = self.evaluate_if_present(AmlName::from_str("\\_INI").unwrap(), vec![]) {
+            warn!("Invoking \\_INI failed: {:?}", err);
+        }
+        if let Err(err) = self.evaluate_if_present(AmlName::from_str("\\_SB._INI").unwrap(), vec![]) {
+            warn!("Invoking \\_SB._INI failed: {:?}", err);
+        }
+
+        // TODO: run all _REGs for globally-installed handlers (this might need more bookkeeping)
+
+        /*
+         * We can now initialize each device in the namespace. For each device, we evaluate `_STA`,
+         * which indicates if the device is present and functional. If this method does not exist,
+         * we assume the device should be initialized.
+         *
+         * We then evaluate `_INI` for the device. This can dynamically populate objects such as
+         * `_ADR`, `_CID`, `_HID`, `_SUN`, and `_UID`, and so is necessary before further
+         * operation.
+         */
+        let mut num_devices_initialized = 0;
+        /*
+         * TODO
+         * We clone a copy of the namespace here to traverse while executing all the `_STA` and
+         * `_INI` objects. Avoiding this would be good, but is not easy, as we need
+         * potentially-mutable access while executing all of the methods.
+         */
+        let mut namespace = self.namespace.lock().clone();
+        let init_status = namespace.traverse(|path, level| {
+            match level.kind {
+                NamespaceLevelKind::Device
+                | NamespaceLevelKind::Processor
+                | NamespaceLevelKind::ThermalZone
+                | NamespaceLevelKind::PowerResource => {
+                    let should_initialize = match self
+                        .evaluate_if_present(AmlName::from_str("_STA").unwrap().resolve(path)?, vec![])
+                    {
+                        Ok(Some(result)) => {
+                            let Object::Integer(result) = *result else { panic!() };
+                            let status = DeviceStatus(result);
+                            status.present() && status.functioning()
+                        }
+                        Ok(None) => true,
+                        Err(err) => {
+                            warn!("Failed to evaluate _STA for device {}: {:?}", path, err);
+                            false
+                        }
+                    };
+
+                    if should_initialize {
+                        num_devices_initialized += 1;
+                        if let Err(err) =
+                            self.evaluate_if_present(AmlName::from_str("_INI").unwrap().resolve(path)?, vec![])
+                        {
+                            warn!("Failed to evaluate _INI for device {}: {:?}", path, err);
+                        }
+                        Ok(true)
+                    } else {
+                        /*
+                         * If this device should not be initialized, don't initialize it's children.
+                         */
+                        Ok(false)
+                    }
+                }
+                _ => Ok(true),
+            }
+        });
+        if let Err(err) = init_status {
+            warn!("Error while traversing namespace for devices: {:?}", err);
+        }
+
+        info!("Initialized {} devices", num_devices_initialized);
+    }
+
+    pub fn acquire_global_lock(&self, timeout: u16) -> Result<(), AmlError> {
+        // This lock is released by `release_global_lock`. Acquire unconditionally since AML
+        // mutexes are reentrant, and the [`Handler`] might want to take action on each acquisition.
+        self.handler.acquire(self.global_lock_mutex, timeout)?;
+
+        let last = self.global_lock_acquisition_count.fetch_add(1, Ordering::Acquire);
+
+        // The firmware lock does not have an acquisition counter, so don't try and acquire a
+        // firmware lock we already own.
+        if last == 0 {
+            // Now we've acquired the AML-side mutex, acquire the hardware side
+            // TODO: count the number of times we have to go round this loop / enforce a timeout?
+            loop {
+                if self.try_do_acquire_firmware_lock() {
+                    break;
+                } else {
+                    /*
+                     * The lock is owned by the firmware. We have set the pending bit - we now need
+                     * to wait for the firmware to signal it has released the lock.
+                     *
+                     * TODO: this should wait for an interrupt from the firmware. That needs more
+                     * infra so for now let's just spin round and try and acquire it again...
+                     */
+                    continue;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Attempt to acquire the firmware lock, setting the owned bit if the lock is free. If the
+    /// lock is not free, sets the pending bit to instruct the firmware to alert us when we can
+    /// attempt to take ownership of the lock again. Returns `true` if we now have ownership of the
+    /// lock, and `false` if we need to wait for firmware to release it.
+    fn try_do_acquire_firmware_lock(&self) -> bool {
+        let Some(facs) = &self.facs else { return true };
+        loop {
+            let global_lock = facs.global_lock.load(Ordering::Relaxed);
+            let is_owned = global_lock.get_bit(1);
+
+            /*
+             * Compute the new value: either the lock is already owned, and we need to set the
+             * pending bit and wait, or we can acquire ownership of the lock now. Either way, we
+             * unconditionally set the owned bit and set the pending bit if the lock is already
+             * owned.
+             */
+            let mut new_value = global_lock;
+            new_value.set_bit(0, is_owned);
+            new_value.set_bit(1, true);
+
+            if facs
+                .global_lock
+                .compare_exchange(global_lock, new_value, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break !is_owned;
+            }
+        }
+    }
+
+    pub fn release_global_lock(&self) -> Result<(), AmlError> {
+        let c = self.global_lock_acquisition_count.fetch_sub(1, Ordering::Release);
+
+        // Only release the firmware lock if that was the last global lock acquisition that this
+        // thread was holding.
+        //
+        // There is no risk of `c` changing - this thread still holds the global lock mutex, so only
+        // this thread can change `self.global_lock_acquisition_count`.
+        if c == 1 {
+            let is_pending = self.do_release_firmware_lock();
+            if is_pending {
+                self.registers.pm1_control_registers.set_bit(Pm1ControlBit::GlobalLockRelease, true).unwrap();
+            }
+        }
+
+        // This mutex was locked in `acquire_global_mutex`.
+        self.handler.release(self.global_lock_mutex);
+        Ok(())
+    }
+
+    /// Atomically release the owned and pending bits of the global lock. Returns whether the
+    /// pending bit was set (this means the firmware is waiting to acquire the lock, and should be
+    /// informed we're finished with it).
+    fn do_release_firmware_lock(&self) -> bool {
+        let Some(facs) = &self.facs else { return false };
+        loop {
+            let global_lock = facs.global_lock.load(Ordering::Relaxed);
+            let is_pending = global_lock.get_bit(0);
+            let mut new_value = global_lock;
+            new_value.set_bit(0, false);
+            new_value.set_bit(1, false);
+
+            if facs
+                .global_lock
+                .compare_exchange(global_lock, new_value, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break is_pending;
+            }
+        }
+    }
+
+    fn do_execute_method(&self, mut context: MethodContext) -> Result<WrappedObject, AmlError> {
+        /*
+         * This is the main loop that executes operations. Every op is handled at the top-level of
+         * the loop to prevent pathological stack growth from nested operations.
+         *
+         * The loop has three main stages:
+         *   1) Check if any in-flight operations are ready to be executed (i.e. have collected all
+         *      their arguments). An operation completing may contribute the last required argument
+         *      of the one above, so this is repeated for as many operations as are ready to be
+         *      retired.
+         *   2) Look at the next opcode in the stream. If we've run out of opcodes in the current
+         *      block, run logic to determine where in the stream we should move to next. Special
+         *      logic at this level handles things like moving in/out of package definitions, and
+         *      performing control flow.
+         *   3) When the next opcode is determined, use it to interpret the next portion of the
+         *      stream. If that is data, the correct number of bytes can be consumed and
+         *      contributed to the current in-flight operation. If it's an opcode, a new in-flight
+         *      operation is started, and we go round the loop again.
+         *
+         * This scheme is what allows the interpreter to use a loop that somewhat resembles a
+         * traditional fast bytecode VM, but also provides enough flexibility to handle the
+         * quirkier parts of the AML grammar, particularly the left-to-right encoding of operands.
+         */
+        let mut context_stack: Vec<MethodContext> = Vec::new();
+
+        loop {
+            /*
+             * First, see if we've gathered enough arguments to complete some in-flight operations.
+             */
+            while let Some(op) = context.in_flight.pop_if(|op| op.arguments.len() == op.expected_arguments) {
+                match op.op {
+                    Opcode::Add
+                    | Opcode::Subtract
+                    | Opcode::Multiply
+                    | Opcode::Divide
+                    | Opcode::ShiftLeft
+                    | Opcode::ShiftRight
+                    | Opcode::Mod
+                    | Opcode::Nand
+                    | Opcode::And
+                    | Opcode::Or
+                    | Opcode::Nor
+                    | Opcode::Xor => self.do_binary_maths(&mut context, op)?,
+                    Opcode::Not | Opcode::FindSetLeftBit | Opcode::FindSetRightBit => {
+                        self.do_unary_maths(&mut context, op)?;
+                    }
+                    Opcode::Increment | Opcode::Decrement => {
+                        let [Argument::Object(operand)] = &op.arguments[..] else { panic!() };
+                        let operand = operand.clone().unwrap_reference();
+                        let token = self.object_token.lock();
+
+                        let Object::Integer(operand) = (unsafe { operand.gain_mut(&token) }) else {
+                            Err(AmlError::ObjectNotOfExpectedType {
+                                expected: ObjectType::Integer,
+                                got: operand.typ(),
+                            })?
+                        };
+
+                        let new_value = match op.op {
+                            Opcode::Increment => operand.wrapping_add(1),
+                            Opcode::Decrement => operand.wrapping_sub(1),
+                            _ => unreachable!(),
+                        };
+
+                        *operand = new_value;
+                        context.contribute_arg(Argument::Object(Object::Integer(new_value).wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::LAnd
+                    | Opcode::LOr
+                    | Opcode::LNot
+                    | Opcode::LNotEqual
+                    | Opcode::LLessEqual
+                    | Opcode::LGreaterEqual
+                    | Opcode::LEqual
+                    | Opcode::LGreater
+                    | Opcode::LLess => self.do_logical_op(&mut context, op)?,
+                    Opcode::ToBuffer => self.do_to_buffer(&mut context, op)?,
+                    Opcode::ToInteger => self.do_to_integer(&mut context, op)?,
+                    Opcode::ToString => self.do_to_string(&mut context, op)?,
+                    Opcode::ToDecimalString | Opcode::ToHexString => {
+                        self.do_to_dec_hex_string(&mut context, op)?
+                    }
+                    Opcode::Mid => self.do_mid(&mut context, op)?,
+                    Opcode::Concat => self.do_concat(&mut context, op)?,
+                    Opcode::ConcatRes => {
+                        extract_args!(op => [
+                            Argument::Object(source1),
+                            Argument::Object(source2),
+                            Argument::Object(target)
+                        ]);
+                        let source1 = source1.as_buffer()?;
+                        let source2 = source2.as_buffer()?;
+                        let result = {
+                            fn strip_end_tag(buf: &[u8]) -> &[u8] {
+                                if buf.len() >= 2 && buf[buf.len() - 2] == 0x79 {
+                                    buf.split_at(buf.len() - 2).0
+                                } else {
+                                    buf
+                                }
+                            }
+                            let mut buffer = Vec::from(strip_end_tag(source1));
+                            buffer.extend_from_slice(strip_end_tag(source2));
+                            // Add a new end-tag
+                            buffer.push(0x79);
+                            // Don't calculate the new real checksum - just use 0
+                            buffer.push(0x00);
+                            Object::Buffer(buffer).wrap()
+                        };
+                        // TODO: use potentially-updated result for return value here
+                        self.do_store(target.clone(), result.clone())?;
+                        context.contribute_arg(Argument::Object(result));
+                        context.retire_op(op);
+                    }
+                    Opcode::Reset => {
+                        extract_args!(op => [Argument::Object(sync_object)]);
+                        let sync_object = sync_object.clone().unwrap_reference();
+
+                        if let Object::Event(ref counter) = *sync_object {
+                            counter.store(0, Ordering::Release);
+                        } else {
+                            return Err(AmlError::InvalidOperationOnObject {
+                                op: Operation::ResetEvent,
+                                typ: sync_object.typ(),
+                            });
+                        }
+                    }
+                    Opcode::Signal => {
+                        extract_args!(op => [Argument::Object(sync_object)]);
+                        let sync_object = sync_object.clone().unwrap_reference();
+
+                        if let Object::Event(ref counter) = *sync_object {
+                            counter.fetch_add(1, Ordering::AcqRel);
+                        } else {
+                            return Err(AmlError::InvalidOperationOnObject {
+                                op: Operation::SignalEvent,
+                                typ: sync_object.typ(),
+                            });
+                        }
+                    }
+                    Opcode::Wait => {
+                        extract_args!(op => [Argument::Object(sync_object), Argument::Object(timeout)]);
+                        let sync_object = sync_object.clone().unwrap_reference();
+                        let timeout = u64::min(timeout.as_integer()?, 0xffff);
+
+                        if let Object::Event(ref counter) = *sync_object {
+                            /*
+                             * `Wait` returns a non-zero value if a timeout occurs and the event
+                             * was not signaled, and zero if it was. Timeout is specified in
+                             * milliseconds, should relinquish processor control (we use
+                             * `Handler::sleep` to do so) and a value of `0xffff` specifies that
+                             * the operation should wait indefinitely.
+                             */
+                            let mut remaining_sleep = timeout;
+                            let mut timed_out = true;
+
+                            'signaled: while remaining_sleep > 0 {
+                                loop {
+                                    /*
+                                     * Try to decrement the counter. If it's zero after a load, we
+                                     * haven't been signalled and should wait for a bit. If it's
+                                     * non-zero, we were signalled and should stop waiting.
+                                     */
+                                    let value = counter.load(Ordering::Acquire);
+                                    if value == 0 {
+                                        break;
+                                    }
+                                    if counter
+                                        .compare_exchange(value, value - 1, Ordering::AcqRel, Ordering::Acquire)
+                                        .is_ok()
+                                    {
+                                        timed_out = false;
+                                        break 'signaled;
+                                    }
+                                }
+
+                                let to_sleep = u64::min(timeout, 10);
+                                if timeout < 0xffff {
+                                    remaining_sleep = remaining_sleep.saturating_sub(to_sleep);
+                                }
+                                self.handler.sleep(to_sleep);
+                            }
+
+                            context.contribute_arg(Argument::Object(
+                                Object::Integer(if timed_out { u64::MAX } else { 0 }).wrap(),
+                            ));
+                        } else {
+                            return Err(AmlError::InvalidOperationOnObject {
+                                op: Operation::WaitEvent,
+                                typ: sync_object.typ(),
+                            });
+                        }
+                    }
+                    Opcode::Notify => {
+                        // No operating system to tell: a no-op, as ACPICA
+                        // does without a notify handler. The object is
+                        // resolved (a name or a reference to it), so any
+                        // argument types.
+                        context.retire_op(op);
+                    }
+                    Opcode::FromBCD => self.do_from_bcd(&mut context, op)?,
+                    Opcode::ToBCD => self.do_to_bcd(&mut context, op)?,
+                    Opcode::Name => {
+                        extract_args!(op => [Argument::Namestring(name), Argument::Object(object)]);
+                        let name = name.resolve(&context.current_scope)?;
+                        self.namespace.lock().insert(name, object.clone())?;
+                        context.retire_op(op);
+                    }
+                    Opcode::Fatal => {
+                        extract_args!(op => [Argument::ByteData(typ), Argument::DWordData(code), Argument::Object(arg)]);
+                        let arg = arg.as_integer()?;
+                        self.handler.handle_fatal_error(*typ, *code, arg);
+                        context.retire_op(op);
+                        return Err(AmlError::FatalErrorEncountered);
+                    }
+                    Opcode::OpRegion => {
+                        extract_args!(op => [
+                            Argument::Namestring(name),
+                            Argument::ByteData(region_space),
+                            Argument::Object(region_offset),
+                            Argument::Object(region_length),
+                        ]);
+                        let region_offset = region_offset.clone().unwrap_transparent_reference();
+                        let region_length = region_length.clone().unwrap_transparent_reference();
+
+                        let region = Object::OpRegion(OpRegion {
+                            space: RegionSpace::from(*region_space),
+                            base: region_offset.as_integer()?,
+                            length: region_length.as_integer()?,
+                            parent_device_path: context.current_scope.clone(),
+                        });
+                        self.namespace.lock().insert(name.resolve(&context.current_scope)?, region.wrap())?;
+                        context.retire_op(op);
+                    }
+                    Opcode::DataRegion => {
+                        extract_args!(op => [
+                            Argument::Namestring(name),
+                            Argument::Object(signature),
+                            Argument::Object(oem_id),
+                            Argument::Object(oem_table_id),
+                        ]);
+                        let _signature = signature.as_string()?;
+                        let _oem_id = oem_id.as_string()?;
+                        let _oem_table_id = oem_table_id.as_string()?;
+
+                        // TODO: once this is integrated into the rest of the crate, load the table
+                        log::warn!(
+                            "DefDataRegion encountered in AML! We don't actually support these - produced region will be incorrect"
+                        );
+
+                        let region = Object::OpRegion(OpRegion {
+                            space: RegionSpace::SystemMemory,
+                            base: 0,
+                            length: 0,
+                            parent_device_path: context.current_scope.clone(),
+                        });
+                        self.namespace.lock().insert(name.resolve(&context.current_scope)?, region.wrap())?;
+                        context.retire_op(op);
+                    }
+                    Opcode::Buffer => {
+                        extract_args!(op => [
+                            Argument::TrackedPc(start_pc),
+                            Argument::PkgLength(pkg_length),
+                            Argument::Object(buffer_size),
+                        ]);
+                        let buffer_size =
+                            buffer_size.clone().unwrap_transparent_reference().as_integer()? as usize;
+
+                        let buffer_len = pkg_length - (context.current_block.pc - start_pc);
+                        let mut buffer = vec![0; buffer_size];
+
+                        /*
+                         * Copy the supplied elements into the buffer, avoiding a pathological case
+                         * where more elements are supplied than the buffer's size
+                         */
+                        let to_copy = usize::min(buffer_size, buffer_len);
+                        buffer[0..to_copy].copy_from_slice(
+                            &context.current_block.stream()
+                                [context.current_block.pc..(context.current_block.pc + buffer_len)],
+                        );
+                        context.current_block.pc += buffer_len;
+
+                        context.contribute_arg(Argument::Object(Object::Buffer(buffer).wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::Package => {
+                        let mut elements = Vec::with_capacity(op.expected_arguments);
+                        for arg in &op.arguments {
+                            let Argument::Object(object) = arg else {
+                                return Err(AmlError::InternalError(
+                                    "Invalid argument type produced for package element".to_string(),
+                                ));
+                            };
+                            elements.push(object.clone());
+                        }
+
+                        /*
+                         * We can end up completing a package's in-flight op in two circumstances:
+                         *    - If the correct number of elements are supplied, we end up here
+                         *      first, and then later in the block's finishing logic.
+                         *    - If less elements are supplied, we end up in the block's finishing
+                         *      logic to add some `Uninitialized`s, then go round again to complete
+                         *      the in-flight operation.
+                         *
+                         * To make these consistent, we always remove the block here, making sure
+                         * we've finished it as a sanity check.
+                         */
+                        assert_eq!(context.current_block.kind, BlockKind::Package);
+                        assert_eq!(context.peek(), Err(AmlError::RunOutOfStream));
+                        context.current_block = context.block_stack.pop().unwrap();
+                        context.contribute_arg(Argument::Object(Object::Package(elements).wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::VarPackage => {
+                        extract_args!(op[0..1] => [Argument::Object(total_elements)]);
+                        let total_elements =
+                            total_elements.clone().unwrap_transparent_reference().as_integer()? as usize;
+
+                        let mut elements = Vec::with_capacity(total_elements);
+                        for arg in &op.arguments[1..] {
+                            let Argument::Object(object) = arg else {
+                                return Err(AmlError::InternalError(
+                                    "Invalid argument type produced for package element".to_string(),
+                                ));
+                            };
+                            elements.push(object.clone());
+                        }
+
+                        /*
+                         * As above, we always remove the block here after the in-flight op has
+                         * been retired.
+                         */
+                        assert_eq!(context.current_block.kind, BlockKind::VarPackage);
+                        assert_eq!(context.peek(), Err(AmlError::RunOutOfStream));
+                        context.current_block = context.block_stack.pop().unwrap();
+                        context.contribute_arg(Argument::Object(Object::Package(elements).wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::If => {
+                        extract_args!(op => [
+                            Argument::TrackedPc(start_pc),
+                            Argument::PkgLength(then_length),
+                            Argument::Object(predicate),
+                        ]);
+                        // `If (Local0)`: the value in the local, as `While` does.
+                        let predicate = predicate.clone().unwrap_transparent_reference().as_integer()?;
+                        let remaining_then_length = then_length - (context.current_block.pc - start_pc);
+
+                        if predicate > 0 {
+                            context.start_new_block(BlockKind::IfThenBranch, remaining_then_length);
+                        } else {
+                            context.current_block.pc += remaining_then_length;
+
+                            /*
+                             * Skip over the prolog to the else branch if present. Also handle if
+                             * there are no more bytes to peek - the `If` op could be the last op
+                             * in a block.
+                             */
+                            const DEF_ELSE_OP: u8 = 0xa1;
+                            match context.peek() {
+                                Ok(DEF_ELSE_OP) => {
+                                    context.next()?;
+                                    let _else_length = context.pkglength()?;
+                                }
+                                Ok(_) => (),
+                                Err(AmlError::RunOutOfStream) => (),
+                                Err(other) => Err(other)?,
+                            }
+                        }
+                        context.retire_op(op);
+                    }
+                    opcode @ Opcode::CreateBitField
+                    | opcode @ Opcode::CreateByteField
+                    | opcode @ Opcode::CreateWordField
+                    | opcode @ Opcode::CreateDWordField
+                    | opcode @ Opcode::CreateQWordField => {
+                        extract_args!(op => [Argument::Object(buffer), Argument::Object(index)]);
+                        let name = context.namestring()?;
+                        // `CreateDWordField (Arg0, Arg1, …)`: through the
+                        // argument (or local) to its value.
+                        let index = index.clone().unwrap_transparent_reference().as_integer()?;
+                        let (offset, length) = match opcode {
+                            Opcode::CreateBitField => (index, 1),
+                            Opcode::CreateByteField => (index * 8, 8),
+                            Opcode::CreateWordField => (index * 8, 16),
+                            Opcode::CreateDWordField => (index * 8, 32),
+                            Opcode::CreateQWordField => (index * 8, 64),
+                            _ => unreachable!(),
+                        };
+                        self.namespace.lock().insert(
+                            name.resolve(&context.current_scope)?,
+                            Object::BufferField { buffer: buffer.clone(), offset: offset as usize, length }.wrap(),
+                        )?;
+                        context.retire_op(op);
+                    }
+                    Opcode::CreateField => {
+                        extract_args!(op => [Argument::Object(buffer), Argument::Object(bit_index), Argument::Object(num_bits)]);
+                        let name = context.namestring()?;
+                        let bit_index = bit_index.clone().unwrap_transparent_reference().as_integer()?;
+                        let num_bits = num_bits.clone().unwrap_transparent_reference().as_integer()?;
+
+                        self.namespace.lock().insert(
+                            name.resolve(&context.current_scope)?,
+                            Object::BufferField {
+                                buffer: buffer.clone(),
+                                offset: bit_index as usize,
+                                length: num_bits as usize,
+                            }
+                            .wrap(),
+                        )?;
+                        context.retire_op(op);
+                    }
+                    Opcode::CopyObject => {
+                        extract_args!(op => [Argument::Object(object), Argument::Object(target)]);
+                        self.do_copy_object(target.clone(), object.clone())?;
+                        context.retire_op(op);
+                    }
+                    Opcode::Store => {
+                        extract_args!(op => [Argument::Object(object), Argument::Object(target)]);
+                        self.do_store(target.clone(), object.clone())?;
+                        context.retire_op(op);
+                    }
+                    Opcode::RefOf => {
+                        extract_args!(op => [Argument::Object(object)]);
+                        let reference =
+                            Object::Reference { kind: ReferenceKind::RefOf, inner: object.clone() }.wrap();
+                        context.contribute_arg(Argument::Object(reference));
+                        context.retire_op(op);
+                    }
+                    Opcode::CondRefOf => {
+                        extract_args!(op => [Argument::Object(object), Argument::Object(target)]);
+                        let result = if let Object::Reference { kind: ReferenceKind::Unresolved, .. } = **object {
+                            Object::Integer(0)
+                        } else {
+                            let reference =
+                                Object::Reference { kind: ReferenceKind::RefOf, inner: object.clone() }.wrap();
+                            self.do_store(target.clone(), reference)?;
+                            Object::Integer(u64::MAX)
+                        };
+                        context.contribute_arg(Argument::Object(result.wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::DerefOf => {
+                        extract_args!(op => [Argument::Object(object)]);
+                        let result = self.do_deref_of(object.clone(), &context.current_scope)?;
+                        context.contribute_arg(Argument::Object(result));
+                        context.retire_op(op);
+                    }
+                    Opcode::Load => {
+                        extract_args!(op => [Argument::Namestring(object), Argument::Object(result)]);
+                        // TODO: read the AML from the object and load it
+                        warn!("Ignoring unsupported DefLoad operation (object={}, result = {})", object, result);
+                        context.retire_op(op);
+                        return Err(AmlError::LibUnimplemented);
+                    }
+                    Opcode::LoadTable => {
+                        extract_args!(op => [
+                            Argument::Object(signature),
+                            Argument::Object(oem_id),
+                            Argument::Object(oem_table_id),
+                            Argument::Object(root_path),
+                            Argument::Object(parameter_path),
+                            Argument::Object(parameter_data),
+                        ]);
+                        // TODO: search for the table in the RSDT/XSDT and load the contained AML
+                        warn!(
+                            "Ignoring unsupported DefLoadTable operation (signature = {}, oem_id = {}, oem_table_id = {}, root_path = {}, parameter_path = {}, parameter_data = {})",
+                            signature, oem_id, oem_table_id, root_path, parameter_path, parameter_data
+                        );
+                        context.retire_op(op);
+                        return Err(AmlError::LibUnimplemented);
+                    }
+                    Opcode::Sleep => {
+                        extract_args!(op => [Argument::Object(msec)]);
+                        self.handler.sleep(msec.as_integer()?);
+                        context.retire_op(op);
+                    }
+                    Opcode::Stall => {
+                        extract_args!(op => [Argument::Object(usec)]);
+                        self.handler.stall(usec.as_integer()?);
+                        context.retire_op(op);
+                    }
+                    Opcode::Acquire => {
+                        extract_args!(op => [Argument::Object(mutex)]);
+                        let mutex = mutex.clone().unwrap_reference();
+                        let Object::Mutex { mutex, sync_level: _ } = *mutex else {
+                            Err(AmlError::InvalidOperationOnObject { op: Operation::Acquire, typ: mutex.typ() })?
+                        };
+                        let timeout = context.next_u16()?;
+
+                        // TODO: should we do something with the sync level??
+                        if mutex == self.global_lock_mutex {
+                            self.acquire_global_lock(timeout)?;
+                        } else {
+                            self.handler.acquire(mutex, timeout)?;
+                        }
+
+                        context.retire_op(op);
+                    }
+                    Opcode::Release => {
+                        extract_args!(op => [Argument::Object(mutex)]);
+                        let mutex = mutex.clone().unwrap_reference();
+                        let Object::Mutex { mutex, sync_level: _ } = *mutex else {
+                            Err(AmlError::InvalidOperationOnObject { op: Operation::Release, typ: mutex.typ() })?
+                        };
+
+                        // TODO: should we do something with the sync level??
+                        if mutex == self.global_lock_mutex {
+                            self.release_global_lock()?;
+                        } else {
+                            self.handler.release(mutex);
+                        }
+
+                        context.retire_op(op);
+                    }
+                    Opcode::InternalMethodCall => {
+                        if context_stack.len() >= MAX_STACK_DEPTH {
+                            return Err(AmlError::MethodStackExceeded);
+                        }
+
+                        extract_args!(op[0..2] => [Argument::Object(method), Argument::Namestring(method_scope)]);
+                        let args = op.arguments[2..]
+                            .iter()
+                            .map(|arg| {
+                                if let Argument::Object(arg) = arg {
+                                    arg.clone()
+                                } else {
+                                    panic!();
+                                }
+                            })
+                            .collect();
+
+                        if let Object::Method { .. } = **method {
+                            self.namespace
+                                .lock()
+                                .add_level(method_scope.clone(), NamespaceLevelKind::MethodLocals)?;
+
+                            let new_context =
+                                MethodContext::new_from_method(method.clone(), args, method_scope.clone())?;
+                            let old_context = mem::replace(&mut context, new_context);
+                            context_stack.push(old_context);
+                            context.retire_op(op);
+                        } else if let Object::NativeMethod { ref f, .. } = **method {
+                            let result = f(&args)?;
+                            context.contribute_arg(Argument::Object(result));
+                        } else {
+                            panic!();
+                        }
+                    }
+                    Opcode::Return => {
+                        extract_args!(op => [Argument::Object(object)]);
+                        let object = object.clone().unwrap_transparent_reference();
+
+                        if let Some(last) = context_stack.pop() {
+                            context = last;
+                            context.contribute_arg(Argument::Object(object.clone()));
+                            context.retire_op(op);
+                        } else {
+                            /*
+                             * If this is the top-most context, this is a `Return` from the actual
+                             * method.
+                             */
+                            return Ok(object.clone());
+                        }
+                    }
+                    Opcode::ObjectType => {
+                        extract_args!(op => [Argument::Object(object)]);
+                        let object_type = self.object_type(object.clone())?;
+                        context.contribute_arg(Argument::Object(Object::Integer(object_type).wrap()));
+                        context.retire_op(op);
+                    }
+                    Opcode::SizeOf => self.do_size_of(&mut context, op)?,
+                    Opcode::Index => self.do_index(&mut context, op)?,
+                    Opcode::BankField => {
+                        extract_args!(op => [
+                            Argument::TrackedPc(start_pc),
+                            Argument::PkgLength(pkg_length),
+                            Argument::Namestring(region_name),
+                            Argument::Namestring(bank_name),
+                            Argument::Object(bank_value),
+                        ]);
+                        let bank_value = bank_value.as_integer()?;
+                        let field_flags = context.next()?;
+
+                        let (region, bank) = {
+                            let namespace = self.namespace.lock();
+                            let (_, region) = namespace.search(region_name, &context.current_scope)?;
+                            let (_, bank) = namespace.search(bank_name, &context.current_scope)?;
+                            (region, bank)
+                        };
+
+                        let kind = FieldUnitKind::Bank { region, bank, bank_value };
+                        self.parse_field_list(&mut context, kind, *start_pc, *pkg_length, field_flags)?;
+                        context.retire_op(op);
+                    }
+                    Opcode::While => {
+                        /*
+                         * We've just evaluated the predicate for an iteration of a while loop. If
+                         * false, skip over the rest of the loop, otherwise carry on.
+                         */
+                        extract_args!(op => [Argument::Object(predicate)]);
+                        let predicate = predicate.clone().unwrap_transparent_reference().as_integer()?;
+
+                        if predicate == 0 {
+                            // Exit from the while loop by skipping out of the current block
+                            context.current_block = context.block_stack.pop().unwrap();
+                            context.retire_op(op);
+                        }
+                    }
+                    Opcode::Match => {
+                        extract_args!(op => [
+                            Argument::Object(search_pkg),
+                            Argument::MatchOp(opcode_a),
+                            Argument::Object(operand_a),
+                            Argument::MatchOp(opcode_b),
+                            Argument::Object(operand_b),
+                            Argument::Object(start_index)]
+                        );
+
+                        let Object::Package(ref pkg) = **search_pkg else {
+                            return Err(AmlError::ObjectNotOfExpectedType {
+                                expected: ObjectType::Package,
+                                got: search_pkg.typ(),
+                            });
+                        };
+
+                        let result = do_match(
+                            pkg,
+                            opcode_a,
+                            operand_a.as_integer()?,
+                            opcode_b,
+                            operand_b.as_integer()?,
+                            start_index.as_integer()?,
+                        );
+
+                        context.contribute_arg(Argument::Object(Object::Integer(result).wrap()));
+                        context.retire_op(op);
+                    }
+                    _ => panic!("Unexpected operation has created in-flight op!"),
+                }
+            }
+
+            /*
+             * Now that we've retired as many in-flight operations as we have arguments for, move
+             * forward in the AML stream.
+             */
+            let opcode = match context.opcode() {
+                Ok(opcode) => opcode,
+                Err(AmlError::RunOutOfStream) => {
+                    /*
+                     * We've reached the end of the current block. What we should do about this
+                     * depends on what type of block it was.
+                     */
+                    match context.current_block.kind {
+                        BlockKind::Table => {
+                            break Ok(Object::Uninitialized.wrap());
+                        }
+                        BlockKind::Method { method_scope } => {
+                            self.namespace.lock().remove_level(method_scope)?;
+
+                            if let Some(prev_context) = context_stack.pop() {
+                                context = prev_context;
+                                continue;
+                            } else {
+                                /*
+                                 * If there is no explicit `Return` op, the result is undefined. We
+                                 * just return an uninitialized object.
+                                 */
+                                return Ok(Object::Uninitialized.wrap());
+                            }
+                        }
+                        BlockKind::Scope { old_scope } => {
+                            assert!(!context.block_stack.is_empty());
+                            context.current_block = context.block_stack.pop().unwrap();
+                            context.current_scope = old_scope;
+                            // Go round the loop again to get the next opcode for the new block
+                            continue;
+                        }
+                        BlockKind::Package => {
+                            /*
+                             * We've reached the end of the package. The in-flight op may have
+                             * already been completed in the case of the package specifying all of
+                             * its elements, or reach the end of the block here if it does not.
+                             *
+                             * In the latter case, fill in the rest of the package with
+                             * *distinct* uninitialized objects, and go round again to complete the
+                             * in-flight op.
+                             */
+                            assert!(!context.block_stack.is_empty());
+
+                            if let Some(package_op) = context.in_flight.last_mut()
+                                && package_op.op == Opcode::Package
+                            {
+                                let num_elements_left = package_op.expected_arguments - package_op.arguments.len();
+                                for _ in 0..num_elements_left {
+                                    package_op.arguments.push(Argument::Object(Object::Uninitialized.wrap()));
+                                }
+                            }
+
+                            // XXX: don't remove the package's block. Refer to completion of
+                            // package ops for rationale here.
+                            continue;
+                        }
+                        BlockKind::VarPackage => {
+                            assert!(!context.block_stack.is_empty());
+
+                            if let Some(package_op) = context.in_flight.last_mut()
+                                && package_op.op == Opcode::VarPackage
+                            {
+                                let num_elements_left = {
+                                    let Argument::Object(total_elements) = &package_op.arguments[0] else {
+                                        panic!()
+                                    };
+                                    let total_elements =
+                                        total_elements.clone().unwrap_transparent_reference().as_integer()?
+                                            as usize;
+
+                                    // Update the expected number of arguments to terminate the in-flight op
+                                    package_op.expected_arguments = package_op.arguments.len();
+                                    total_elements - (package_op.arguments.len() - 1)
+                                };
+
+                                for _ in 0..num_elements_left {
+                                    package_op.arguments.push(Argument::Object(Object::Uninitialized.wrap()));
+                                }
+                            }
+
+                            // As above, leave the package's block.
+                            continue;
+                        }
+                        BlockKind::IfThenBranch => {
+                            context.current_block = context.block_stack.pop().unwrap();
+
+                            /*
+                             * Check for an else-branch, and skip over it. We need to handle the
+                             * case here where there isn't a next byte - that just means the `If`
+                             * is the last op in a block.
+                             */
+                            const DEF_ELSE_OP: u8 = 0xa1;
+                            match context.peek() {
+                                Ok(DEF_ELSE_OP) => {
+                                    context.next()?;
+                                    let start_pc = context.current_block.pc;
+                                    let else_length = context.pkglength()?;
+                                    context.current_block.pc +=
+                                        else_length - (context.current_block.pc - start_pc);
+                                }
+                                Ok(_) => (),
+                                Err(AmlError::RunOutOfStream) => (),
+                                Err(other) => Err(other)?,
+                            };
+
+                            continue;
+                        }
+                        BlockKind::While { .. } => {
+                            self.continue_loop(&mut context)?;
+                            continue;
+                        }
+                    }
+                }
+                Err(other_err) => return Err(other_err),
+            };
+            match opcode {
+                Opcode::Zero => {
+                    /*
+                     * This represents a `Zero` operand that should create an `Integer` operand in
+                     * most places, but could also encode a `NullName` if we are expecting a
+                     * `Target`. We handle the latter in logic for stores to targets.
+                     */
+                    context.contribute_arg(Argument::Object(Object::Integer(0).wrap()));
+                }
+                Opcode::One => {
+                    context.contribute_arg(Argument::Object(Object::Integer(1).wrap()));
+                }
+                Opcode::MatchOp(opcode) => {
+                    if context.expecting_match_opcode() {
+                        context.contribute_arg(Argument::MatchOp(opcode));
+                    } else {
+                        Err(AmlError::IllegalOpcode(opcode as u16))?
+                    }
+                }
+                Opcode::Ones => {
+                    context.contribute_arg(Argument::Object(Object::Integer(u64::MAX).wrap()));
+                }
+                Opcode::Alias => {
+                    let source = context.namestring()?;
+                    let alias = context.namestring()?;
+
+                    let mut namespace = self.namespace.lock();
+                    let object = namespace.get(source.resolve(&context.current_scope)?)?.clone();
+                    let alias = alias.resolve(&context.current_scope)?;
+                    namespace.create_alias(alias, object)?;
+                }
+                Opcode::Name => {
+                    let name = context.namestring()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::Name,
+                        vec![Argument::Namestring(name)],
+                        &[ResolveBehaviour::Placeholder, ResolveBehaviour::TermArg],
+                    ));
+                }
+                Opcode::BytePrefix => {
+                    let value = context.next()?;
+                    context.contribute_arg(Argument::Object(Object::Integer(value as u64).wrap()));
+                }
+                Opcode::WordPrefix => {
+                    let value = context.next_u16()?;
+                    context.contribute_arg(Argument::Object(Object::Integer(value as u64).wrap()));
+                }
+                Opcode::DWordPrefix => {
+                    let value = context.next_u32()?;
+                    context.contribute_arg(Argument::Object(Object::Integer(value as u64).wrap()));
+                }
+                Opcode::StringPrefix => {
+                    let str_start = context.current_block.pc;
+                    while context.next()? != b'\0' {}
+                    // TODO: handle err
+                    let str = String::from(
+                        str::from_utf8(&context.current_block.stream()[str_start..(context.current_block.pc - 1)])
+                            .unwrap(),
+                    );
+                    context.contribute_arg(Argument::Object(Object::String(str).wrap()));
+                }
+                Opcode::QWordPrefix => {
+                    let value = context.next_u64()?;
+                    context.contribute_arg(Argument::Object(Object::Integer(value).wrap()));
+                }
+                Opcode::Scope => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let name = context.namestring()?;
+
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    let new_scope = name.resolve(&context.current_scope)?;
+                    self.namespace.lock().add_level(new_scope.clone(), NamespaceLevelKind::Scope)?;
+
+                    let old_scope = mem::replace(&mut context.current_scope, new_scope);
+                    context.start_new_block(BlockKind::Scope { old_scope }, remaining_length);
+                }
+                Opcode::Buffer => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::Buffer,
+                        vec![Argument::TrackedPc(start_pc), Argument::PkgLength(pkg_length)],
+                        &[ResolveBehaviour::Placeholder, ResolveBehaviour::Placeholder, ResolveBehaviour::TermArg],
+                    ));
+                }
+                Opcode::Package => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let num_elements = context.next()?;
+
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    /*
+                     * We now need to interpret an arbitrary number of package elements, bounded by
+                     * the remaining pkglength. This may be less than `num_elements` - the
+                     * remaining elements of the package are uninitialized. We utilise a
+                     * combination of a block to manage the pkglength, plus an in-flight op to
+                     * store interpreted arguments.
+                     */
+                    context.start(OpInFlight::new_dynamic(
+                        Opcode::Package,
+                        num_elements as usize,
+                        &[ResolveBehaviour::AsPackageElements],
+                    ));
+                    context.start_new_block(BlockKind::Package, remaining_length);
+                }
+                Opcode::VarPackage => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    /*
+                     * For variable packages, we're first going to parse a `TermArg` that encodes,
+                     * dynamically, how many elements the package will have. We then accept as many
+                     * elements as remain in the block, and we'll sort out how many are supposed to
+                     * be in the package later.
+                     */
+                    context.start(OpInFlight::new_dynamic(
+                        Opcode::VarPackage,
+                        usize::MAX,
+                        &[ResolveBehaviour::TermArg, ResolveBehaviour::AsPackageElements],
+                    ));
+                    context.start_new_block(BlockKind::VarPackage, remaining_length);
+                }
+                Opcode::Method => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let name = context.namestring()?;
+                    let flags = MethodFlags(context.next()?);
+
+                    let code_len = pkg_length - (context.current_block.pc - start_pc);
+                    let code = context.current_block.stream()
+                        [context.current_block.pc..(context.current_block.pc + code_len)]
+                        .to_vec();
+                    context.current_block.pc += code_len;
+
+                    let name = name.resolve(&context.current_scope)?;
+                    self.namespace.lock().insert(name, Object::Method { code, flags }.wrap())?;
+                }
+                Opcode::External => {
+                    let _name = context.namestring()?;
+                    let _object_type = context.next()?;
+                    let _arg_count = context.next()?;
+                }
+                Opcode::Mutex => {
+                    let name = context.namestring()?;
+                    let sync_level = context.next()?;
+
+                    let name = name.resolve(&context.current_scope)?;
+                    let mutex = self.handler.create_mutex();
+                    self.namespace.lock().insert(name, Object::Mutex { mutex, sync_level }.wrap())?;
+                }
+                Opcode::Event => {
+                    let name = context.namestring()?;
+
+                    let name = name.resolve(&context.current_scope)?;
+                    self.namespace.lock().insert(name, Object::Event(Arc::new(AtomicU64::new(0))).wrap())?;
+                }
+                Opcode::LoadTable => {
+                    context.start(OpInFlight::new(Opcode::LoadTable, &[ResolveBehaviour::TermArg; 6]));
+                }
+                Opcode::Load => {
+                    let name = context.namestring()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::Load,
+                        vec![Argument::Namestring(name)],
+                        &[ResolveBehaviour::Target],
+                    ));
+                }
+                Opcode::Stall => context.start(OpInFlight::new(Opcode::Stall, &[ResolveBehaviour::TermArg])),
+                Opcode::Sleep => context.start(OpInFlight::new(Opcode::Sleep, &[ResolveBehaviour::TermArg])),
+                Opcode::Acquire => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Release => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Signal => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Wait => context
+                    .start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName, ResolveBehaviour::TermArg])),
+                Opcode::Reset => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Notify => context
+                    .start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName, ResolveBehaviour::TermArg])),
+                Opcode::FromBCD | Opcode::ToBCD => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::TermArg, ResolveBehaviour::Target]))
+                }
+                Opcode::Revision => {
+                    context.contribute_arg(Argument::Object(Object::Integer(INTERPRETER_REVISION).wrap()));
+                }
+                Opcode::Debug => context.contribute_arg(Argument::Object(Object::Debug.wrap())),
+                Opcode::Fatal => {
+                    let typ = context.next()?;
+                    let code = context.next_u32()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::Fatal,
+                        vec![Argument::ByteData(typ), Argument::DWordData(code)],
+                        &[ResolveBehaviour::Placeholder, ResolveBehaviour::Placeholder, ResolveBehaviour::TermArg],
+                    ));
+                }
+                Opcode::Timer => {
+                    // Time has to be monotonically-increasing, in 100ns units
+                    let time = self.handler.nanos_since_boot() / 100;
+                    context.contribute_arg(Argument::Object(Object::Integer(time).wrap()));
+                }
+                Opcode::OpRegion => {
+                    let name = context.namestring()?;
+                    let region_space = context.next()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::OpRegion,
+                        vec![Argument::Namestring(name), Argument::ByteData(region_space)],
+                        &[
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::TermArg,
+                            ResolveBehaviour::TermArg,
+                        ],
+                    ));
+                }
+                Opcode::DataRegion => {
+                    let name = context.namestring()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::DataRegion,
+                        vec![Argument::Namestring(name)],
+                        &[
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::TermArg,
+                            ResolveBehaviour::TermArg,
+                            ResolveBehaviour::TermArg,
+                        ],
+                    ));
+                }
+                Opcode::Field => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let region_name = context.namestring()?;
+                    let field_flags = context.next()?;
+
+                    let (_, region) = self.namespace.lock().search(&region_name, &context.current_scope)?.clone();
+                    let kind = FieldUnitKind::Normal { region };
+                    self.parse_field_list(&mut context, kind, start_pc, pkg_length, field_flags)?;
+                }
+                Opcode::BankField => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let region_name = context.namestring()?;
+                    let bank_name = context.namestring()?;
+
+                    context.start(OpInFlight::new_with(
+                        Opcode::BankField,
+                        vec![
+                            Argument::TrackedPc(start_pc),
+                            Argument::PkgLength(pkg_length),
+                            Argument::Namestring(region_name),
+                            Argument::Namestring(bank_name),
+                        ],
+                        &[
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::Placeholder,
+                            ResolveBehaviour::TermArg,
+                        ],
+                    ));
+                }
+                Opcode::IndexField => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let index_name = context.namestring()?;
+                    let data_name = context.namestring()?;
+                    let field_flags = context.next()?;
+
+                    let (index, data) = {
+                        let namespace = self.namespace.lock();
+                        let (_, index) = namespace.search(&index_name, &context.current_scope)?;
+                        let (_, data) = namespace.search(&data_name, &context.current_scope)?;
+                        (index, data)
+                    };
+
+                    if let Object::FieldUnit(ref data_fu) = *data {
+                        if data_fu.flags.access_type_bytes()? < FieldFlags(field_flags).access_type_bytes()? {
+                            // On ACPICA this causes reads/writes to be truncated to the width of
+                            // the data register.
+                            //
+                            // The issue comes from this part of the spec:
+                            // "The value written to the IndexName register is defined to be a byte
+                            // offset that is aligned on an AccessType boundary."
+                            //
+                            // Consider the case where the index field is WordAcc but the data
+                            // register is ByteAcc. Only even numbers could be written to the index
+                            // register - multiples of width of word (2 bytes). But to access the
+                            // high byte of the word for the field, we'd need to write an odd number
+                            // to the index register. Which is not compatible with the spec.
+                            //
+                            // The ASL writer shouldn't have allowed this. And it seems that most
+                            // uses of IndexField are ByteAcc all around. So whatever strange
+                            // behaviour we allow is probably OK.
+                            //
+                            // But warn the user, just in case.
+                            warn!("Data field access width is smaller than normal field width at {:?}", start_pc);
+                        }
+                    } else {
+                        warn!("Wrong data field type in IndexField: {:?}", data);
+                    };
+
+                    let kind = FieldUnitKind::Index { index, data };
+                    self.parse_field_list(&mut context, kind, start_pc, pkg_length, field_flags)?;
+                }
+                Opcode::Device | Opcode::ThermalZone => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let name = context.namestring()?;
+
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    let new_scope = name.resolve(&context.current_scope)?;
+                    let (kind, object) = match opcode {
+                        Opcode::Device => (NamespaceLevelKind::Device, Object::Device),
+                        Opcode::ThermalZone => (NamespaceLevelKind::ThermalZone, Object::ThermalZone),
+                        _ => unreachable!(),
+                    };
+                    let mut namespace = self.namespace.lock();
+                    namespace.add_level(new_scope.clone(), kind)?;
+                    namespace.insert(new_scope.clone(), object.wrap())?;
+
+                    let old_scope = mem::replace(&mut context.current_scope, new_scope);
+                    context.start_new_block(BlockKind::Scope { old_scope }, remaining_length);
+                }
+                Opcode::Processor => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let name = context.namestring()?;
+                    let proc_id = context.next()?;
+                    let pblk_address = context.next_u32()?;
+                    let pblk_length = context.next()?;
+
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    let new_scope = name.resolve(&context.current_scope)?;
+                    let object = Object::Processor { proc_id, pblk_address, pblk_length };
+                    let mut namespace = self.namespace.lock();
+                    namespace.add_level(new_scope.clone(), NamespaceLevelKind::Processor)?;
+                    namespace.insert(new_scope.clone(), object.wrap())?;
+
+                    let old_scope = mem::replace(&mut context.current_scope, new_scope);
+                    context.start_new_block(BlockKind::Scope { old_scope }, remaining_length);
+                }
+                Opcode::PowerRes => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let name = context.namestring()?;
+                    let system_level = context.next()?;
+                    let resource_order = context.next_u16()?;
+
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+
+                    let new_scope = name.resolve(&context.current_scope)?;
+                    let object = Object::PowerResource { system_level, resource_order };
+                    let mut namespace = self.namespace.lock();
+                    namespace.add_level(new_scope.clone(), NamespaceLevelKind::PowerResource)?;
+                    namespace.insert(new_scope.clone(), object.wrap())?;
+
+                    let old_scope = mem::replace(&mut context.current_scope, new_scope);
+                    context.start_new_block(BlockKind::Scope { old_scope }, remaining_length);
+                }
+                Opcode::Local(local) => {
+                    let local = context.locals[local as usize].clone();
+                    context.contribute_arg(Argument::Object(
+                        Object::Reference { kind: ReferenceKind::Local, inner: local }.wrap(),
+                    ));
+                }
+                Opcode::Arg(arg) => {
+                    let arg = context.args[arg as usize].clone();
+                    context.contribute_arg(Argument::Object(
+                        Object::Reference { kind: ReferenceKind::Arg, inner: arg }.wrap(),
+                    ));
+                }
+                Opcode::Store => context.start(OpInFlight::new(
+                    Opcode::Store,
+                    &[ResolveBehaviour::TermArg, ResolveBehaviour::SuperName],
+                )),
+                Opcode::CopyObject => context.start(OpInFlight::new(
+                    Opcode::CopyObject,
+                    &[ResolveBehaviour::TermArg, ResolveBehaviour::SimpleName],
+                )),
+                Opcode::RefOf => context.start(OpInFlight::new(Opcode::RefOf, &[ResolveBehaviour::SuperName])),
+                Opcode::CondRefOf => context.start(OpInFlight::new(
+                    opcode,
+                    &[ResolveBehaviour::SuperNameIfExists, ResolveBehaviour::Target],
+                )),
+
+                Opcode::DualNamePrefix
+                | Opcode::MultiNamePrefix
+                | Opcode::Digit(_)
+                | Opcode::NameChar(_)
+                | Opcode::RootChar
+                | Opcode::ParentPrefixChar => {
+                    context.current_block.pc -= 1;
+                    let name = context.namestring()?;
+
+                    let behaviour = context
+                        .in_flight
+                        .last()
+                        .map(|op| op.resolve_behaviour())
+                        .unwrap_or(ResolveBehaviour::TermArg);
+                    match behaviour {
+                        // XXX: `NullName` is handled separately given its ambiguity with `Zero`
+                        ResolveBehaviour::SimpleName | ResolveBehaviour::SuperName | ResolveBehaviour::Target => {
+                            let object = self.namespace.lock().search(&name, &context.current_scope);
+                            match object {
+                                Ok((_resolved_name, object)) => {
+                                    context.contribute_arg(Argument::Object(
+                                        Object::Reference { kind: ReferenceKind::Named, inner: object }.wrap(),
+                                    ));
+                                }
+                                Err(err) => Err(err)?,
+                            }
+                        }
+                        ResolveBehaviour::SuperNameIfExists => {
+                            let object = self.namespace.lock().search(&name, &context.current_scope);
+                            match object {
+                                Ok((_resolved_name, object)) => {
+                                    context.contribute_arg(Argument::Object(object));
+                                }
+                                // A missing parent too: `CondRefOf (\A.B.C)` is
+                                // false when there's no `B` (firmware tests
+                                // paths that way, the Framework 13's included).
+                                Err(AmlError::ObjectDoesNotExist(_) | AmlError::LevelDoesNotExist(_)) => {
+                                    let reference = Object::Reference {
+                                        kind: ReferenceKind::Unresolved,
+                                        inner: Object::String(name.to_string()).wrap(),
+                                    };
+                                    context.contribute_arg(Argument::Object(reference.wrap()));
+                                }
+                                Err(err) => Err(err)?,
+                            }
+                        }
+                        ResolveBehaviour::TermArg => {
+                            let object = self.namespace.lock().search(&name, &context.current_scope);
+                            match object {
+                                Ok((resolved_name, object)) => {
+                                    if let Object::Method { flags, .. } | Object::NativeMethod { flags, .. } =
+                                        *object
+                                    {
+                                        context.start(OpInFlight::new_with_dynamic(
+                                            Opcode::InternalMethodCall,
+                                            vec![Argument::Object(object), Argument::Namestring(resolved_name)],
+                                            flags.arg_count(),
+                                            &[
+                                                ResolveBehaviour::Placeholder,
+                                                ResolveBehaviour::Placeholder,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                                ResolveBehaviour::TermArg,
+                                            ],
+                                        ))
+                                    } else if let Object::FieldUnit(ref field) = *object {
+                                        let value = self.do_field_read(field)?;
+                                        context.contribute_arg(Argument::Object(value));
+                                    } else if let Object::BufferField { .. } = *object {
+                                        let value = object.read_buffer_field(self.integer_size)?;
+                                        context.contribute_arg(Argument::Object(value.wrap()));
+                                    } else {
+                                        context.contribute_arg(Argument::Object(object));
+                                    }
+                                }
+                                Err(err) => Err(err)?,
+                            }
+                        }
+                        ResolveBehaviour::AsPackageElements => {
+                            /*
+                             * NameStrings in packages can refer to objects that are defined later,
+                             * including ones in another table. Keep the name and the scope it
+                             * appeared in, so resolution doesn't depend on table load order, or on
+                             * the scope the package is eventually used from. Store it directly;
+                             * indexing the package creates a reference to the element when needed.
+                             */
+                            context.contribute_arg(Argument::Object(
+                                Object::NamePath { name, scope: context.current_scope.clone() }.wrap(),
+                            ));
+                        }
+                        ResolveBehaviour::Placeholder => {
+                            panic!("Invalid resolve behaviour for name to be resolved!")
+                        }
+                        ResolveBehaviour::MatchOpcode => Err(AmlError::InvalidArgType)?,
+                    }
+                }
+
+                Opcode::Add
+                | Opcode::Subtract
+                | Opcode::Multiply
+                | Opcode::ShiftLeft
+                | Opcode::ShiftRight
+                | Opcode::Mod
+                | Opcode::Nand
+                | Opcode::And
+                | Opcode::Or
+                | Opcode::Nor
+                | Opcode::Xor
+                | Opcode::Concat => {
+                    context.start(OpInFlight::new(
+                        opcode,
+                        &[ResolveBehaviour::TermArg, ResolveBehaviour::TermArg, ResolveBehaviour::Target],
+                    ));
+                }
+
+                Opcode::Divide => context.start(OpInFlight::new(
+                    Opcode::Divide,
+                    &[
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::Target,
+                        ResolveBehaviour::Target,
+                    ],
+                )),
+                Opcode::Increment | Opcode::Decrement => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName]))
+                }
+                Opcode::Not => context
+                    .start(OpInFlight::new(Opcode::Not, &[ResolveBehaviour::TermArg, ResolveBehaviour::Target])),
+                Opcode::FindSetLeftBit | Opcode::FindSetRightBit => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::TermArg, ResolveBehaviour::Target]))
+                }
+                // Resolve as a SuperName so BufferField and FieldUnit objects are not read eagerly
+                // as TermArgs; DerefOf handles those reads itself when executing the opcode.
+                Opcode::DerefOf => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::ConcatRes => context.start(OpInFlight::new(
+                    opcode,
+                    &[ResolveBehaviour::TermArg, ResolveBehaviour::TermArg, ResolveBehaviour::Target],
+                )),
+                Opcode::SizeOf => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Index => context.start(OpInFlight::new(
+                    opcode,
+                    &[ResolveBehaviour::TermArg, ResolveBehaviour::TermArg, ResolveBehaviour::Target],
+                )),
+                Opcode::Match => context.start(OpInFlight::new(
+                    opcode,
+                    &[
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::MatchOpcode,
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::MatchOpcode,
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::TermArg,
+                    ],
+                )),
+
+                Opcode::CreateBitField
+                | Opcode::CreateByteField
+                | Opcode::CreateWordField
+                | Opcode::CreateDWordField
+                | Opcode::CreateQWordField => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::TermArg; 2]))
+                }
+                Opcode::CreateField => {
+                    context.start(OpInFlight::new(Opcode::CreateField, &[ResolveBehaviour::TermArg; 3]))
+                }
+
+                Opcode::LNot => {
+                    context.start(OpInFlight::new(Opcode::LNot, &[ResolveBehaviour::TermArg]));
+                }
+
+                Opcode::LAnd
+                | Opcode::LOr
+                | Opcode::LNotEqual
+                | Opcode::LLessEqual
+                | Opcode::LGreaterEqual
+                | Opcode::LEqual
+                | Opcode::LGreater
+                | Opcode::LLess => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::TermArg; 2]));
+                }
+
+                Opcode::ToBuffer | Opcode::ToDecimalString | Opcode::ToHexString | Opcode::ToInteger => {
+                    context.start(OpInFlight::new(opcode, &[ResolveBehaviour::TermArg, ResolveBehaviour::Target]))
+                }
+                Opcode::ToString => context.start(OpInFlight::new(
+                    opcode,
+                    &[ResolveBehaviour::TermArg, ResolveBehaviour::TermArg, ResolveBehaviour::Target],
+                )),
+
+                Opcode::ObjectType => context.start(OpInFlight::new(opcode, &[ResolveBehaviour::SuperName])),
+                Opcode::Mid => context.start(OpInFlight::new(
+                    Opcode::Mid,
+                    &[
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::TermArg,
+                        ResolveBehaviour::Target,
+                    ],
+                )),
+                Opcode::If => {
+                    let start_pc = context.current_block.pc;
+                    let then_length = context.pkglength()?;
+                    context.start(OpInFlight::new_with(
+                        Opcode::If,
+                        vec![Argument::TrackedPc(start_pc), Argument::PkgLength(then_length)],
+                        &[ResolveBehaviour::Placeholder, ResolveBehaviour::Placeholder, ResolveBehaviour::TermArg],
+                    ));
+                }
+                Opcode::Else => return Err(AmlError::ElseFoundWithoutCorrespondingIf),
+                Opcode::While => {
+                    let start_pc = context.current_block.pc;
+                    let pkg_length = context.pkglength()?;
+                    let remaining_length = pkg_length - (context.current_block.pc - start_pc);
+                    context.start_new_block(
+                        BlockKind::While {
+                            start_pc: context.current_block.pc,
+                            start_nanos: self.handler.nanos_since_boot(),
+                        },
+                        remaining_length,
+                    );
+                    context.start(OpInFlight::new(Opcode::While, &[ResolveBehaviour::TermArg]));
+                }
+                Opcode::Continue => {
+                    self.continue_loop(&mut context)?;
+                }
+                Opcode::Break => {
+                    if let BlockKind::While { .. } = &context.current_block.kind {
+                        context.current_block = context.block_stack.pop().unwrap();
+                    } else {
+                        loop {
+                            let Some(block) = context.block_stack.pop() else {
+                                Err(AmlError::BreakOutsideOfWhile)?
+                            };
+                            if let BlockKind::While { .. } = block.kind {
+                                context.current_block = context.block_stack.pop().unwrap();
+                                break;
+                            }
+                        }
+                    }
+                }
+                Opcode::Return => context.start(OpInFlight::new(Opcode::Return, &[ResolveBehaviour::TermArg])),
+                Opcode::Noop => {}
+                Opcode::Breakpoint => {
+                    self.handler.breakpoint();
+                }
+
+                Opcode::InternalMethodCall => panic!(),
+            }
+        }
+    }
+
+    fn parse_field_list(
+        &self,
+        context: &mut MethodContext,
+        kind: FieldUnitKind,
+        start_pc: usize,
+        pkg_length: usize,
+        mut flags: u8,
+    ) -> Result<(), AmlError> {
+        const RESERVED_FIELD: u8 = 0x00;
+        const ACCESS_FIELD: u8 = 0x01;
+        const CONNECT_FIELD: u8 = 0x02;
+        const EXTENDED_ACCESS_FIELD: u8 = 0x03;
+
+        let mut field_offset = 0;
+
+        while context.current_block.pc < (start_pc + pkg_length) {
+            match context.next()? {
+                RESERVED_FIELD => {
+                    let length = context.pkglength()?;
+                    field_offset += length;
+                }
+                ACCESS_FIELD => {
+                    /*
+                     * These aren't actually fields themselves, but are created by `AccessAs` AML
+                     * elements. They change the access type and attributes for remaining fields in
+                     * the list.
+                     */
+                    let access_type = context.next()?;
+                    let _access_attrib = context.next()?;
+                    flags.set_bits(0..4, access_type);
+                }
+                EXTENDED_ACCESS_FIELD => {
+                    let access_type = context.next()?;
+                    let _extended_access_attrib = context.next()?;
+                    let _access_length = context.next()?;
+                    flags.set_bits(0..4, access_type);
+                    warn!("Ignoring extended attributes and length in ExtendedAccessField");
+                }
+                CONNECT_FIELD => {
+                    // TODO: either consume a namestring or `BufferData` (it's not
+                    // clear what a buffer data acc is lmao)
+                    todo!("Connect field :(");
+                }
+                _ => {
+                    context.current_block.pc -= 1;
+                    // TODO: this should only ever be a nameseg really...
+                    let field_name = context.namestring()?;
+                    let field_length = context.pkglength()?;
+
+                    let field = Object::FieldUnit(FieldUnit {
+                        kind: kind.clone(),
+                        bit_index: field_offset,
+                        bit_length: field_length,
+                        flags: FieldFlags(flags),
+                    });
+                    self.namespace.lock().insert(field_name.resolve(&context.current_scope)?, field.wrap())?;
+
+                    field_offset += field_length;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn do_binary_maths(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op[0..3] => [Argument::Object(left), Argument::Object(right), Argument::Object(target)]);
+        let target2 = if op.op == Opcode::Divide { Some(&op.arguments[3]) } else { None };
+
+        let left = left.clone().unwrap_transparent_reference().to_integer(self.integer_size)?;
+        let right = right.clone().unwrap_transparent_reference().to_integer(self.integer_size)?;
+
+        if right == 0 && matches!(op.op, Opcode::Divide | Opcode::Mod) {
+            return Err(AmlError::InternalError("Division by zero".to_string()));
+        }
+        // Divide's targets are the remainder, then the quotient.
+        let (target, target2) = match target2 {
+            Some(Argument::Object(quotient)) => (quotient, Some(target)),
+            _ => (target, None),
+        };
+        let result = match op.op {
+            Opcode::Add => left.wrapping_add(right),
+            Opcode::Subtract => left.wrapping_sub(right),
+            Opcode::Multiply => left.wrapping_mul(right),
+            Opcode::Divide => {
+                if let Some(remainder) = target2 {
+                    self.do_store(remainder.clone(), Object::Integer(left.wrapping_rem(right)).wrap())?;
+                }
+                left.wrapping_div_euclid(right)
+            }
+            Opcode::ShiftLeft => left.wrapping_shl(right as u32),
+            Opcode::ShiftRight => left.wrapping_shr(right as u32),
+            Opcode::Mod => left.wrapping_rem(right),
+            Opcode::Nand => !(left & right),
+            Opcode::And => left & right,
+            Opcode::Or => left | right,
+            Opcode::Nor => !(left | right),
+            Opcode::Xor => left ^ right,
+            _ => panic!(),
+        };
+
+        let result = Object::Integer(result).wrap();
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_unary_maths(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(operand)]);
+        let operand = operand.clone().unwrap_transparent_reference().as_integer()?;
+
+        let result = match op.op {
+            Opcode::FindSetLeftBit => {
+                if operand == 0 {
+                    0
+                } else {
+                    /*
+                     * This is a particularly important place to respect the integer width as set
+                     * by the DSDT revision.
+                     */
+                    match self.integer_size {
+                        IntegerSize::FourBytes => ((operand as u32).leading_zeros() + 1) as u64,
+                        IntegerSize::EightBytes => (operand.leading_zeros() + 1) as u64,
+                    }
+                }
+            }
+            Opcode::FindSetRightBit => {
+                if operand == 0 {
+                    0
+                } else {
+                    (operand.trailing_zeros() + 1) as u64
+                }
+            }
+            Opcode::Not => {
+                if operand == 0 {
+                    u64::MAX
+                } else {
+                    0
+                }
+            }
+            _ => panic!(),
+        };
+
+        context.contribute_arg(Argument::Object(Object::Integer(result).wrap()));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_logical_op(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        if op.op == Opcode::LNot {
+            extract_args!(op => [Argument::Object(operand)]);
+            let operand = operand.clone().unwrap_transparent_reference().as_integer()?;
+            let result = if operand == 0 { u64::MAX } else { 0 };
+
+            context.contribute_arg(Argument::Object(Object::Integer(result).wrap()));
+            context.retire_op(op);
+            return Ok(());
+        }
+
+        extract_args!(op => [Argument::Object(left), Argument::Object(right)]);
+        let left = left.clone().unwrap_transparent_reference();
+        let right = right.clone().unwrap_transparent_reference();
+
+        let mut int_size = self.integer_size;
+
+        // Make sure both sides are the same type.
+        let right = match *left {
+            Object::Integer(_) => &Object::Integer(right.as_integer()?),
+            Object::String(_) => &Object::String(right.as_string()?.parse().unwrap()),
+            Object::Buffer(_) => {
+                // When doing && or ||, uACPI and NT only compare the first 4 bytes of a buffer.
+                int_size = IntegerSize::FourBytes;
+                if right.typ() == ObjectType::Buffer {
+                    &*right
+                } else {
+                    &Object::Buffer(right.to_buffer(self.integer_size)?)
+                }
+            }
+            _ => Err(AmlError::InvalidOperationOnObject { op: Operation::LogicalOp, typ: left.typ() })?,
+        };
+
+        let ordering = left.aml_cmp(right);
+        let result = match op.op {
+            Opcode::LAnd => (left.to_integer(int_size)? > 0) && (right.to_integer(int_size)? > 0),
+            Opcode::LOr => (left.to_integer(int_size)? > 0) || (right.to_integer(int_size)? > 0),
+            Opcode::LNotEqual => ordering?.is_ne(),
+            Opcode::LLessEqual => ordering?.is_le(),
+            Opcode::LGreaterEqual => ordering?.is_ge(),
+            Opcode::LEqual => ordering?.is_eq(),
+            Opcode::LGreater => ordering?.is_gt(),
+            Opcode::LLess => ordering?.is_lt(),
+            _ => panic!(),
+        };
+        let result = if result { Object::Integer(u64::MAX) } else { Object::Integer(0) };
+
+        context.contribute_arg(Argument::Object(result.wrap()));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_to_buffer(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(operand), Argument::Object(target)]);
+        let operand = operand.clone().unwrap_transparent_reference();
+
+        let result = match *operand {
+            Object::Buffer(ref bytes) => Object::Buffer(bytes.clone()),
+            Object::Integer(value) => {
+                if self.integer_size == IntegerSize::EightBytes {
+                    Object::Buffer(value.to_le_bytes().to_vec())
+                } else {
+                    Object::Buffer((value as u32).to_le_bytes().to_vec())
+                }
+            }
+            Object::String(ref value) => {
+                // XXX: an empty string is converted to an empty buffer, *without* the null-terminator
+                if value.is_empty() {
+                    Object::Buffer(vec![])
+                } else {
+                    let mut bytes = value.as_bytes().to_vec();
+                    bytes.push(b'\0');
+                    Object::Buffer(bytes)
+                }
+            }
+            _ => Err(AmlError::InvalidOperationOnObject { op: Operation::ToBuffer, typ: operand.typ() })?,
+        }
+        .wrap();
+
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_to_integer(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(operand), Argument::Object(target)]);
+        let operand = operand.clone().unwrap_transparent_reference();
+
+        let result = Object::Integer(operand.to_integer(self.integer_size)?).wrap();
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_to_string(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(source), Argument::Object(length), Argument::Object(target)]);
+        let source = source.clone().unwrap_transparent_reference();
+        let source = source.as_buffer()?;
+        let length = length.clone().unwrap_transparent_reference().as_integer()? as usize;
+
+        let result = if source.is_empty() {
+            Object::String(String::new())
+        } else {
+            // Up to the first null, which isn't part of the string.
+            let mut buffer = source.split(|b| *b == b'\0').next().unwrap();
+            if length < usize::MAX {
+                buffer = &buffer[0..usize::min(length, buffer.len())];
+            }
+            let string = str::from_utf8(buffer).map_err(|_| AmlError::InvalidOperationOnObject {
+                op: Operation::ToString,
+                typ: ObjectType::Buffer,
+            })?;
+            Object::String(string.to_string())
+        }
+        .wrap();
+
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    /// Perform a `ToDecimalString` or `ToHexString` operation
+    fn do_to_dec_hex_string(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(operand), Argument::Object(target)]);
+        let operand = operand.clone().unwrap_transparent_reference();
+
+        let result = match *operand {
+            Object::String(ref value) => Object::String(value.clone()),
+            Object::Integer(value) => match op.op {
+                Opcode::ToDecimalString => Object::String(value.to_string()),
+                Opcode::ToHexString => Object::String(alloc::format!("{value:#X}")),
+                _ => panic!(),
+            },
+            Object::Buffer(ref bytes) => {
+                if bytes.is_empty() {
+                    Object::String(String::new())
+                } else {
+                    let mut string = String::new();
+                    for byte in bytes {
+                        let as_str = match op.op {
+                            Opcode::ToDecimalString => alloc::format!("{byte},"),
+                            Opcode::ToHexString => alloc::format!("{byte:#04X},"),
+                            _ => panic!(),
+                        };
+                        string.push_str(&as_str);
+                    }
+                    // Remove last comma, if present
+                    if !string.is_empty() {
+                        string.pop();
+                    }
+                    Object::String(string)
+                }
+            }
+            _ => Err(AmlError::InvalidOperationOnObject { op: Operation::ToDecOrHexString, typ: operand.typ() })?,
+        }
+        .wrap();
+
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_mid(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(source), Argument::Object(index), Argument::Object(length), Argument::Object(target)]);
+        let index = index.clone().unwrap_transparent_reference().as_integer()? as usize;
+        let length = length.clone().unwrap_transparent_reference().as_integer()? as usize;
+
+        let result = match **source {
+            Object::String(ref string) => {
+                if index >= string.len() {
+                    Object::String(String::new())
+                } else {
+                    let upper = usize::min(index + length, index + string.len());
+                    let chars = &string[index..upper];
+                    Object::String(String::from(chars))
+                }
+            }
+            Object::Buffer(ref buffer) => {
+                if index >= buffer.len() {
+                    Object::Buffer(vec![])
+                } else {
+                    let upper = usize::min(index + length, index + buffer.len());
+                    let bytes = &buffer[index..upper];
+                    Object::Buffer(bytes.to_vec())
+                }
+            }
+            _ => Err(AmlError::InvalidOperationOnObject { op: Operation::Mid, typ: source.typ() })?,
+        }
+        .wrap();
+
+        self.do_store(target.clone(), result.clone())?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_concat(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(source1), Argument::Object(source2), Argument::Object(target)]);
+        let source1 = source1.clone().unwrap_transparent_reference();
+        let source2 = source2.clone().unwrap_transparent_reference();
+
+        fn resolve_as_string(obj: &Object) -> String {
+            match obj {
+                Object::Uninitialized => "[Uninitialized Object]".to_string(),
+                Object::Buffer(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+                Object::BufferField { .. } => "[Buffer Field]".to_string(),
+                Object::Device => "[Device]".to_string(),
+                Object::Event(_) => "[Event]".to_string(),
+                Object::FieldUnit(_) => "[Field]".to_string(),
+                Object::Integer(value) => value.to_string(),
+                Object::Method { .. } | Object::NativeMethod { .. } => "[Control Method]".to_string(),
+                Object::Mutex { .. } => "[Mutex]".to_string(),
+                Object::Reference { inner, .. } => resolve_as_string(&(inner.clone().unwrap_reference())),
+                // We can't resolve the name here, as we don't have access to the namespace
+                Object::NamePath { name, .. } => name.to_string(),
+                Object::OpRegion(_) => "[Operation Region]".to_string(),
+                Object::Package(_) => "[Package]".to_string(),
+                Object::PowerResource { .. } => "[Power Resource]".to_string(),
+                Object::Processor { .. } => "[Processor]".to_string(),
+                Object::RawDataBuffer => "[Raw Data Buffer]".to_string(),
+                Object::String(value) => value.clone(),
+                Object::ThermalZone => "[Thermal Zone]".to_string(),
+                Object::Debug => "[Debug Object]".to_string(),
+            }
+        }
+
+        let result = match source1.typ() {
+            ObjectType::Integer => {
+                let source1 = source1.as_integer()?;
+                let source2 = source2.to_integer(self.integer_size)?;
+                let mut buffer = Vec::new();
+                if self.integer_size == IntegerSize::EightBytes {
+                    buffer.extend_from_slice(&source1.to_le_bytes());
+                    buffer.extend_from_slice(&source2.to_le_bytes());
+                } else {
+                    buffer.extend_from_slice(&(source1 as u32).to_le_bytes());
+                    buffer.extend_from_slice(&(source2 as u32).to_le_bytes());
+                }
+                Object::Buffer(buffer).wrap()
+            }
+            ObjectType::Buffer => {
+                let mut buffer = source1.as_buffer()?.to_vec();
+                buffer.extend(source2.to_buffer(self.integer_size)?);
+                Object::Buffer(buffer).wrap()
+            }
+            _ => {
+                let source1 = resolve_as_string(&source1);
+                let source2 = resolve_as_string(&source2);
+                Object::String(source1 + &source2).wrap()
+            }
+        };
+
+        let result = self.do_store(target.clone(), result)?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_from_bcd(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(value)]);
+        let mut value = value.clone().unwrap_transparent_reference().as_integer()?;
+
+        let mut result = 0;
+        let mut i = 1;
+        while value > 0 {
+            result += (value & 0x0f) * i;
+            i *= 10;
+            value >>= 4;
+        }
+
+        context.contribute_arg(Argument::Object(Object::Integer(result).wrap()));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_to_bcd(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(value)]);
+        let mut value = value.clone().unwrap_transparent_reference().as_integer()?;
+
+        let mut result = 0;
+        let mut i = 0;
+        while value > 0 {
+            result |= (value % 10) << (4 * i);
+            value /= 10;
+            i += 1;
+        }
+
+        context.contribute_arg(Argument::Object(Object::Integer(result).wrap()));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_size_of(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(object)]);
+        let object = self.resolve_name_path(object.clone())?;
+
+        let result = match *object {
+            Object::Buffer(ref buffer) => buffer.len(),
+            Object::String(ref str) => str.len(),
+            Object::Package(ref package) => package.len(),
+            _ => Err(AmlError::InvalidOperationOnObject { op: Operation::SizeOf, typ: object.typ() })?,
+        };
+
+        context.contribute_arg(Argument::Object(Object::Integer(result as u64).wrap()));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    fn do_index(&self, context: &mut MethodContext, op: OpInFlight) -> Result<(), AmlError> {
+        extract_args!(op => [Argument::Object(object), Argument::Object(index_value), Argument::Object(target)]);
+        let object = object.clone().unwrap_transparent_reference();
+        let index_value = index_value.clone().unwrap_transparent_reference().as_integer()?;
+
+        let result = match *object {
+            Object::Buffer(ref buffer) => {
+                if index_value as usize >= buffer.len() {
+                    Err(AmlError::IndexOutOfBounds)?
+                }
+
+                Object::Reference {
+                    kind: ReferenceKind::RefOf,
+                    inner: Object::BufferField {
+                        buffer: object.clone(),
+                        offset: index_value as usize * 8,
+                        length: 8,
+                    }
+                    .wrap(),
+                }
+            }
+            Object::String(ref string) => {
+                if index_value as usize >= string.len() {
+                    Err(AmlError::IndexOutOfBounds)?
+                }
+
+                Object::Reference {
+                    kind: ReferenceKind::RefOf,
+                    inner: Object::BufferField {
+                        buffer: object.clone(),
+                        offset: index_value as usize * 8,
+                        length: 8,
+                    }
+                    .wrap(),
+                }
+            }
+            Object::Package(ref package) => {
+                let Some(element) = package.get(index_value as usize) else { Err(AmlError::IndexOutOfBounds)? };
+                // An `Index` reference: a store replaces the element.
+                Object::Reference { kind: ReferenceKind::Index, inner: element.clone() }
+            }
+            _ => Err(AmlError::IndexOutOfBounds)?,
+        }
+        .wrap();
+
+        self.do_store(target.clone(), result.clone())?;
+        context.contribute_arg(Argument::Object(result));
+        context.retire_op(op);
+        Ok(())
+    }
+
+    /// Resolve an object to the value it refers to, looking up `NamePath`s (i.e. names that were
+    /// used as package elements) in the namespace. Objects that aren't references are returned
+    /// unchanged.
+    fn resolve_name_path(&self, object: WrappedObject) -> Result<WrappedObject, AmlError> {
+        let mut object = object.unwrap_reference();
+
+        /*
+         * A name can resolve to another unresolved name, and firmware is free to make that
+         * circular. Bound the number of indirections we follow rather than recursing.
+         */
+        for _ in 0..MAX_NAME_PATH_INDIRECTIONS {
+            let (name, scope) = match *object {
+                Object::NamePath { ref name, ref scope } => (name.clone(), scope.clone()),
+                _ => return Ok(object),
+            };
+            let (_, resolved) = self.namespace.lock().search(&name, &scope)?;
+            object = resolved.unwrap_reference();
+        }
+
+        Err(AmlError::NameResolutionLoop)
+    }
+
+    fn object_type(&self, object: WrappedObject) -> Result<u64, AmlError> {
+        let object = self.resolve_name_path(object)?;
+
+        // TODO: this should technically support scopes as well - this is less easy
+        // (they should return `0`)
+        Ok(match object.typ() {
+            ObjectType::Uninitialized => 0,
+            ObjectType::Integer => 1,
+            ObjectType::String => 2,
+            ObjectType::Buffer => 3,
+            ObjectType::Package => 4,
+            ObjectType::FieldUnit => 5,
+            ObjectType::Device => 6,
+            ObjectType::Event => 7,
+            ObjectType::Method => 8,
+            ObjectType::Mutex => 9,
+            ObjectType::OpRegion => 10,
+            ObjectType::PowerResource => 11,
+            ObjectType::Processor => 12,
+            ObjectType::ThermalZone => 13,
+            ObjectType::BufferField => 14,
+            // XXX: 15 is reserved
+            ObjectType::Debug => 16,
+            ObjectType::RawDataBuffer => 17,
+            ObjectType::Reference => unreachable!(),
+        })
+    }
+
+    fn do_deref_of(&self, object: WrappedObject, current_scope: &AmlName) -> Result<WrappedObject, AmlError> {
+        // Through a reference (`DerefOf (Index (PKG, 1))`), a string is the
+        // value; only a string itself names an object.
+        let through_reference = matches!(*object, Object::Reference { .. });
+        let object = self.resolve_name_path(object)?;
+        match &*object {
+            Object::BufferField { .. } => Ok(object.read_buffer_field(self.integer_size)?.wrap()),
+            Object::FieldUnit(field) => self.do_field_read(field),
+            Object::String(path) if !through_reference => {
+                let path = AmlName::from_str(path)?;
+                let (_, object) = self.namespace.lock().search(&path, current_scope)?;
+                Ok(object.clone())
+            }
+            Object::Reference { .. } => unreachable!(),
+            _ => Ok(object),
+        }
+    }
+
+    /// Perform a store of `object` into `target`, matching the expected behaviour of `DefStore`,
+    /// which depends on the target:
+    ///    - Locals and Index references are overwritten, unless the Local contains a reference
+    ///      (e.g. obtained via `RefOf`), in which case a store is performed to the referenced
+    ///      object with implicit casting.
+    ///    - Args are overwritten, unless they contain a reference, in which case the referenced
+    ///      object is *usually* overwritten. References from Arg to Local without an intermediate
+    ///      `RefOf` cause the Arg to be overwritten instead of the Local (see
+    ///      [issue #313](https://github.com/rust-osdev/acpi/issues/313)).
+    ///    - There is an exception to this, needed to match the Windows NT interpreter: if an Arg
+    ///      referencing a Local is found whilst unwrapping a real reference (e.g. a Local holding
+    ///      `RefOf(Arg0)`, where `Arg0` was itself passed a `Local` directly) and the final result
+    ///      of unwrapping is a string, the string is modified instead of the Arg. This does not
+    ///      apply if the Arg is the direct target of the store and only applies to Strings. (This
+    ///      sounds odd, but is the Windows way)
+    ///    - Named objects are stored into, with implicit casting
+    ///
+    /// This is complex so may be explained better by `tests/store.asl` and
+    /// [`Object::unwrap_ref_for_store`]!
+    fn do_store(&self, target: WrappedObject, object: WrappedObject) -> Result<WrappedObject, AmlError> {
+        let object = object.unwrap_transparent_reference();
+        let token = self.object_token.lock();
+
+        match unsafe { target.gain_mut(&token) } {
+            Object::Reference { .. } => {
+                let (target_object, implicit_cast_reqd) = target.unwrap_ref_for_store()?;
+
+                if !implicit_cast_reqd {
+                    unsafe {
+                        *target_object.gain_mut(&token) = (*object).clone();
+                    }
+                } else {
+                    match &*target_object {
+                        Object::Integer(_) | Object::String(_) | Object::Buffer(_) => {
+                            let target_object = unsafe { target_object.gain_mut(&token) };
+                            target_object.replace_with_implicit_casting((*object).clone())?;
+                        }
+                        Object::BufferField { .. } => {
+                            let target_object = unsafe { target_object.gain_mut(&token) };
+                            match unsafe { object.gain_mut(&token) } {
+                                Object::Integer(value) => {
+                                    target_object.write_buffer_field(&value.to_le_bytes(), &token)?
+                                }
+                                Object::Buffer(value) => {
+                                    target_object.write_buffer_field(value.as_slice(), &token)?
+                                }
+                                _ => panic!(),
+                            }
+                        }
+
+                        /*
+                         * TODO: stores to fields with BufferAcc can return a different value to the
+                         * object stored. This is used for complex field types with a
+                         * write-then-read pattern. We should perform a read in those cases and
+                         * return that instead.
+                         */
+                        Object::FieldUnit(field_unit) => self.do_field_write(field_unit, object.clone())?,
+
+                        _ => {
+                            return Err(AmlError::InvalidOperationOnObject {
+                                op: Operation::Store,
+                                typ: target_object.typ(),
+                            });
+                        }
+                    }
+                }
+            }
+            Object::Debug => self.handler.handle_debug(&object),
+            Object::Integer(0) => {} // Store to NullName
+            _ => return Err(AmlError::InvalidOperationOnObject { op: Operation::Store, typ: target.typ() }),
+        }
+
+        Ok(object)
+    }
+
+    /// Copy `object` into `target`, matching the expected behaviour of `DefCopyObject`, which
+    /// depends on the object referenced:
+    ///    - Locals are overwritten
+    ///    - Args are overwritten, unless they are references, in which case the referenced object is overwritten
+    ///    - Objects referenced by name are overwritten
+    ///    - Index references cause the object at the index to be overwritten
+    ///    - Other reference operations are not allowed
+    fn do_copy_object(&self, target: WrappedObject, object: WrappedObject) -> Result<(), AmlError> {
+        let Object::Reference { kind, ref inner } = *target else {
+            return Err(AmlError::InternalError("Target of CopyObject must be a reference".to_string()));
+        };
+        let object = object.clone().unwrap_transparent_reference();
+        let token = self.object_token.lock();
+
+        let dst = match kind {
+            ReferenceKind::Named | ReferenceKind::Local => inner.clone().unwrap_transparent_reference(),
+            ReferenceKind::Arg => {
+                if let Object::Reference { kind: _, inner: ref inner_inner } = **inner {
+                    inner_inner.clone()
+                } else {
+                    inner.clone().unwrap_transparent_reference()
+                }
+            }
+            // A package element, replaced.
+            ReferenceKind::Index => inner.clone(),
+            ReferenceKind::RefOf | ReferenceKind::Unresolved => return Err(AmlError::StoreToInvalidReferenceType),
+        };
+
+        unsafe {
+            *dst.gain_mut(&token) = (*object).clone();
+        }
+
+        Ok(())
+    }
+
+    /// Do a read from a field by performing one or more well-formed accesses to the underlying
+    /// operation regions, and then shifting and masking the resulting value as appropriate. Will
+    /// return either an `Integer` or `Buffer` as appropriate, guided by the size of the field
+    /// and expected integer size (as per the DSDT revision).
+    fn do_field_read(&self, field: &FieldUnit) -> Result<WrappedObject, AmlError> {
+        let needs_buffer = field.bit_length > (self.integer_size as usize * 8);
+        let access_width_bits = field.flags.access_type_bytes()? * 8;
+
+        trace!("AML field read. Field = {:?}", field);
+
+        // TODO: if the field needs to be locked, acquire/release a global mutex?
+
+        enum Output {
+            Integer([u8; 8]),
+            Buffer(Vec<u8>),
+        }
+        let mut output = if needs_buffer {
+            Output::Buffer(vec![0; field.bit_length.next_multiple_of(8)])
+        } else {
+            Output::Integer([0; 8])
+        };
+        let output_bytes = match &mut output {
+            Output::Buffer(bytes) => bytes.as_mut_slice(),
+            Output::Integer(value) => value,
+        };
+
+        let (read_region, index_field_idx) = match field.kind {
+            FieldUnitKind::Normal { ref region } => (region, 0),
+            FieldUnitKind::Bank { ref region, ref bank, bank_value } => {
+                let Object::FieldUnit(ref bank) = **bank else { panic!() };
+                assert!(matches!(bank.kind, FieldUnitKind::Normal { .. }));
+                self.do_field_write(bank, Object::Integer(bank_value).wrap())?;
+                (region, 0)
+            }
+            FieldUnitKind::Index { index: _, ref data } => {
+                let Object::FieldUnit(ref data) = **data else { panic!() };
+                let FieldUnitKind::Normal { region } = &data.kind else { panic!() };
+                let reg_idx = field.bit_index / 8;
+                (region, reg_idx)
+            }
+        };
+        let Object::OpRegion(ref read_region) = **read_region else { panic!() };
+
+        /*
+         * TODO: it might be worth having a fast path here for reads that don't do weird
+         * unaligned accesses, which I'm guessing might be relatively common on real
+         * hardware? Eg. single native read + mask
+         */
+
+        /*
+         * Break the field read into native reads that respect the region's access width.
+         * Copy each potentially-unaligned part into the destination's bit range.
+         */
+        let native_accesses_needed =
+            (field.bit_length + (field.bit_index % access_width_bits)).div_ceil(access_width_bits);
+        let mut read_so_far = 0;
+        for i in 0..native_accesses_needed {
+            // Advance the read pointer. For Index fields, this also means updating the Index
+            // register.
+            let aligned_offset = match field.kind {
+                FieldUnitKind::Normal { .. } | FieldUnitKind::Bank { .. } => {
+                    object::align_down(field.bit_index + i * access_width_bits, access_width_bits)
+                }
+                FieldUnitKind::Index { ref index, ref data } => {
+                    // Update index register
+                    let Object::FieldUnit(ref index) = **index else { panic!() };
+                    let Object::FieldUnit(ref data) = **data else { panic!() };
+                    self.do_field_write(
+                        index,
+                        Object::Integer((index_field_idx + i * (access_width_bits / 8)) as u64).wrap(),
+                    )?;
+
+                    // The offset is always that of the data register, as we always read from the
+                    // base of the data register.
+                    data.bit_index
+                }
+            };
+
+            let raw = self.do_native_region_read(read_region, aligned_offset / 8, access_width_bits / 8)?;
+            let src_index = if i == 0 { field.bit_index % access_width_bits } else { 0 };
+            let remaining_length = field.bit_length - read_so_far;
+            let length = if i == 0 {
+                usize::min(remaining_length, access_width_bits - (field.bit_index % access_width_bits))
+            } else {
+                usize::min(remaining_length, access_width_bits)
+            };
+
+            object::copy_bits(&raw.to_le_bytes(), src_index, output_bytes, read_so_far, length);
+            read_so_far += length;
+        }
+
+        match output {
+            Output::Buffer(bytes) => Ok(Object::Buffer(bytes).wrap()),
+            Output::Integer(value) => Ok(Object::Integer(u64::from_le_bytes(value)).wrap()),
+        }
+    }
+
+    fn do_field_write(&self, field: &FieldUnit, value: WrappedObject) -> Result<(), AmlError> {
+        trace!("AML field write. Field = {:?}. Value = {}", field, value);
+
+        let value_bytes = match &*value {
+            Object::Integer(value) => &value.to_le_bytes() as &[u8],
+            Object::Buffer(bytes) => bytes,
+            _ => Err(AmlError::ObjectNotOfExpectedType { expected: ObjectType::Integer, got: value.typ() })?,
+        };
+        let access_width_bits = field.flags.access_type_bytes()? * 8;
+
+        // In this tuple:
+        // - write_region is the region that the data will be written to.
+        // - index_field_idx is the initial index to write into the Index register of an index
+        //   field. For all other field types it is unused and set to zero.
+        let (write_region, index_field_idx) = match field.kind {
+            FieldUnitKind::Normal { ref region } => (region, 0),
+            FieldUnitKind::Bank { ref region, ref bank, bank_value } => {
+                let Object::FieldUnit(ref bank) = **bank else { panic!() };
+                assert!(matches!(bank.kind, FieldUnitKind::Normal { .. }));
+                self.do_field_write(bank, Object::Integer(bank_value).wrap())?;
+                (region, 0)
+            }
+            FieldUnitKind::Index { index: _, ref data } => {
+                let Object::FieldUnit(ref data) = **data else { panic!() };
+                let FieldUnitKind::Normal { region: data_region } = &data.kind else { panic!() };
+                let reg_idx = field.bit_index / 8;
+                (data_region, reg_idx)
+            }
+        };
+        let Object::OpRegion(ref write_region) = **write_region else { panic!() };
+
+        // TODO: if the region wants locking, do that
+
+        // TODO: maybe also a fast path for writes
+
+        let native_accesses_needed =
+            (field.bit_length + (field.bit_index % access_width_bits)).div_ceil(access_width_bits);
+        let mut written_so_far = 0;
+
+        for i in 0..native_accesses_needed {
+            // Advance the write pointer... For normal and bank fields this is straightforward. For
+            // Index fields, this involves updating the index register.
+            let aligned_offset = match field.kind {
+                FieldUnitKind::Normal { .. } | FieldUnitKind::Bank { .. } => {
+                    object::align_down(field.bit_index + i * access_width_bits, access_width_bits)
+                }
+                FieldUnitKind::Index { ref index, ref data } => {
+                    // Update index register
+                    let Object::FieldUnit(ref index) = **index else { panic!() };
+                    let Object::FieldUnit(ref data) = **data else { panic!() };
+                    self.do_field_write(
+                        index,
+                        Object::Integer((index_field_idx + i * (access_width_bits / 8)) as u64).wrap(),
+                    )?;
+
+                    // The offset is always that of the data register, as we always read from the
+                    // base of the data register.
+                    data.bit_index
+                }
+            };
+            let dst_index = if i == 0 { field.bit_index % access_width_bits } else { 0 };
+
+            /*
+             * If we're not going to write a whole native access, respect the field's
+             * update rule. If we're meant to preserve the surrounding bits, we need to do
+             * a read first.
+             */
+            let mut bytes = if dst_index > 0 || (field.bit_length - written_so_far) < access_width_bits {
+                match field.flags.update_rule() {
+                    FieldUpdateRule::Preserve => self
+                        .do_native_region_read(write_region, aligned_offset / 8, access_width_bits / 8)?
+                        .to_le_bytes(),
+                    FieldUpdateRule::WriteAsOnes => [0xff; 8],
+                    FieldUpdateRule::WriteAsZeros => [0; 8],
+                }
+            } else {
+                [0; 8]
+            };
+
+            let remaining_length = field.bit_length - written_so_far;
+            let length = if i == 0 {
+                usize::min(remaining_length, access_width_bits - (field.bit_index % access_width_bits))
+            } else {
+                usize::min(remaining_length, access_width_bits)
+            };
+
+            object::copy_bits(value_bytes, written_so_far, &mut bytes, dst_index, length);
+            self.do_native_region_write(
+                write_region,
+                aligned_offset / 8,
+                access_width_bits / 8,
+                u64::from_le_bytes(bytes),
+            )?;
+            written_so_far += length;
+        }
+
+        Ok(())
+    }
+
+    /// Performs an actual read from an operation region. `offset` and `length` must respect the
+    /// access requirements of the field being read, and are supplied in **bytes**. This may call
+    /// AML methods if required, and may invoke user-supplied handlers.
+    fn do_native_region_read(&self, region: &OpRegion, offset: usize, length: usize) -> Result<u64, AmlError> {
+        trace!("Native field read. Region = {:?}, offset = {:#x}, length={:#x}", region, offset, length);
+
+        match region.space {
+            RegionSpace::SystemMemory => Ok({
+                let address = region.base as usize + offset;
+                match length {
+                    1 => self.handler.read_u8(address) as u64,
+                    2 => self.handler.read_u16(address) as u64,
+                    4 => self.handler.read_u32(address) as u64,
+                    8 => self.handler.read_u64(address),
+                    _ => panic!(),
+                }
+            }),
+            RegionSpace::SystemIO => Ok({
+                let address = region.base as u16 + offset as u16;
+                match length {
+                    1 => self.handler.read_io_u8(address) as u64,
+                    2 => self.handler.read_io_u16(address) as u64,
+                    4 => self.handler.read_io_u32(address) as u64,
+                    _ => panic!(),
+                }
+            }),
+            RegionSpace::PciConfig => {
+                let address = self.pci_address_for_device(&region.parent_device_path)?;
+                let offset = region.base as u16 + offset as u16;
+                match length {
+                    1 => Ok(self.handler.read_pci_u8(address, offset) as u64),
+                    2 => Ok(self.handler.read_pci_u16(address, offset) as u64),
+                    4 => Ok(self.handler.read_pci_u32(address, offset) as u64),
+                    _ => panic!(),
+                }
+            }
+
+            RegionSpace::EmbeddedControl
+            | RegionSpace::SmBus
+            | RegionSpace::SystemCmos
+            | RegionSpace::PciBarTarget
+            | RegionSpace::Ipmi
+            | RegionSpace::GeneralPurposeIo
+            | RegionSpace::GenericSerialBus
+            | RegionSpace::Pcc
+            | RegionSpace::Oem(_) => {
+                if let Some(_handler) = self.region_handlers.lock().get(&region.space) {
+                    warn!("Custom region handlers aren't actually supported yet.");
+                    Err(AmlError::LibUnimplemented)
+                } else {
+                    Err(AmlError::NoHandlerForRegionAccess(region.space))
+                }
+            }
+        }
+    }
+
+    /// Performs an actual write to an operation region. `offset` and `length` must respect the
+    /// access requirements of the field being read, and are supplied in **bytes**. This may call
+    /// AML methods if required, and may invoke user-supplied handlers.
+    fn do_native_region_write(
+        &self,
+        region: &OpRegion,
+        offset: usize,
+        length: usize,
+        value: u64,
+    ) -> Result<(), AmlError> {
+        trace!(
+            "Native field write. Region = {:?}, offset = {:#x}, length={:#x}, value={:#x}",
+            region, offset, length, value
+        );
+
+        match region.space {
+            RegionSpace::SystemMemory => {
+                let address = region.base as usize + offset;
+                match length {
+                    1 => self.handler.write_u8(address, value as u8),
+                    2 => self.handler.write_u16(address, value as u16),
+                    4 => self.handler.write_u32(address, value as u32),
+                    8 => self.handler.write_u64(address, value),
+                    _ => panic!(),
+                }
+                Ok(())
+            }
+            RegionSpace::SystemIO => {
+                let address = region.base as u16 + offset as u16;
+                match length {
+                    1 => self.handler.write_io_u8(address, value as u8),
+                    2 => self.handler.write_io_u16(address, value as u16),
+                    4 => self.handler.write_io_u32(address, value as u32),
+                    _ => panic!(),
+                }
+                Ok(())
+            }
+            RegionSpace::PciConfig => {
+                let address = self.pci_address_for_device(&region.parent_device_path)?;
+                let offset = region.base as u16 + offset as u16;
+                match length {
+                    1 => self.handler.write_pci_u8(address, offset, value as u8),
+                    2 => self.handler.write_pci_u16(address, offset, value as u16),
+                    4 => self.handler.write_pci_u32(address, offset, value as u32),
+                    _ => panic!(),
+                }
+                Ok(())
+            }
+
+            RegionSpace::EmbeddedControl
+            | RegionSpace::SmBus
+            | RegionSpace::SystemCmos
+            | RegionSpace::PciBarTarget
+            | RegionSpace::Ipmi
+            | RegionSpace::GeneralPurposeIo
+            | RegionSpace::GenericSerialBus
+            | RegionSpace::Pcc
+            | RegionSpace::Oem(_) => {
+                if let Some(_handler) = self.region_handlers.lock().get(&region.space) {
+                    warn!("Custom region handlers aren't actually supported yet.");
+                    Err(AmlError::LibUnimplemented)
+                } else {
+                    Err(AmlError::NoHandlerForRegionAccess(region.space))
+                }
+            }
+        }
+    }
+
+    fn pci_address_for_device(&self, path: &AmlName) -> Result<PciAddress, AmlError> {
+        /*
+         * TODO: it's not ideal to do these reads for every native access. See if we can
+         * cache them somewhere?
+         */
+        let seg = match self.evaluate_if_present(AmlName::from_str("_SEG").unwrap().resolve(path)?, vec![])? {
+            Some(value) => value.as_integer()?,
+            None => 0,
+        };
+        let bus = match self.evaluate_if_present(AmlName::from_str("_BBN").unwrap().resolve(path)?, vec![])? {
+            Some(value) => value.as_integer()?,
+            None => 0,
+        };
+        let (device, function) = {
+            let adr = self.evaluate_if_present(AmlName::from_str("_ADR").unwrap().resolve(path)?, vec![])?;
+            let adr = match adr {
+                Some(adr) => adr.as_integer()?,
+                None => 0,
+            };
+            (adr.get_bits(16..32), adr.get_bits(0..16))
+        };
+        Ok(PciAddress::new(seg as u16, bus as u8, device as u8, function as u8))
+    }
+
+    /// Return to the beginning of a While loop - either because `Continue` was executed or
+    /// because we reached the end of the While block.
+    fn continue_loop(&self, context: &mut MethodContext) -> Result<(), AmlError> {
+        let start: u64;
+
+        if let BlockKind::While { start_pc, start_nanos } = &context.current_block.kind {
+            context.current_block.pc = *start_pc;
+            start = *start_nanos;
+        } else {
+            loop {
+                let Some(block) = context.block_stack.pop() else { Err(AmlError::ContinueOutsideOfWhile)? };
+                context.current_block = block;
+                if let BlockKind::While { start_pc, start_nanos } = context.current_block.kind {
+                    context.current_block.pc = start_pc;
+                    start = start_nanos;
+                    break;
+                }
+            }
+        }
+
+        if self.handler.nanos_since_boot() - start > LOOP_TIMEOUT_NS {
+            return Err(AmlError::LoopTimeout);
+        }
+
+        context.start(OpInFlight::new(Opcode::While, &[ResolveBehaviour::TermArg]));
+        Ok(())
+    }
+}
+
+/// A `MethodContext` represents a piece of running AML code - either a real method, or the
+/// top-level of an AML table.
+struct MethodContext {
+    current_block: Block,
+    block_stack: Vec<Block>,
+    in_flight: Vec<OpInFlight>,
+    args: [WrappedObject; 8],
+    locals: [WrappedObject; 8],
+    current_scope: AmlName,
+
+    _method: Option<WrappedObject>,
+}
+
+struct Block {
+    stream: Vec<u8>,
+    pc: usize,
+    kind: BlockKind,
+}
+
+impl Block {
+    fn stream(&self) -> &[u8] {
+        &self.stream
+    }
+}
+
+#[derive(PartialEq, Debug)]
+pub enum BlockKind {
+    Table,
+    Method {
+        method_scope: AmlName,
+    },
+    Scope {
+        old_scope: AmlName,
+    },
+    Package,
+    VarPackage,
+    /// Used for executing the then-branch of an `DefIfElse`. After finishing, it will check for
+    /// and skip over an else-branch, if present.
+    IfThenBranch,
+    While {
+        start_pc: usize,
+        start_nanos: u64,
+    },
+}
+
+/// A `ResolveBehaviour` describes how a name at the top-level should be resolved as part of an
+/// operation.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ResolveBehaviour {
+    /// Attempt to resolve the name to an object that has already been defined. There are generally
+    /// no forward definitions in AML, so this is the usual resolution behaviour for most operands.
+    TermArg,
+    /// Resolve a name to reference an object. This is used when an operation needs to operate on
+    /// the object itself, rather than evaluate it to a value (for example, given a `FieldUnit`, `TermArg` would read a
+    /// value from the field, while this would resolve to the `FieldUnit` itself. Can be a name,
+    /// argument, or local.
+    SimpleName,
+    /// Like a `SimpleName`, but can also be the `Debug` object or an operation that produces a
+    /// reference.
+    SuperName,
+    /// Behaves the same as `SuperName` if the object exists, but resolves successfully to an
+    /// unresolved reference if the object does not exist. Used by `DefCondRefOf`.
+    SuperNameIfExists,
+    /// `SuperName`, but can also be `NullName`
+    Target,
+    /// Surrogate argument, used by `DefPackage` and `DefVarPackage`. Only one of these is emitted,
+    /// but represents parsing of potentially many package elements. Names in packages refer to the
+    /// named object (see `Package` in the ASL reference, §19.6.101 of ACPI 6.5). We keep the name
+    /// and the scope it appeared in, and only resolve it when the reference is used, as the object
+    /// may not exist yet. ACPICA resolves these at package creation, but that makes resolution
+    /// depend on the order tables are loaded in.
+    AsPackageElements,
+    /// Used with [`OpInFlight::new_with`] to represent arguments that have already been resolved
+    /// when an operation enters flight.
+    Placeholder,
+    /// The match statement takes two single byte arguments - the "match opcode".
+    MatchOpcode,
+}
+
+#[derive(Debug)]
+struct OpInFlight {
+    op: Opcode,
+    expected_arguments: usize,
+    arguments: Vec<Argument>,
+    resolve_behaviour: &'static [ResolveBehaviour],
+}
+
+#[derive(Debug)]
+enum Argument {
+    Object(WrappedObject),
+    Namestring(AmlName),
+    ByteData(u8),
+    DWordData(u32),
+    TrackedPc(usize),
+    PkgLength(usize),
+    MatchOp(MatchOp),
+}
+
+impl OpInFlight {
+    /// Creates a new `OpInFlight`. The number of expected arguments is inferred from the number of
+    /// `ResolveBehaviour`s passed.
+    pub fn new(op: Opcode, resolve_behaviour: &'static [ResolveBehaviour]) -> OpInFlight {
+        OpInFlight { op, expected_arguments: resolve_behaviour.len(), arguments: Vec::new(), resolve_behaviour }
+    }
+
+    /// Creates a new `OpInFlight` with the given number of expected arguments. This should be used
+    /// when the correct number of expected arguments differs from the number of
+    /// `ResolveBehaviour`s passed.
+    pub fn new_dynamic(
+        op: Opcode,
+        expected_arguments: usize,
+        resolve_behaviour: &'static [ResolveBehaviour],
+    ) -> OpInFlight {
+        OpInFlight { op, expected_arguments, arguments: Vec::new(), resolve_behaviour }
+    }
+
+    /// Creates a new `OpInFlight` with a number of arguments that have already been interpreted,
+    /// and is expecting some `more` arguments.
+    pub fn new_with_dynamic(
+        op: Opcode,
+        arguments: Vec<Argument>,
+        more: usize,
+        resolve_behaviour: &'static [ResolveBehaviour],
+    ) -> OpInFlight {
+        OpInFlight { op, expected_arguments: arguments.len() + more, arguments, resolve_behaviour }
+    }
+
+    /// Creates a new `OpInFlight` with a number of arguments that have already been interpreted,
+    /// and is expecting more - the number of remaining arguments is inferred from the number of
+    /// `ResolveBehaviour`s passed (with existing arguments marked as
+    /// `ResolveBehaviour::Placeholder`).
+    pub fn new_with(
+        op: Opcode,
+        arguments: Vec<Argument>,
+        resolve_behaviour: &'static [ResolveBehaviour],
+    ) -> OpInFlight {
+        OpInFlight { op, expected_arguments: resolve_behaviour.len(), arguments, resolve_behaviour }
+    }
+
+    /// Get the desired `ResolveBehaviour` for the argument currently being interpreted
+    fn resolve_behaviour(&self) -> ResolveBehaviour {
+        if let Some(behaviour) = self.resolve_behaviour.get(self.arguments.len()) {
+            *behaviour
+        } else if self.op == Opcode::Package || (self.op == Opcode::VarPackage && !self.arguments.is_empty()) {
+            ResolveBehaviour::AsPackageElements
+        } else {
+            panic!("Tried to get resolving behaviour for unexpected argument for operation of type {:?}", self.op);
+        }
+    }
+}
+
+impl MethodContext {
+    unsafe fn new_from_table(stream: &[u8]) -> MethodContext {
+        let block = Block { stream: Vec::from(stream), pc: 0, kind: BlockKind::Table };
+        MethodContext {
+            current_block: block,
+            block_stack: Vec::new(),
+            in_flight: Vec::new(),
+            args: core::array::from_fn(|_| Object::Uninitialized.wrap()),
+            locals: core::array::from_fn(|_| Object::Uninitialized.wrap()),
+            current_scope: AmlName::root(),
+            _method: None,
+        }
+    }
+
+    fn new_from_method(
+        method: WrappedObject,
+        args: Vec<WrappedObject>,
+        scope: AmlName,
+    ) -> Result<MethodContext, AmlError> {
+        if let Object::Method { code, flags } = &*method {
+            if args.len() != flags.arg_count() {
+                return Err(AmlError::MethodArgCountIncorrect);
+            }
+            let block =
+                Block { stream: code.clone(), pc: 0, kind: BlockKind::Method { method_scope: scope.clone() } };
+            let args = core::array::from_fn(|i| {
+                if let Some(arg) = args.get(i) { arg.clone() } else { Object::Uninitialized.wrap() }
+            });
+            let context = MethodContext {
+                current_block: block,
+                block_stack: Vec::new(),
+                in_flight: Vec::new(),
+                args,
+                locals: core::array::from_fn(|_| Object::Uninitialized.wrap()),
+                current_scope: scope,
+                _method: Some(method.clone()),
+            };
+            Ok(context)
+        } else {
+            Err(AmlError::ObjectNotOfExpectedType { expected: ObjectType::Method, got: method.typ() })
+        }
+    }
+
+    fn contribute_arg(&mut self, arg: Argument) {
+        if let Some(in_flight) = self.in_flight.last_mut()
+            && in_flight.arguments.len() < in_flight.expected_arguments
+        {
+            in_flight.arguments.push(arg);
+        }
+    }
+
+    /// Start a new `InFlightOp`.
+    fn start(&mut self, op: OpInFlight) {
+        trace!(
+            "START OP: {:?}, args: {:?}, with {} more needed ({:?})",
+            op.op,
+            op.arguments,
+            op.expected_arguments - op.arguments.len(),
+            op.resolve_behaviour
+        );
+        self.in_flight.push(op);
+    }
+
+    fn retire_op(&mut self, op: OpInFlight) {
+        trace!("RETIRE OP: {:?}, args: {:?}", op.op, op.arguments);
+    }
+
+    fn start_new_block(&mut self, kind: BlockKind, length: usize) {
+        let block = Block {
+            stream: self.current_block.stream()[..(self.current_block.pc + length)].into(),
+            pc: self.current_block.pc,
+            kind,
+        };
+        self.current_block.pc += length;
+        self.block_stack.push(mem::replace(&mut self.current_block, block));
+    }
+
+    fn opcode(&mut self) -> Result<Opcode, AmlError> {
+        let opcode: u16 = match self.next()? {
+            0x5b => {
+                let ext = self.next()?;
+                (0x5b << 8) as u16 | ext as u16
+            }
+            other => other as u16,
+        };
+
+        // Opcodes Zero and One overlap with the Match Opcodes that are only used in the match
+        // expression. It's reasonable to assume that if Zero or One appear at the time we expect a
+        // Match Opcode, then they *are* Match Opcodes instead of regular arguments.
+        Ok(match opcode {
+            0x00 => {
+                if self.expecting_match_opcode() {
+                    Opcode::MatchOp(MatchOp::MTR)
+                } else {
+                    Opcode::Zero
+                }
+            }
+            0x01 => {
+                if self.expecting_match_opcode() {
+                    Opcode::MatchOp(MatchOp::MEQ)
+                } else {
+                    Opcode::One
+                }
+            }
+            0x02 => Opcode::MatchOp(MatchOp::MLE),
+            0x03 => Opcode::MatchOp(MatchOp::MLT),
+            0x04 => Opcode::MatchOp(MatchOp::MGE),
+            0x05 => Opcode::MatchOp(MatchOp::MGT),
+            0x06 => Opcode::Alias,
+            0x08 => Opcode::Name,
+            0x0a => Opcode::BytePrefix,
+            0x0b => Opcode::WordPrefix,
+            0x0c => Opcode::DWordPrefix,
+            0x0d => Opcode::StringPrefix,
+            0x0e => Opcode::QWordPrefix,
+            0x10 => Opcode::Scope,
+            0x11 => Opcode::Buffer,
+            0x12 => Opcode::Package,
+            0x13 => Opcode::VarPackage,
+            0x14 => Opcode::Method,
+            0x15 => Opcode::External,
+            0x2e => Opcode::DualNamePrefix,
+            0x2f => Opcode::MultiNamePrefix,
+            0x30..=0x39 => Opcode::Digit(opcode as u8),    // b'0'..=b'9'
+            0x41..=0x5a => Opcode::NameChar(opcode as u8), // b'A'..=b'Z'
+            0x5b01 => Opcode::Mutex,
+            0x5b02 => Opcode::Event,
+            0x5b12 => Opcode::CondRefOf,
+            0x5b13 => Opcode::CreateField,
+            0x5b1f => Opcode::LoadTable,
+            0x5b20 => Opcode::Load,
+            0x5b21 => Opcode::Stall,
+            0x5b22 => Opcode::Sleep,
+            0x5b23 => Opcode::Acquire,
+            0x5b24 => Opcode::Signal,
+            0x5b25 => Opcode::Wait,
+            0x5b26 => Opcode::Reset,
+            0x5b27 => Opcode::Release,
+            0x5b28 => Opcode::FromBCD,
+            0x5b29 => Opcode::ToBCD,
+            0x5b30 => Opcode::Revision,
+            0x5b31 => Opcode::Debug,
+            0x5b32 => Opcode::Fatal,
+            0x5b33 => Opcode::Timer,
+            0x5b80 => Opcode::OpRegion,
+            0x5b81 => Opcode::Field,
+            0x5b82 => Opcode::Device,
+            0x5b83 => Opcode::Processor,
+            0x5b84 => Opcode::PowerRes,
+            0x5b85 => Opcode::ThermalZone,
+            0x5b86 => Opcode::IndexField,
+            0x5b87 => Opcode::BankField,
+            0x5b88 => Opcode::DataRegion,
+            0x5c => Opcode::RootChar,
+            0x5e => Opcode::ParentPrefixChar,
+            0x5f => Opcode::NameChar(b'_'),
+            0x60..=0x67 => Opcode::Local(opcode as u8 - 0x60),
+            0x68..=0x6e => Opcode::Arg(opcode as u8 - 0x68),
+            0x70 => Opcode::Store,
+            0x71 => Opcode::RefOf,
+            0x72 => Opcode::Add,
+            0x73 => Opcode::Concat,
+            0x74 => Opcode::Subtract,
+            0x75 => Opcode::Increment,
+            0x76 => Opcode::Decrement,
+            0x77 => Opcode::Multiply,
+            0x78 => Opcode::Divide,
+            0x79 => Opcode::ShiftLeft,
+            0x7a => Opcode::ShiftRight,
+            0x7b => Opcode::And,
+            0x7c => Opcode::Nand,
+            0x7d => Opcode::Or,
+            0x7e => Opcode::Nor,
+            0x7f => Opcode::Xor,
+            0x80 => Opcode::Not,
+            0x81 => Opcode::FindSetLeftBit,
+            0x82 => Opcode::FindSetRightBit,
+            0x83 => Opcode::DerefOf,
+            0x84 => Opcode::ConcatRes,
+            0x85 => Opcode::Mod,
+            0x86 => Opcode::Notify,
+            0x87 => Opcode::SizeOf,
+            0x88 => Opcode::Index,
+            0x89 => Opcode::Match,
+            0x8a => Opcode::CreateDWordField,
+            0x8b => Opcode::CreateWordField,
+            0x8c => Opcode::CreateByteField,
+            0x8d => Opcode::CreateBitField,
+            0x8e => Opcode::ObjectType,
+            0x8f => Opcode::CreateQWordField,
+            0x90 => Opcode::LAnd,
+            0x91 => Opcode::LOr,
+            /*
+             * `0x92` is a bit strange. It can be an opcode in its own right (`LNotOp`), but when
+             * followed by `0x93..=0x95`, it instead serves as a negating prefix to encode
+             * `LNotEqualOp`, `LLessEqualOp`, and `LGreaterEqualOp`.
+             */
+            0x92 => match self.peek() {
+                Ok(0x93) => {
+                    self.current_block.pc += 1;
+                    Opcode::LNotEqual
+                }
+                Ok(0x94) => {
+                    self.current_block.pc += 1;
+                    Opcode::LLessEqual
+                }
+                Ok(0x95) => {
+                    self.current_block.pc += 1;
+                    Opcode::LGreaterEqual
+                }
+                _ => Opcode::LNot,
+            },
+            0x93 => Opcode::LEqual,
+            0x94 => Opcode::LGreater,
+            0x95 => Opcode::LLess,
+            0x96 => Opcode::ToBuffer,
+            0x97 => Opcode::ToDecimalString,
+            0x98 => Opcode::ToHexString,
+            0x99 => Opcode::ToInteger,
+            0x9c => Opcode::ToString,
+            0x9d => Opcode::CopyObject,
+            0x9e => Opcode::Mid,
+            0x9f => Opcode::Continue,
+            0xa0 => Opcode::If,
+            0xa1 => Opcode::Else,
+            0xa2 => Opcode::While,
+            0xa3 => Opcode::Noop,
+            0xa4 => Opcode::Return,
+            0xa5 => Opcode::Break,
+            0xcc => Opcode::Breakpoint,
+            0xff => Opcode::Ones,
+
+            _ => Err(AmlError::IllegalOpcode(opcode))?,
+        })
+    }
+
+    fn pkglength(&mut self) -> Result<usize, AmlError> {
+        let lead_byte = self.next()?;
+        let byte_count = lead_byte.get_bits(6..8);
+        assert!(byte_count < 4);
+
+        if byte_count == 0 {
+            Ok(lead_byte.get_bits(0..6) as usize)
+        } else {
+            let mut length = lead_byte.get_bits(0..4) as usize;
+            for i in 0..byte_count {
+                length |= (self.next()? as usize) << (4 + i * 8);
+            }
+            Ok(length)
+        }
+    }
+
+    fn namestring(&mut self) -> Result<AmlName, AmlError> {
+        use namespace::{NameComponent, NameSeg};
+
+        /*
+         * The NameString grammar is actually a little finicky and annoying.
+         *
+         * NameString := <RootChar NamePath> | <PrefixPath NamePath>
+         * PrefixPath := Nothing | <'^' PrefixPath>
+         * NamePath := NameSeg | DualNamePath | MultiNamePath | NullName
+         * DualNamePath := DualNamePrefix NameSeg NameSeg
+         * MultiNamePath := MultiNamePrefix SegCount NameSeg(SegCount)
+         */
+        const NULL_NAME: u8 = 0x00;
+        const DUAL_NAME_PREFIX: u8 = 0x2e;
+        const MULTI_NAME_PREFIX: u8 = 0x2f;
+
+        let mut components = vec![];
+
+        match self.peek()? {
+            b'\\' => {
+                self.next()?;
+                components.push(NameComponent::Root);
+            }
+            b'^' => {
+                components.push(NameComponent::Prefix);
+                self.next()?;
+                while self.peek()? == b'^' {
+                    self.next()?;
+                    components.push(NameComponent::Prefix);
+                }
+            }
+            _ => (),
+        }
+
+        let next = self.next()?;
+        match next {
+            NULL_NAME => {}
+            DUAL_NAME_PREFIX => {
+                for _ in 0..2 {
+                    let name_seg = [self.next()?, self.next()?, self.next()?, self.next()?];
+                    components.push(NameComponent::Segment(NameSeg::from_bytes(name_seg)?));
+                }
+            }
+            MULTI_NAME_PREFIX => {
+                let count = self.next()?;
+                for _ in 0..count {
+                    let name_seg = [self.next()?, self.next()?, self.next()?, self.next()?];
+                    components.push(NameComponent::Segment(NameSeg::from_bytes(name_seg)?));
+                }
+            }
+            first_char => {
+                if !namespace::is_lead_name_char(first_char) {
+                    self.current_block.pc -= 1;
+                }
+                let name_seg = [first_char, self.next()?, self.next()?, self.next()?];
+                components.push(namespace::NameComponent::Segment(namespace::NameSeg::from_bytes(name_seg)?));
+            }
+        }
+
+        Ok(AmlName::from_components(components))
+    }
+
+    fn next(&mut self) -> Result<u8, AmlError> {
+        if self.current_block.pc >= self.current_block.stream.len() {
+            return Err(AmlError::RunOutOfStream);
+        }
+
+        let byte = self.current_block.stream()[self.current_block.pc];
+        self.current_block.pc += 1;
+
+        Ok(byte)
+    }
+
+    fn next_u16(&mut self) -> Result<u16, AmlError> {
+        Ok(u16::from_le_bytes([self.next()?, self.next()?]))
+    }
+
+    fn next_u32(&mut self) -> Result<u32, AmlError> {
+        Ok(u32::from_le_bytes([self.next()?, self.next()?, self.next()?, self.next()?]))
+    }
+
+    fn next_u64(&mut self) -> Result<u64, AmlError> {
+        Ok(u64::from_le_bytes([
+            self.next()?,
+            self.next()?,
+            self.next()?,
+            self.next()?,
+            self.next()?,
+            self.next()?,
+            self.next()?,
+            self.next()?,
+        ]))
+    }
+
+    fn peek(&self) -> Result<u8, AmlError> {
+        if self.current_block.pc >= self.current_block.stream.len() {
+            return Err(AmlError::RunOutOfStream);
+        }
+
+        Ok(self.current_block.stream()[self.current_block.pc])
+    }
+
+    fn expecting_match_opcode(&self) -> bool {
+        let resolve_behaviour = self.in_flight.last().map(|op| op.resolve_behaviour());
+        resolve_behaviour.is_some_and(|rb| matches!(rb, ResolveBehaviour::MatchOpcode))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Opcode {
+    Zero,
+    One,
+    MatchOp(MatchOp),
+    Alias,
+    Name,
+    BytePrefix,
+    WordPrefix,
+    DWordPrefix,
+    StringPrefix,
+    QWordPrefix,
+    Scope,
+    Buffer,
+    Package,
+    VarPackage,
+    Method,
+    External,
+    DualNamePrefix,
+    MultiNamePrefix,
+    Digit(u8),
+    NameChar(u8),
+    Mutex,
+    Event,
+    CondRefOf,
+    CreateField,
+    LoadTable,
+    Load,
+    Stall,
+    Sleep,
+    Acquire,
+    Signal,
+    Wait,
+    Reset,
+    Release,
+    FromBCD,
+    ToBCD,
+    Revision,
+    Debug,
+    Fatal,
+    Timer,
+    OpRegion,
+    Field,
+    Device,
+    Processor,
+    PowerRes,
+    ThermalZone,
+    IndexField,
+    BankField,
+    DataRegion,
+    RootChar,
+    ParentPrefixChar,
+    Local(u8),
+    Arg(u8),
+    Store,
+    RefOf,
+    Add,
+    Concat,
+    Subtract,
+    Increment,
+    Decrement,
+    Multiply,
+    Divide,
+    ShiftLeft,
+    ShiftRight,
+    And,
+    Nand,
+    Or,
+    Nor,
+    Xor,
+    Not,
+    FindSetLeftBit,
+    FindSetRightBit,
+    DerefOf,
+    ConcatRes,
+    Mod,
+    Notify,
+    SizeOf,
+    Index,
+    Match,
+    CreateDWordField,
+    CreateWordField,
+    CreateByteField,
+    CreateBitField,
+    ObjectType,
+    CreateQWordField,
+    LAnd,
+    LOr,
+    LNot,
+    LNotEqual,
+    LLessEqual,
+    LGreaterEqual,
+    LEqual,
+    LGreater,
+    LLess,
+    ToBuffer,
+    ToDecimalString,
+    ToHexString,
+    ToInteger,
+    ToString,
+    CopyObject,
+    Mid,
+    Continue,
+    If,
+    Else,
+    While,
+    Noop,
+    Return,
+    Break,
+    Breakpoint,
+    Ones,
+
+    /*
+     * Internal opcodes are not produced from the bytecode, but are used to track special in-flight
+     * ops etc.
+     */
+    InternalMethodCall,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Operation {
+    Mid,
+    SizeOf,
+    Acquire,
+    Release,
+    ConvertToBuffer,
+
+    ToBuffer,
+    ToInteger,
+    ToString,
+    ToDecOrHexString,
+
+    ReadBufferField,
+    WriteBufferField,
+    LogicalOp,
+    DecodePrt,
+    ParseResource,
+
+    Store,
+
+    ResetEvent,
+    SignalEvent,
+    WaitEvent,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+#[non_exhaustive]
+pub enum AmlError {
+    RunOutOfStream,
+    IllegalOpcode(u16),
+    InvalidFieldFlags,
+
+    InvalidName(Option<AmlName>),
+
+    InvalidNameSeg([u8; 4]),
+    InvalidNormalizedName(AmlName),
+    /// An absolute name was required, but a relative one was supplied.
+    NameNotAbsolute(AmlName),
+    /// A name in a package resolved to another unresolved name too many times, probably because
+    /// the names form a cycle.
+    NameResolutionLoop,
+    RootHasNoParent,
+    EmptyNamesAreInvalid,
+    LevelDoesNotExist(AmlName),
+    NameCollision(AmlName),
+    ObjectDoesNotExist(AmlName),
+
+    NoCurrentOp,
+    ElseFoundWithoutCorrespondingIf,
+    ContinueOutsideOfWhile,
+    BreakOutsideOfWhile,
+
+    MethodArgCountIncorrect,
+
+    InvalidOperationOnObject {
+        op: Operation,
+        typ: ObjectType,
+    },
+    IndexOutOfBounds,
+    ObjectNotOfExpectedType {
+        expected: ObjectType,
+        got: ObjectType,
+    },
+    InvalidImplicitCast {
+        from: ObjectType,
+        to: ObjectType,
+    },
+    StoreToInvalidReferenceType,
+
+    InvalidResourceDescriptor,
+    UnexpectedResourceType,
+
+    NoHandlerForRegionAccess(RegionSpace),
+    MutexAcquireTimeout,
+
+    PrtInvalidAddress,
+    PrtInvalidPin,
+    PrtInvalidGsi,
+    PrtInvalidSource,
+    PrtNoEntry,
+
+    /// An OEM-defined fatal error has occured. The specification states a host should log this
+    /// fatal error and then shutdown in a timely fashion.
+    FatalErrorEncountered,
+
+    /// This is emitted to signal that the library does not support the requested behaviour. This
+    /// should eventually never be emitted.
+    LibUnimplemented,
+
+    /// The library has given a response the host does not understand, or the host is otherwise
+    /// unable to continue operating the library correctly. The specific reason is given in the
+    /// contained String.
+    ///
+    /// This variant is set by the host, not by the library, and can be used when it is convenient
+    /// not to construct a more complex error type around [`AmlError`].
+    HostError(String),
+
+    /// An internal interpreter error has occured, and the interpreter has been left in an unknown
+    /// state. More information may be given in the contained value.
+    InternalError(String),
+
+    /// The maximum stack depths of method calls [`MAX_STACK_DEPTH`] has been reached, so the method
+    /// call has been aborted.
+    MethodStackExceeded,
+
+    /// The maximum length of time a loop ([`LOOP_TIMEOUT_NS`]) can execute for has been exceeded.
+    LoopTimeout,
+
+    /// The provided argument to the current operation is invalid.
+    ///
+    /// For example, trying to pass an object as the Operation parameter in a Match expression is
+    /// invalid.
+    InvalidArgType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum IntegerSize {
+    FourBytes = 4,
+    EightBytes = 8,
+}
+
+impl IntegerSize {
+    pub fn from_revision(revision: u8) -> IntegerSize {
+        if revision >= 2 { IntegerSize::EightBytes } else { IntegerSize::FourBytes }
+    }
+}
