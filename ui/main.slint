@@ -992,24 +992,14 @@ export component AppWindow inherits Window {
         }
     }
 
-    // Glyphs are only embedded for font weights that appear as literals.
-    // Weight 500 is only used in conditional bindings, so mention it here.
+    // Glyphs are only embedded for the characters of string literals (and
+    // ASCII), and for the font weights written as literals. Text built at
+    // runtime can have these characters, and weight 500 is only used in
+    // conditional bindings.
     Text {
         visible: false;
-        text: " ";
+        text: "`•×·–—°©®™ÄÖÜäöüßÀÂÇÈÉÊËÎÏÔÙÛàâçèéêëîïôùûÿñÑ“”‘’«»";
         font-weight: 500;
-    }
-    // Glyphs are only embedded for characters in string literals (plus
-    // ASCII). These can appear in text built at runtime.
-    Text {
-        visible: false;
-        text: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~●•×·…–—°©®™ÄÖÜäöüßÀÂÇÈÉÊËÎÏÔÙÛàâçèéêëîïôùûÿñÑ“”‘’«»";
-    }
-    // The translations' letters (the Rust side's aren't seen by the
-    // compiler): scripts/update-translations.py writes this line.
-    Text {
-        visible: false;
-        text: "«°·»ÀÄÇÉÖÜßàäçèéêôöùûüœ’“”„…←↑→↓、。一三上下不丢个中为主久么义之也二于五产什仅仍从他代令以件任份休会但何余你使例保信倒值健充先入全六共关其内册再写出分列则利到制前剩功加动包区单卡即卸压原参及发取变只可台号同名后启周命和器四回固国图在地坏壁处备复外多大失头夹如始字存它安完定容密将小尝局层屏已布常幕年并序应度康开式强当径待循德志态恢息意成或户所才打执找拔拖拟择括持按损据排接提支改效数文断新方旁无日时星是显暂更替最月有期未本机条板查标栏核检模橙次正此步段每求池没法注浅消深添源满焦然片牙状率环班理生用电画界留的盘目相眠知短码确磁示种秒称移程稍空立符第等签管箭类粉系紫纸线络统继续网置美者而耗聚能脑自色若英菜蓝藏行被装西要观视解言计认论设试询该语误请读调败足路跳身载输辨边过运返这进适选通都配酸里重量钟钥铅锁错键闭问间除隐青面顶项顺题首驱高默（），：；？"; // translations' glyphs
     }
 
     // The colors repainted at once after a theme or accent change: the

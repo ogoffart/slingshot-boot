@@ -58,8 +58,8 @@ core and alloc built from source; needs `rust-src`), about twice as fast. CI and
 Slint is pinned to a commit of the `pre-release/1.19` branch, and the `.slint` files use edition 1.19.
 
 The software renderer only has the glyphs embedded at build time (signed distance fields; `SDF_SIZE` in `build.rs`):
-the characters of string literals and the font weights that appear as literals. Characters or weights that only
-appear in conditional bindings go in the hidden Text at the end of `ui/main.slint`.
+the characters of string literals and of the bundled translations, and the font weights that appear as literals.
+Characters or weights that only appear in conditional bindings go in the hidden Text at the end of `ui/main.slint`.
 
 ## Tests
 
@@ -133,8 +133,8 @@ monitor.
 
 The .slint texts use `@tr()`, the Rust ones `tr()` and `trf()` (src/tr.rs). Both read
 `translations/<lang>/LC_MESSAGES/slingshot.po`. After adding or changing texts, run `scripts/update-translations.py`:
-it updates the .pot and .po files, and writes the translations' letters in the hidden glyph Text at the end of
-ui/main.slint. Chinese glyphs come from `ui/fonts/NotoSansSC-subset.ttf` (GB2312's common characters); the script
+it updates the .pot and .po files. The firmware embeds the glyphs of every translation in them, the Rust side's
+too. Chinese glyphs come from `ui/fonts/NotoSansSC-subset.ttf` (GB2312's common characters); the script
 says when a translation uses a character no font has. The language is slingshot.toml's `language`, else the
 firmware's PlatformLang or the desktop's LANG.
 

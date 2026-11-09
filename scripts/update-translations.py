@@ -6,7 +6,7 @@ trf("...", ...). This writes translations/slingshot.pot, and adds the new
 texts (untranslated) to each translations/<lang>/LC_MESSAGES/slingshot.po,
 keeping the existing translations; texts no longer used are dropped.
 """
-import glob, os, re, sys
+import glob, os, re
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 STRING = r'"((?:[^"\\]|\\.)*)"'
@@ -86,20 +86,12 @@ if __name__ == "__main__":
         missing = [t for t in texts if not old.get(t)]
         print(f"{lang}: {len(texts) - len(missing)} of {len(texts)} translated")
     print(f"{len(texts)} texts")
-    # The firmware only has the glyphs of the characters the .slint files
-    # contain: list the translations' in ui/main.slint.
+    # The firmware draws the translations' letters from Inter, or the Chinese
+    # font's subset.
     letters = set()
     for po in glob.glob(os.path.join(ROOT, "translations", "*", "LC_MESSAGES", "slingshot.po")):
         for text in read_po(po).values():
             letters.update(c for c in text if ord(c) > 0x7e)
-    path = os.path.join(ROOT, "ui", "main.slint")
-    slint = open(path, encoding="utf-8").read()
-    line = 'text: "' + "".join(sorted(letters)) + '"; // translations\' glyphs'
-    slint, n = re.subn(r'text: "[^"\n]*"; // translations\' glyphs', lambda _: line, slint)
-    if n != 1:
-        sys.exit("ui/main.slint: no translations' glyphs line")
-    open(path, "w", encoding="utf-8").write(slint)
-    # The firmware draws them from Inter, or the Chinese font's subset.
     try:
         from fontTools.ttLib import TTFont
     except ImportError:
