@@ -14,10 +14,12 @@ Patched with three pull requests, which explain the changes:
 running laptops' battery methods) and
 [#378](https://github.com/rust-osdev/acpi/pull/378) (builds with a stable
 compiler without the `platform` feature, which Slingshot turns off). Some
-fixes here are earlier versions of the reviewed ones. The tests and the
+fixes here are earlier versions of the reviewed ones. One more, not yet
+proposed: a `Store` into a buffer keeps the buffer's length, as in ACPICA
+(Dell's `_BIF` failed with `IndexOutOfBounds` without it). The tests and the
 toolchain file are left out.
 
-Use a release instead of this copy once it has all three.
+Use a release instead of this copy once it has all four.
 
 ## argon2 0.6.0
 

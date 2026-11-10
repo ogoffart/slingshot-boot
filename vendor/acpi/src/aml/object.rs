@@ -406,6 +406,14 @@ impl Object {
             Object::String(value) => {
                 *value = String::from_utf8_lossy(new_bytes).split('\0').next().unwrap().to_string();
             }
+            // Copied into the buffer, which keeps its length (the rest
+            // zeroed, or the source cut), as ACPICA does: a buffer made for
+            // a string and its null (Dell's `XPTB`). An empty one grows.
+            Object::Buffer(value) if !value.is_empty() => {
+                let n = core::cmp::min(new_bytes.len(), value.len());
+                value.fill(0);
+                value[..n].copy_from_slice(&new_bytes[..n]);
+            }
             Object::Buffer(value) => {
                 *value = new_bytes.to_vec();
             }
