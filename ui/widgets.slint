@@ -263,6 +263,113 @@ export component SegmentedControl inherits Rectangle {
     }
 }
 
+// Steps along a track, the chosen one named next to it: ← →, a click or
+// a drag.
+export component Slider inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    out property <bool> has-focus: fs.has-focus;
+    callback activated(int);
+
+    function choose(i: int) {
+        let step = clamp(i, 0, root.options.length - 1);
+        if step != root.current {
+            root.current = step;
+            root.activated(step);
+        }
+    }
+    // The step nearest to `x`, along the track.
+    function step-at(x: length) -> int {
+        return round((x - root.knob / 2) / max(1px, track.width - root.knob) * (root.options.length - 1));
+    }
+
+    property <length> knob: 20px;
+    property <float> fraction: root.options.length > 1 ? root.current / (root.options.length - 1) : 0;
+
+    forward-focus: fs;
+    height: 48px;
+    background: Theme.surface;
+    border-radius: Theme.radius;
+    border-width: fs.has-focus ? 2px : 1px;
+    border-color: fs.has-focus ? Theme.accent : Theme.border;
+    accessible-role: slider;
+    accessible-value: root.options[root.current];
+    accessible-action-increment => { root.choose(root.current + 1); }
+    accessible-action-decrement => { root.choose(root.current - 1); }
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 14px;
+        spacing: 16px;
+        track := Rectangle {
+            horizontal-stretch: 1;
+            // The rail between the knob's centers at both ends, filled up
+            // to it.
+            Rectangle {
+                x: root.knob / 2;
+                width: parent.width - root.knob;
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.surface-strong;
+            }
+            Rectangle {
+                x: root.knob / 2;
+                width: (parent.width - root.knob) * root.fraction;
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.accent;
+            }
+            Rectangle {
+                x: (parent.width - root.knob) * root.fraction;
+                width: root.knob;
+                height: root.knob;
+                border-radius: root.knob / 2;
+                background: Theme.accent;
+                border-width: 2px;
+                border-color: Theme.surface;
+            }
+            touch := TouchArea {
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        fs.focus();
+                        root.choose(root.step-at(self.mouse-x));
+                    }
+                }
+                moved => {
+                    if self.pressed {
+                        root.choose(root.step-at(self.mouse-x));
+                    }
+                }
+            }
+        }
+        Text {
+            width: 110px;
+            text: root.options[root.current];
+            font-size: 14px;
+            font-weight: 500;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+    }
+    // ← → choose.
+    fs := FocusScope {
+        x: 0;
+        y: 0;
+        focus-on-click: false;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow {
+                root.choose(root.current - 1);
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.choose(root.current + 1);
+                return accept;
+            }
+            reject
+        }
+    }
+}
+
 // The keyboard shortcut chips shown in the footer.
 export component KeyChip inherits HorizontalLayout {
     in property <string> key;

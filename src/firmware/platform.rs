@@ -258,6 +258,11 @@ pub static KEYMAP: KeymapCell = KeymapCell(core::cell::RefCell::new(None));
 /// restores the display mode and repaints everything.
 static FULL_REDRAW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// The pointer's speed (an `f32`'s bits, 1.0 to start) and acceleration
+/// (`Backend::set_pointer`).
+pub static POINTER_FACTOR: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000);
+pub static POINTER_ACCELERATION: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
 pub fn request_full_redraw() {
     FULL_REDRAW.store(true, core::sync::atomic::Ordering::Relaxed);
 }
@@ -372,6 +377,10 @@ impl slint::platform::Platform for Platform {
             absolute_handles
         ));
         let mut seen_relative = false;
+        // When the last relative move came.
+        let mut last_move = Duration::ZERO;
+        // The last turn had one: the pointer is moving.
+        let mut moving = false;
         let mut seen_absolute = false;
         let mut wheel_seen = false;
         // SAFETY: No callback. Never closed: the event loop doesn't end.
@@ -531,6 +540,27 @@ impl slint::platform::Platform for Platform {
                     pointer_events.push((None, Some((x, y)), 0, pressed, false));
                 }
             }
+            // The devices give moves in pixels at scale 1: in the screen's
+            // scale (a screen scaled ×2 has twice the pixels to cross), times
+            // the speed chosen in Settings, and with acceleration, up to 3
+            // times more for fast moves. Their speed: since the last move,
+            // or over a report's ~10 ms when starting (a flick's first report
+            // counts).
+            let distance: f32 = pointer_events.iter().filter_map(|e| e.0).map(|(dx, dy)| libm::hypotf(dx, dy)).sum();
+            let mut gain = scale;
+            if distance > 0. {
+                use core::sync::atomic::Ordering::Relaxed;
+                let now = slint::platform::Platform::duration_since_start(self);
+                let since = now - last_move;
+                let ms = if moving || since < Duration::from_millis(50) { (since.as_secs_f32() * 1000.).max(1.) } else { 10. };
+                last_move = now;
+                gain *= f32::from_bits(POINTER_FACTOR.load(Relaxed));
+                if POINTER_ACCELERATION.load(Relaxed) {
+                    // Under 0.4 px per ms (about 5 cm/s), as it comes.
+                    gain *= (1. + (distance / ms - 0.4) * 0.5).clamp(1., 3.);
+                }
+            }
+            moving = distance > 0.;
             for (delta, abs, wheel, left, right) in pointer_events {
                 had_input = true;
                 if (delta.is_some() && !seen_relative) || (abs.is_some() && !seen_absolute) {
@@ -545,8 +575,8 @@ impl slint::platform::Platform for Platform {
                 }
                 let (old_x, old_y) = (mouse.x, mouse.y);
                 if let Some((dx, dy)) = delta {
-                    mouse.x = (mouse.x + dx).clamp(0., display.width as f32 - 1.);
-                    mouse.y = (mouse.y + dy).clamp(0., display.height as f32 - 1.);
+                    mouse.x = (mouse.x + dx * gain).clamp(0., display.width as f32 - 1.);
+                    mouse.y = (mouse.y + dy * gain).clamp(0., display.height as f32 - 1.);
                 }
                 if let Some((x, y)) = abs {
                     mouse.x = (x * display.width as f32).clamp(0., display.width as f32 - 1.);

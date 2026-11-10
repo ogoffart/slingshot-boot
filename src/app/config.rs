@@ -12,6 +12,7 @@
 //! timeout = 5
 //! startup = "splash"
 //! resolution = "1920x1080"
+//! pointer-speed = "fast"
 //! firmware-setup = false
 //!
 //! [splash]
@@ -44,7 +45,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::settings::{STYLES, Settings, THEMES};
+use super::settings::{POINTER_SPEEDS, STYLES, Settings, THEMES};
 use crate::parse::bls::glob_match;
 
 /// The icons a card can have: drawn ones, then the systems' logos
@@ -80,6 +81,8 @@ pub struct SettingsDefaults {
     pub remember_last: Option<bool>,
     pub timeout: Option<u16>,
     pub mode: Option<(u16, u16)>,
+    pub pointer_speed: Option<u8>,
+    pub pointer_acceleration: Option<bool>,
 }
 
 impl SettingsDefaults {
@@ -96,6 +99,8 @@ impl SettingsDefaults {
             remember_last: differs(builtin.remember_last, chosen.remember_last),
             timeout: differs(builtin.timeout, chosen.timeout),
             mode: differs(builtin.mode, chosen.mode).filter(|m| *m != (0, 0)),
+            pointer_speed: differs(builtin.pointer_speed, chosen.pointer_speed),
+            pointer_acceleration: differs(builtin.pointer_acceleration, chosen.pointer_acceleration),
         }
     }
 
@@ -107,6 +112,8 @@ impl SettingsDefaults {
         settings.remember_last = self.remember_last.unwrap_or(settings.remember_last);
         settings.timeout = self.timeout.unwrap_or(settings.timeout);
         settings.mode = self.mode.unwrap_or(settings.mode);
+        settings.pointer_speed = self.pointer_speed.unwrap_or(settings.pointer_speed);
+        settings.pointer_acceleration = self.pointer_acceleration.unwrap_or(settings.pointer_acceleration);
     }
 }
 
@@ -338,6 +345,8 @@ pub fn parse(text: &str) -> Config {
     config.defaults.accent = top.choice("accent", &ACCENTS, w).map(|i| i as u8);
     config.defaults.splash = top.choice("startup", &["menu", "splash"], w).map(|i| i == 1);
     config.defaults.remember_last = top.choice("default", &["entry", "last"], w).map(|i| i == 1);
+    config.defaults.pointer_speed = top.choice("pointer-speed", &POINTER_SPEEDS, w).map(|i| i as u8);
+    config.defaults.pointer_acceleration = top.bool("pointer-acceleration", w);
     if let Some(v) = top.value("timeout") {
         match v.as_integer() {
             Some(t) if t >= 0 => config.defaults.timeout = Some(t.min(255) as u16),
@@ -582,6 +591,12 @@ pub fn to_text(config: &Config) -> String {
     }
     if let Some((w, h)) = d.mode {
         line(format!("resolution = {}", quoted(&format!("{w}x{h}"))));
+    }
+    if let Some(name) = d.pointer_speed.and_then(|s| POINTER_SPEEDS.get(s as usize)) {
+        line(format!("pointer-speed = {}", quoted(name)));
+    }
+    if let Some(on) = d.pointer_acceleration {
+        line(format!("pointer-acceleration = {on}"));
     }
     if !config.firmware_setup {
         line(String::from("firmware-setup = false"));
@@ -985,6 +1000,8 @@ mod tests {
             startup = "splash"
             timeout = 3
             resolution = "1920x1080"
+            pointer-speed = "fast"
+            pointer-acceleration = false
             firmware-setup = false
             [splash]
             text = "Hello = world"
@@ -1001,9 +1018,12 @@ mod tests {
                 splash: Some(true),
                 remember_last: None,
                 timeout: Some(3),
-                mode: Some((1920, 1080))
+                mode: Some((1920, 1080)),
+                pointer_speed: Some(3),
+                pointer_acceleration: Some(false),
             }
         );
+        assert_eq!(parse(&to_text(&c)).defaults, c.defaults);
         assert_eq!(c.splash_text, "Hello = world");
         assert_eq!(c.splash_image, "splash.png");
         assert!(!c.firmware_setup);

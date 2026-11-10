@@ -90,6 +90,11 @@ fn use_keymap(backend: &dyn Backend, config: &Config, choice: u8) {
     backend.set_keymap(keymap);
 }
 
+/// Moves the pointer at the speed and with the acceleration of `settings`.
+fn use_pointer(backend: &dyn Backend, settings: &Settings) {
+    backend.set_pointer(settings::POINTER_FACTORS[usize::from(settings.pointer_speed)], settings.pointer_acceleration);
+}
+
 /// The language chosen in Settings (`choice`, see `Settings::language`):
 /// none for "Automatic".
 fn chosen_language(choice: u8) -> Option<&'static str> {
@@ -595,6 +600,8 @@ fn show_settings(ui: &AppWindow, settings: &Settings) {
     page.set_startup_index(if settings.splash { 1 } else { 0 });
     page.set_default_index(settings.remember_last.into());
     page.set_timeout_seconds(settings.timeout.into());
+    page.set_pointer_speed(settings.pointer_speed.into());
+    page.set_pointer_acceleration(settings.pointer_acceleration);
 }
 
 /// Rebuilds the boot picker's cards from the entries in `st`, and shows the
@@ -977,6 +984,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     config.defaults.apply(&mut defaults);
     let settings = initial_settings(caps.configure, &config, defaults, saved);
     show_settings(&ui, &settings);
+    use_pointer(&*backend, &settings);
     show_language_choices(&ui, &*backend, &config, &settings);
     // F10 too, not only the card.
     ui.set_firmware_setup_supported(boot.firmware_setup_supported && config.firmware_setup);
@@ -1569,6 +1577,17 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     page.on_startup_selected(on_setting(|s, i| s.splash = i == 1));
     page.on_timeout_changed(on_setting(|s, seconds| s.timeout = seconds.min(255) as u16));
     {
+        // Applied right away.
+        let (state, backend) = (state.clone(), backend.clone());
+        page.on_pointer_changed(move |speed, acceleration| {
+            let mut st = state.borrow_mut();
+            st.settings.pointer_speed = speed.clamp(0, settings::POINTER_SPEEDS.len() as i32 - 1) as u8;
+            st.settings.pointer_acceleration = acceleration;
+            st.settings_dirty = true;
+            use_pointer(&*backend, &st.settings);
+        });
+    }
+    {
         // The default entry: the boot screen shows the new one.
         let (state, ui_weak) = (state.clone(), ui.as_weak());
         ui.global::<SettingsPage>().on_default_selected(move |i| {
@@ -1659,9 +1678,11 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
             let defaults = state.borrow().defaults;
             show_settings(&ui, &defaults);
-            // Applied as if chosen (the texts, the keys).
-            ui.global::<SettingsPage>().invoke_language_selected(defaults.language.into());
-            ui.global::<SettingsPage>().invoke_keyboard_selected(defaults.keyboard.into());
+            // Applied as if chosen (the texts, the keys, the pointer).
+            let page = ui.global::<SettingsPage>();
+            page.invoke_language_selected(defaults.language.into());
+            page.invoke_keyboard_selected(defaults.keyboard.into());
+            page.invoke_pointer_changed(defaults.pointer_speed.into(), defaults.pointer_acceleration);
             let mut st = state.borrow_mut();
             st.settings = defaults;
             st.settings_dirty = false;

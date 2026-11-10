@@ -622,6 +622,13 @@ impl Backend for UefiBackend {
         *platform::KEYMAP.0.borrow_mut() = Some(keymap);
     }
 
+    fn set_pointer(&self, factor: f32, acceleration: bool) {
+        use core::sync::atomic::Ordering::Relaxed;
+        log::info!("pointer: speed ×{factor}, acceleration {}", if acceleration { "on" } else { "off" });
+        platform::POINTER_FACTOR.store(factor.to_bits(), Relaxed);
+        platform::POINTER_ACCELERATION.store(acceleration, Relaxed);
+    }
+
     fn language(&self) -> Option<String> {
         // PlatformLang: an RFC 4646 tag ("fr-FR"), NUL-terminated ASCII.
         let (data, _) = uefi::runtime::get_variable_boxed(uefi::cstr16!("PlatformLang"), &uefi::runtime::VariableVendor::GLOBAL_VARIABLE).ok()?;

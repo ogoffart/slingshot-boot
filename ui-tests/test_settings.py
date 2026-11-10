@@ -131,14 +131,14 @@ def test_alt_down_moves_an_entry_and_restore_undoes_it(window):
 
 def test_page_down_goes_from_section_to_section(window):
     open_settings(window)
-    sections = ["Appearance", "Startup", "Language and keyboard", "Boot order"]
+    sections = ["Appearance", "Startup", "Language and input", "Boot order"]
     shown = lambda: [s for s in sections if button(window, s).accessible_item_selected]
     assert shown() == ["Appearance"]
     for section in sections[1:]:
         press(window, keys.PageDown)
         assert shown() == [section]
     press(window, keys.PageUp)
-    assert shown() == ["Language and keyboard"]
+    assert shown() == ["Language and input"]
     press(window, keys.PageDown)
     # The boot order's first row has the focus.
     assert focused_row(window) == [order(window)[0]]
@@ -185,7 +185,7 @@ def test_up_down_go_from_setting_to_setting_across_sections(window):
     """↑ ↓ go to the previous or next setting (Tab goes control by control),
     into the next section after the last one and back."""
     open_settings(window)
-    sections = ["Appearance", "Startup", "Language and keyboard", "Boot order"]
+    sections = ["Appearance", "Startup", "Language and input", "Boot order"]
     shown = lambda: [s for s in sections if button(window, s).accessible_item_selected]
     # Theme → accent: → changes the accent, not the theme.
     press(window, keys.DownArrow)

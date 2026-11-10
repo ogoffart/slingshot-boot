@@ -3,7 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { BootEntry, Button, Focus, Panel, PicturePicker, Segment, SegmentedControl, TextField, Toggle } from "widgets.slint";
+import { BootEntry, Button, Focus, Panel, PicturePicker, Segment, SegmentedControl, Slider, TextField, Toggle } from "widgets.slint";
 
 component IconButton inherits Rectangle {
     in property <string> icon;
@@ -605,6 +605,10 @@ export global SettingsPage {
     in-out property <int> keyboard-index;
     callback language-selected(int);
     callback keyboard-selected(int);
+    // The pointer: an index in `POINTER_SPEEDS`, and the acceleration.
+    in-out property <int> pointer-speed: 2;
+    in-out property <bool> pointer-acceleration: true;
+    callback pointer-changed(/* speed */ int, /* acceleration */ bool);
 
     in-out property <bool> confirm-reset-visible;
     callback reset-settings();
@@ -645,7 +649,7 @@ export component SettingsScreen inherits Rectangle {
     property <[{icon: string, title: string, about: string}]> sections: [
         { icon: "palette", title: @tr("Appearance"), about: @tr("How the boot menu looks, and the screen resolution. Applied right away.") },
         { icon: "play", title: @tr("Startup"), about: @tr("What shows first, and when the default entry starts by itself.") },
-        { icon: "keyboard", title: @tr("Language and keyboard"), about: @tr("The language of the menus, and how the keys type (passphrases too).") },
+        { icon: "keyboard", title: @tr("Language and input"), about: @tr("The language of the menus, how the keys type (passphrases too), and how fast the mouse and the touchpad move.") },
         { icon: "list", title: @tr("Boot order"), about: @tr("Drag the entries, or use the arrows or Alt + ↑ ↓. Saved to the firmware only when you confirm.") },
     ];
     // The section shown.
@@ -1113,17 +1117,21 @@ export component SettingsScreen inherits Rectangle {
                 pending <=> root.pending-focus;
                 take-focus(at-end) => {
                     if at-end {
-                        keyboard-picker.focus();
+                        acceleration-toggle.focus();
                     } else {
                         language-picker.focus();
                     }
                 }
                 step(d) => {
-                    let n = (keyboard-picker.has-focus ? 1 : 0) + d;
+                    let n = (keyboard-picker.has-focus ? 1 : speed-picker.has-focus ? 2 : acceleration-toggle.has-focus ? 3 : 0) + d;
                     if n == 0 {
                         language-picker.focus();
                     } else if n == 1 {
                         keyboard-picker.focus();
+                    } else if n == 2 {
+                        speed-picker.focus();
+                    } else if n == 3 {
+                        acceleration-toggle.focus();
                     } else {
                         return false;
                     }
@@ -1154,6 +1162,26 @@ export component SettingsScreen inherits Rectangle {
                         can-next: SettingsPage.keyboard-index < SettingsPage.keyboard-names.length - 1;
                         step(d) => {
                             SettingsPage.select-keyboard(clamp(SettingsPage.keyboard-index + d, 0, SettingsPage.keyboard-names.length - 1));
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Pointer speed"); }
+                    speed-picker := Slider {
+                        max-width: root.control-width;
+                        options: [@tr("Slower"), @tr("Slow"), @tr("Normal"), @tr("Fast"), @tr("Faster")];
+                        current <=> SettingsPage.pointer-speed;
+                        activated(i) => {
+                            SettingsPage.pointer-changed(i, SettingsPage.pointer-acceleration);
+                        }
+                    }
+                    acceleration-toggle := Toggle {
+                        text: @tr("Pointer acceleration");
+                        checked: SettingsPage.pointer-acceleration;
+                        clicked => {
+                            SettingsPage.pointer-acceleration = !SettingsPage.pointer-acceleration;
+                            SettingsPage.pointer-changed(SettingsPage.pointer-speed, SettingsPage.pointer-acceleration);
                         }
                     }
                 }

@@ -45,7 +45,7 @@ Most systems with an encrypted disk already meet these, except for the unified k
 
 3. **Restart and start the entry:** Slingshot asks for the passphrase.
 
-The window types with the keyboard layout chosen in Settings (Language and keyboard), or the `keyboard` setting in
+The window types with the keyboard layout chosen in Settings (Language and input), or the `keyboard` setting in
 [slingshot.toml](configuration.md): your console's after `slingshot-setup install`. With several disks, Slingshot
 asks for each, trying the previous passphrase first. **Skip** starts the entry without unlocking, and Linux asks
 instead. Encrypted partitions are also listed in **Start a file…**: once unlocked, their files show read-only (with a

@@ -29,6 +29,8 @@ timeout = 10                # seconds before the default entry starts; 0: never
 startup = "menu"            # "menu" or "splash" (the splash screen)
 default = "entry"           # "entry" (the default entry) or "last" (the one started last)
 # resolution = "1920x1080"  # by default the firmware's
+pointer-speed = "normal"    # "slower", "slow", "normal", "fast", "faster": mice and touchpads
+pointer-acceleration = true # fast movements go further
 firmware-setup = true       # the "Firmware setup" entry, and F10
 ```
 

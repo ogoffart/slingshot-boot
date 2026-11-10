@@ -281,13 +281,10 @@ impl Touchpad {
         hid::parse_mouse_report(self.layout.as_ref()?, report)
     }
 
-    /// Pixels per touch pad unit, at rest: the Framework's pad is 1337 units
-    /// for 11 cm. Faster moves go further (`ACCELERATION` more per unit of a
-    /// report's move, up to `MAX_SPEED`): slow ones stay precise, a flick
-    /// crosses the screen.
-    const SPEED: f32 = 2.5;
-    const ACCELERATION: f32 = 0.15;
-    const MAX_SPEED: f32 = 8.;
+    /// Pixels per touch pad unit, at scale 1: the Framework's pad is 1337
+    /// units for 11 cm (2.5 on its screen, scaled ×1.5). The platform
+    /// accelerates fast moves.
+    const SPEED: f32 = 1.7;
 
     /// A finger report as a mouse's: the movement of the finger since the
     /// last report (none when it just came down, or with more fingers), and
@@ -300,9 +297,8 @@ impl Touchpad {
                 && t.fingers <= 1
             {
                 let (mx, my) = ((t.x - x) as f32, (t.y - y) as f32);
-                let speed = (Self::SPEED + Self::ACCELERATION * mx.abs().max(my.abs())).min(Self::MAX_SPEED);
-                let fx = mx * speed + self.carry.0;
-                let fy = my * speed + self.carry.1;
+                let fx = mx * Self::SPEED + self.carry.0;
+                let fy = my * Self::SPEED + self.carry.1;
                 (dx, dy) = (fx as i32, fy as i32);
                 self.carry = (fx - dx as f32, fy - dy as f32);
             } else {
