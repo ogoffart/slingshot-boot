@@ -143,26 +143,26 @@ export component AppWindow inherits Window {
 
     // The tabs: F1 is the first one, F2 the second, and so on.
     property <[TabInfo]> tabs: root.settings-access == 1 ? (Install.available ? [
-        { text: @tr("Boot"), screen: 0 },
-        { text: @tr("System"), screen: 1 },
-        { text: @tr("Install"), screen: 3 },
+        { text: @tr("Boot"), icon: "play", screen: 0 },
+        { text: @tr("System"), icon: "cpu", screen: 1 },
+        { text: @tr("Install"), icon: "download", screen: 3 },
     ] : [
-        { text: @tr("Boot"), screen: 0 },
-        { text: @tr("System"), screen: 1 },
+        { text: @tr("Boot"), icon: "play", screen: 0 },
+        { text: @tr("System"), icon: "cpu", screen: 1 },
     ]) : root.screen-available(4) ? [
-        { text: @tr("Boot"), screen: 0 },
-        { text: @tr("Files"), screen: 4 },
-        { text: @tr("System"), screen: 1 },
-        { text: @tr("Settings"), screen: 2 },
+        { text: @tr("Boot"), icon: "play", screen: 0 },
+        { text: @tr("Files"), icon: "folder", screen: 4 },
+        { text: @tr("System"), icon: "cpu", screen: 1 },
+        { text: @tr("Settings"), icon: "sliders", screen: 2 },
     ] : (Install.available ? [
-        { text: @tr("Boot"), screen: 0 },
-        { text: @tr("System"), screen: 1 },
-        { text: @tr("Settings"), screen: 2 },
-        { text: @tr("Install"), screen: 3 },
+        { text: @tr("Boot"), icon: "play", screen: 0 },
+        { text: @tr("System"), icon: "cpu", screen: 1 },
+        { text: @tr("Settings"), icon: "sliders", screen: 2 },
+        { text: @tr("Install"), icon: "download", screen: 3 },
     ] : [
-        { text: @tr("Boot"), screen: 0 },
-        { text: @tr("System"), screen: 1 },
-        { text: @tr("Settings"), screen: 2 },
+        { text: @tr("Boot"), icon: "play", screen: 0 },
+        { text: @tr("System"), icon: "cpu", screen: 1 },
+        { text: @tr("Settings"), icon: "sliders", screen: 2 },
     ]);
 
     // The screens in the tabs' order (Boot, Files, System, Settings,

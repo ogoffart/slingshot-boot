@@ -3,14 +3,17 @@
 
 import { Theme } from "theme.slint";
 import { Frost, Focus } from "widgets.slint";
+import { Icon } from "icons.slint";
 
 export struct TabInfo {
     text: string,
+    icon: string,
     screen: int,
 }
 
 component Tab inherits Rectangle {
     in property <string> text;
+    in property <string> icon;
     // The key that switches to this screen, e.g. "F1".
     in property <string> shortcut;
     in property <bool> active;
@@ -50,6 +53,17 @@ component Tab inherits Rectangle {
     row := HorizontalLayout {
         alignment: center;
         spacing: 8px;
+        Rectangle {
+            width: 18px;
+            Icon {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                kind: root.icon;
+                size: 18px;
+                thickness: root.active ? 2px : 1.7px;
+                color: root.active ? Theme.accent : Theme.text-muted;
+            }
+        }
         Text {
             text: root.text;
             font-size: 15px;
@@ -166,6 +180,7 @@ export component TopBar inherits Rectangle {
                 spacing: 4px;
                 for tab[i] in root.tabs: Tab {
                     text: tab.text;
+                    icon: tab.icon;
                     // F1 for the first tab, and so on: as the window's keys.
                     shortcut: "F" + (i + 1);
                     active: root.screen == tab.screen;
