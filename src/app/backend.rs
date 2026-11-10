@@ -168,7 +168,8 @@ pub struct Secret(pub Vec<u8>);
 
 impl Drop for Secret {
     fn drop(&mut self) {
-        crate::parse::wipe(&mut self.0);
+        // The spare capacity too (a passphrase after Backspace).
+        zeroize::Zeroize::zeroize(&mut self.0);
     }
 }
 

@@ -296,7 +296,7 @@ impl Cpio {
 
 impl Drop for Cpio {
     fn drop(&mut self) {
-        super::wipe(&mut self.data);
+        zeroize::Zeroize::zeroize(&mut self.data);
     }
 }
 

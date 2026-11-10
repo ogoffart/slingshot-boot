@@ -355,7 +355,6 @@ fn pbkdf2_with<M: hmac::Mac + Clone>(prf: M, salt: &[u8], iterations: u32, out: 
             }
             let mut mac = prf.clone();
             mac.update(&u);
-            wipe(&mut u);
             u = mac.finalize().into_bytes();
             for (b, x) in block.iter_mut().zip(u.iter()) {
                 *b ^= x;
@@ -580,9 +579,7 @@ impl Attempt {
         // The derived keys and Argon2's memory are no longer needed.
         wipe(&mut self.key);
         wipe(&mut self.passphrase);
-        let len = self.blocks.len() * argon2::Block::SIZE;
-        // SAFETY: blocks are plain integers.
-        wipe(unsafe { core::slice::from_raw_parts_mut(self.blocks.as_mut_ptr().cast::<u8>(), len) });
+        self.blocks.iter_mut().for_each(zeroize::Zeroize::zeroize);
     }
 
     fn try_slot(&mut self, i: usize, lanes: &dyn argon2::LaneRunner) -> Result<bool, Error> {

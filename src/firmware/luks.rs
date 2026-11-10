@@ -1034,6 +1034,6 @@ impl Drop for Handoff {
         }
         DATA.store(core::ptr::null_mut(), Ordering::Release);
         LEN.store(0, Ordering::Release);
-        crate::parse::wipe(&mut self.data);
+        zeroize::Zeroize::zeroize(&mut self.data);
     }
 }

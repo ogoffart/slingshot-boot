@@ -4467,6 +4467,7 @@ dependencies = [
  "uefi-raw",
  "xkbcommon",
  "xts-mode",
+ "zeroize",
  "zune-core",
  "zune-jpeg",
 ]

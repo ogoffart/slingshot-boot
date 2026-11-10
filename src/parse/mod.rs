@@ -43,17 +43,7 @@ use alloc::vec::Vec;
 
 /// Overwrites `data` with zeros, in a way the compiler keeps.
 pub fn wipe(data: &mut [u8]) {
-    // SAFETY: any bytes are valid u64s.
-    let (head, words, tail) = unsafe { data.align_to_mut::<u64>() };
-    for w in words {
-        // SAFETY: a valid, aligned reference.
-        unsafe { core::ptr::write_volatile(w, 0) };
-    }
-    for b in head.iter_mut().chain(tail) {
-        // SAFETY: as above.
-        unsafe { core::ptr::write_volatile(b, 0) };
-    }
-    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    zeroize::Zeroize::zeroize(data);
 }
 
 /// The architecture in EFI file names: `BOOTX64.EFI`, `systemd-bootaa64.efi`.
