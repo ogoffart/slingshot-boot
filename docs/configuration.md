@@ -31,15 +31,14 @@ default = "entry"           # "entry" (the default entry) or "last" (the one sta
 # resolution = "1920x1080"  # by default the firmware's
 pointer-speed = "normal"    # "slower", "slow", "normal", "fast", "faster": mice and touchpads
 pointer-acceleration = true # fast movements go further
-animations = "auto"         # screen transitions: "on", "off", "auto" (off when slower than…)
-animations-fps = 20         # … this many frames per second
 firmware-setup = true       # the "Firmware setup" entry, and F10
+animations-fps = 15         # the screen animations stop below this; 0: always on
 ```
 
 These are the Settings screen's defaults. Changes made there at boot are
 saved in the firmware (NVRAM) and win over the file, until the file changes
 again: the most recent change counts. "Reset all settings" goes back to the
-file's values. The style is only set here.
+file's values. The style and `animations-fps` are only set here.
 
 - **Styles:** cards; colorful (each kind of entry on a colored tile); flat
   (icons and titles, no cards); classic (a list, chosen with ↑ ↓).

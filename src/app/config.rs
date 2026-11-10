@@ -45,7 +45,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::settings::{ANIMATIONS, ANIMATIONS_FPS, POINTER_SPEEDS, STYLES, Settings, THEMES};
+use super::settings::{POINTER_SPEEDS, STYLES, Settings, THEMES};
 use crate::parse::bls::glob_match;
 
 /// The icons a card can have: drawn ones, then the systems' logos
@@ -83,8 +83,6 @@ pub struct SettingsDefaults {
     pub mode: Option<(u16, u16)>,
     pub pointer_speed: Option<u8>,
     pub pointer_acceleration: Option<bool>,
-    pub animations: Option<u8>,
-    pub animations_fps: Option<u8>,
 }
 
 impl SettingsDefaults {
@@ -103,8 +101,6 @@ impl SettingsDefaults {
             mode: differs(builtin.mode, chosen.mode).filter(|m| *m != (0, 0)),
             pointer_speed: differs(builtin.pointer_speed, chosen.pointer_speed),
             pointer_acceleration: differs(builtin.pointer_acceleration, chosen.pointer_acceleration),
-            animations: differs(builtin.animations, chosen.animations),
-            animations_fps: differs(builtin.animations_fps, chosen.animations_fps),
         }
     }
 
@@ -118,8 +114,6 @@ impl SettingsDefaults {
         settings.mode = self.mode.unwrap_or(settings.mode);
         settings.pointer_speed = self.pointer_speed.unwrap_or(settings.pointer_speed);
         settings.pointer_acceleration = self.pointer_acceleration.unwrap_or(settings.pointer_acceleration);
-        settings.animations = self.animations.unwrap_or(settings.animations);
-        settings.animations_fps = self.animations_fps.unwrap_or(settings.animations_fps);
     }
 }
 
@@ -195,6 +189,9 @@ pub struct Config {
     pub editor: Option<bool>,
     /// Show the "Firmware setup" card (when the firmware supports it).
     pub firmware_setup: bool,
+    /// The screen animations are off when full redraws draw fewer frames
+    /// per second; 0: always on.
+    pub animations_fps: u8,
     pub entries: Vec<EntryRule>,
     /// Lines that were not understood, to log.
     pub warnings: Vec<String>,
@@ -215,6 +212,7 @@ impl Default for Config {
             settings_access: SettingsAccess::Shown,
             editor: None,
             firmware_setup: true,
+            animations_fps: 15,
             entries: Vec::new(),
             warnings: Vec::new(),
         }
@@ -353,13 +351,6 @@ pub fn parse(text: &str) -> Config {
     config.defaults.remember_last = top.choice("default", &["entry", "last"], w).map(|i| i == 1);
     config.defaults.pointer_speed = top.choice("pointer-speed", &POINTER_SPEEDS, w).map(|i| i as u8);
     config.defaults.pointer_acceleration = top.bool("pointer-acceleration", w);
-    config.defaults.animations = top.choice("animations", &ANIMATIONS, w).map(|i| i as u8);
-    if let Some(v) = top.value("animations-fps") {
-        match v.as_integer().and_then(|fps| u8::try_from(fps).ok()).filter(|fps| ANIMATIONS_FPS.contains(fps)) {
-            Some(fps) => config.defaults.animations_fps = Some(fps),
-            None => w.push(format!("animations-fps: expected a number of frames per second, from {} to {}", ANIMATIONS_FPS.start(), ANIMATIONS_FPS.end())),
-        }
-    }
     if let Some(v) = top.value("timeout") {
         match v.as_integer() {
             Some(t) if t >= 0 => config.defaults.timeout = Some(t.min(255) as u16),
@@ -374,6 +365,12 @@ pub fn parse(text: &str) -> Config {
     }
     if let Some(b) = top.bool("firmware-setup", w) {
         config.firmware_setup = b;
+    }
+    if let Some(v) = top.value("animations-fps") {
+        match v.as_integer().and_then(|fps| u8::try_from(fps).ok()).filter(|fps| *fps <= 60) {
+            Some(fps) => config.animations_fps = fps,
+            None => w.push(String::from("animations-fps: expected a number of frames per second, from 0 (always animate) to 60")),
+        }
     }
     config.wallpaper = top.str("wallpaper", w).unwrap_or_default().into();
     config.language = top.str("language", w).map(String::from);
@@ -611,14 +608,11 @@ pub fn to_text(config: &Config) -> String {
     if let Some(on) = d.pointer_acceleration {
         line(format!("pointer-acceleration = {on}"));
     }
-    if let Some(name) = d.animations.and_then(|a| ANIMATIONS.get(a as usize)) {
-        line(format!("animations = {}", quoted(name)));
-    }
-    if let Some(fps) = d.animations_fps {
-        line(format!("animations-fps = {fps}"));
-    }
     if !config.firmware_setup {
         line(String::from("firmware-setup = false"));
+    }
+    if config.animations_fps != Config::default().animations_fps {
+        line(format!("animations-fps = {}", config.animations_fps));
     }
     if let Some(language) = &config.language {
         line(format!("language = {}", quoted(language)));
@@ -1021,8 +1015,7 @@ mod tests {
             resolution = "1920x1080"
             pointer-speed = "fast"
             pointer-acceleration = false
-            animations = "off"
-            animations-fps = 30
+            animations-fps = 0
             firmware-setup = false
             [splash]
             text = "Hello = world"
@@ -1042,13 +1035,13 @@ mod tests {
                 mode: Some((1920, 1080)),
                 pointer_speed: Some(3),
                 pointer_acceleration: Some(false),
-                animations: Some(1),
-                animations_fps: Some(30),
             }
         );
         assert_eq!(parse(&to_text(&c)).defaults, c.defaults);
         assert_eq!(c.splash_text, "Hello = world");
         assert_eq!(c.splash_image, "splash.png");
+        assert_eq!(c.animations_fps, 0);
+        assert_eq!(parse(&to_text(&c)).animations_fps, 0);
         assert!(!c.firmware_setup);
     }
 
