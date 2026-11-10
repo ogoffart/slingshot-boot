@@ -326,8 +326,6 @@ impl slint::platform::Platform for Platform {
 
         #[cfg(not(all(target_arch = "x86_64", feature = "touchpad")))]
         log::info!("touchpad: not in this build (the touchpad feature, x86 only)");
-        // Whether full redraws are too slow to animate, once measured.
-        let mut slow_rendering: Option<bool> = None;
         let mut warmed_up = false;
         let mut first_frame_logged = false;
         // The drivers and the devices: connected after the first frame.
@@ -631,16 +629,7 @@ impl slint::platform::Platform for Platform {
                     log::info!("display: first frame drawn");
                 }
                 if covered * 10 >= display.width * display.height * 9 && core::mem::replace(&mut warmed_up, true) {
-                    let took = slint::platform::Platform::duration_since_start(self) - render_start;
-                    // Off above 50 ms (20 frames per second still look
-                    // right); back on only under 40 ms, so that a machine
-                    // near the line doesn't switch at every screen.
-                    let slow = if slow_rendering == Some(true) { took >= Duration::from_millis(40) } else { took > Duration::from_millis(50) };
-                    if slow_rendering != Some(slow) {
-                        log::info!("display: a full redraw takes {} ms: screen animations {}", took.as_millis(), if slow { "off" } else { "on" });
-                        slow_rendering = Some(slow);
-                        self.shared.slow_rendering(slow);
-                    }
+                    self.shared.full_redraw(slint::platform::Platform::duration_since_start(self) - render_start);
                 }
                 for (origin, size) in region.iter() {
                     display.blit_from_fb(

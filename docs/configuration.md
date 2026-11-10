@@ -31,6 +31,8 @@ default = "entry"           # "entry" (the default entry) or "last" (the one sta
 # resolution = "1920x1080"  # by default the firmware's
 pointer-speed = "normal"    # "slower", "slow", "normal", "fast", "faster": mice and touchpads
 pointer-acceleration = true # fast movements go further
+animations = "auto"         # screen transitions: "on", "off", "auto" (off when slower than…)
+animations-fps = 20         # … this many frames per second
 firmware-setup = true       # the "Firmware setup" entry, and F10
 ```
 

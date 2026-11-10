@@ -95,6 +95,31 @@ fn use_pointer(backend: &dyn Backend, settings: &Settings) {
     backend.set_pointer(settings::POINTER_FACTORS[usize::from(settings.pointer_speed)], settings.pointer_acceleration);
 }
 
+/// The screen animations as chosen in Settings ("auto": unless full redraws
+/// are `slow`).
+fn show_animations(ui: &AppWindow, settings: &Settings, slow: bool) {
+    let on = match settings::ANIMATIONS[usize::from(settings.animations)] {
+        "on" => true,
+        "off" => false,
+        _ => !slow,
+    };
+    ui.global::<Theme>().set_motion(on);
+}
+
+/// Whether full redraws are too slow for the animations of `st.settings`,
+/// after the last one: slower than a frame; once slow, until under 80% of
+/// it, so that a machine near the line doesn't switch at every screen.
+fn measure_rendering(st: &mut State) {
+    let Some(took) = st.full_redraw else { return };
+    let fps = st.settings.animations_fps;
+    let frame = Duration::from_secs(1) / u32::from(fps);
+    let slow = if st.slow_rendering { took >= frame * 4 / 5 } else { took > frame };
+    if slow != st.slow_rendering {
+        log::info!("display: a full redraw takes {} ms: {} {fps} frames per second", took.as_millis(), if slow { "under" } else { "at least" });
+        st.slow_rendering = slow;
+    }
+}
+
 /// The language chosen in Settings (`choice`, see `Settings::language`):
 /// none for "Automatic".
 fn chosen_language(choice: u8) -> Option<&'static str> {
@@ -344,6 +369,10 @@ struct State {
     edited: Vec<usize>,
     settings: Settings,
     settings_dirty: bool,
+    /// How long the last full redraw took, and whether that's slower than
+    /// `settings.animations_fps`.
+    full_redraw: Option<Duration>,
+    slow_rendering: bool,
     /// Index in the mode list shown in the Settings resolution picker.
     mode_candidate: usize,
     /// The resolution to go back to if the new one isn't confirmed.
@@ -602,6 +631,8 @@ fn show_settings(ui: &AppWindow, settings: &Settings) {
     page.set_timeout_seconds(settings.timeout.into());
     page.set_pointer_speed(settings.pointer_speed.into());
     page.set_pointer_acceleration(settings.pointer_acceleration);
+    page.set_animations(settings.animations.into());
+    page.set_animations_fps(settings.animations_fps.into());
 }
 
 /// Rebuilds the boot picker's cards from the entries in `st`, and shows the
@@ -985,6 +1016,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     let settings = initial_settings(caps.configure, &config, defaults, saved);
     show_settings(&ui, &settings);
     use_pointer(&*backend, &settings);
+    show_animations(&ui, &settings, false);
     show_language_choices(&ui, &*backend, &config, &settings);
     // F10 too, not only the card.
     ui.set_firmware_setup_supported(boot.firmware_setup_supported && config.firmware_setup);
@@ -1032,6 +1064,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         cards: Vec::new(),
         settings,
         settings_dirty: false,
+        full_redraw: None,
+        slow_rendering: false,
         mode_candidate: 0,
         revert_to: None,
         revert_left: -1,
@@ -1588,6 +1622,20 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         });
     }
     {
+        let (state, ui_weak) = (state.clone(), ui.as_weak());
+        page.on_animations_changed(move |animations, fps| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let mut st = state.borrow_mut();
+            st.settings.animations = animations.clamp(0, settings::ANIMATIONS.len() as i32 - 1) as u8;
+            let fps = fps.clamp(i32::from(*settings::ANIMATIONS_FPS.start()), i32::from(*settings::ANIMATIONS_FPS.end()));
+            st.settings.animations_fps = fps as u8;
+            st.settings_dirty = true;
+            // The new threshold, on the last redraw.
+            measure_rendering(&mut st);
+            show_animations(&ui, &st.settings, st.slow_rendering);
+        });
+    }
+    {
         // The default entry: the boot screen shows the new one.
         let (state, ui_weak) = (state.clone(), ui.as_weak());
         ui.global::<SettingsPage>().on_default_selected(move |i| {
@@ -1683,6 +1731,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             page.invoke_language_selected(defaults.language.into());
             page.invoke_keyboard_selected(defaults.keyboard.into());
             page.invoke_pointer_changed(defaults.pointer_speed.into(), defaults.pointer_acceleration);
+            page.invoke_animations_changed(defaults.animations.into(), defaults.animations_fps.into());
             let mut st = state.borrow_mut();
             st.settings = defaults;
             st.settings_dirty = false;
@@ -1727,11 +1776,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }));
         }
         {
-            let ui_weak = ui.as_weak();
-            *hub.on_slow_rendering.borrow_mut() = Some(Box::new(move |slow| {
+            let (state, ui_weak) = (state.clone(), ui.as_weak());
+            *hub.on_full_redraw.borrow_mut() = Some(Box::new(move |took| {
                 if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_animate_screens(!slow);
-                    ui.global::<Theme>().set_motion(!slow);
+                    let mut st = state.borrow_mut();
+                    st.full_redraw = Some(took);
+                    measure_rendering(&mut st);
+                    show_animations(&ui, &st.settings, st.slow_rendering);
                 }
             }));
         }

@@ -18,6 +18,11 @@ pub const STYLES: [&str; 4] = ["cards", "colorful", "flat", "classic"];
 pub const POINTER_SPEEDS: [&str; 5] = ["slower", "slow", "normal", "fast", "faster"];
 pub const POINTER_FACTORS: [f32; POINTER_SPEEDS.len()] = [0.5, 0.7, 1., 1.4, 2.];
 
+/// The screen animations (`SettingsPage.animations`): always, never, or
+/// while full redraws keep up with `animations_fps`, in this range.
+pub const ANIMATIONS: [&str; 3] = ["on", "off", "auto"];
+pub const ANIMATIONS_FPS: core::ops::RangeInclusive<u8> = 1..=60;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     /// Index in `THEMES`.
@@ -28,6 +33,10 @@ pub struct Settings {
     pub pointer_speed: u8,
     /// Fast movements of the mouse or the touchpad go further.
     pub pointer_acceleration: bool,
+    /// Index in `ANIMATIONS`.
+    pub animations: u8,
+    /// "auto": the animations are off below these frames per second.
+    pub animations_fps: u8,
     /// Index in `Theme.accents`.
     pub accent: u8,
     /// Show the splash screen at startup instead of the boot menu.
@@ -57,6 +66,8 @@ impl Default for Settings {
             style: 0,
             pointer_speed: 2,
             pointer_acceleration: true,
+            animations: 2,
+            animations_fps: 20,
             accent: 0,
             splash: false,
             remember_last: false,
@@ -91,15 +102,15 @@ impl Saved {
 /// A checksum of `defaults` (FNV-1a of their encoding).
 pub fn stamp(defaults: &Settings) -> u32 {
     // The language and the keyboard aren't defaults from slingshot.toml:
-    // they don't count. The pointer only when it isn't the default, so
-    // that version 6's stamps (from before it) stay valid.
-    let body = defaults.body();
-    let pointer = (body[9] != Settings::default().body()[9]).then_some(&body[9]);
-    body[..9].iter().chain(pointer).fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193))
+    // they don't count. The settings added since version 6 only when they
+    // aren't the default, so that its stamps stay valid.
+    let (body, default) = (defaults.body(), Settings::default().body());
+    let newer = (9..12).filter(|&i| body[i] != default[i]).flat_map(|i| [i as u8, body[i]]);
+    body[..9].iter().copied().chain(newer).fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193))
 }
 
 impl Settings {
-    fn body(&self) -> [u8; 12] {
+    fn body(&self) -> [u8; 14] {
         let t = self.timeout.min(255) as u8;
         let [w0, w1] = self.mode.0.to_le_bytes();
         let [h0, h1] = self.mode.1.to_le_bytes();
@@ -107,43 +118,50 @@ impl Settings {
         let startup = self.splash as u8 | (self.remember_last as u8) << 1;
         // The pointer's speed, and bit 4 for no acceleration.
         let pointer = self.pointer_speed | (!self.pointer_acceleration as u8) << 4;
-        [self.theme, t, startup, w0, w1, h0, h1, self.accent, self.style, pointer, self.language, self.keyboard]
+        [
+            self.theme, t, startup, w0, w1, h0, h1, self.accent, self.style, pointer, self.animations, self.animations_fps,
+            self.language, self.keyboard,
+        ]
     }
 }
 
 // The encoding is only used by the UEFI build (NVRAM).
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
 impl Saved {
-    pub fn encode(&self) -> [u8; 17] {
-        let mut data = [0; 17];
+    pub fn encode(&self) -> [u8; 19] {
+        let mut data = [0; 19];
         data[0] = VERSION;
-        data[1..13].copy_from_slice(&self.settings.body());
-        data[13..].copy_from_slice(&self.base.unwrap_or(0).to_le_bytes());
+        data[1..15].copy_from_slice(&self.settings.body());
+        data[15..].copy_from_slice(&self.base.unwrap_or(0).to_le_bytes());
         data
     }
 
     /// `None` for anything else than what `encode` writes (another
-    /// version's: the defaults then), or version 6's (no pointer yet).
+    /// version's: the defaults then), or version 6's (the settings added
+    /// since at their defaults).
     pub fn decode(data: &[u8]) -> Option<Self> {
         if data.len() == 16 && data[0] == 6 {
-            let mut v7 = [0; 17];
+            let mut v7 = [0; 19];
             v7[0] = VERSION;
             v7[1..10].copy_from_slice(&data[1..10]);
-            v7[10] = Settings::default().body()[9];
-            v7[11..].copy_from_slice(&data[10..]);
+            v7[10..13].copy_from_slice(&Settings::default().body()[9..12]);
+            v7[13..].copy_from_slice(&data[10..]);
             return Saved::decode(&v7);
         }
-        if data.len() != 17 || data[0] != VERSION {
+        if data.len() != 19 || data[0] != VERSION {
             return None;
         }
-        let (style, pointer, language, keyboard) = (data[9], data[10], data[11], data[12]);
+        let (style, pointer, language, keyboard) = (data[9], data[10], data[13], data[14]);
         let speed = pointer & 0xf;
+        let default = Settings::default();
         let settings = Settings {
             theme: if usize::from(data[1]) < THEMES.len() { data[1] } else { 0 },
             accent: data[8],
             style: if (style as usize) < STYLES.len() { style } else { 0 },
-            pointer_speed: if usize::from(speed) < POINTER_SPEEDS.len() { speed } else { Settings::default().pointer_speed },
+            pointer_speed: if usize::from(speed) < POINTER_SPEEDS.len() { speed } else { default.pointer_speed },
             pointer_acceleration: pointer & 0x10 == 0,
+            animations: if usize::from(data[11]) < ANIMATIONS.len() { data[11] } else { default.animations },
+            animations_fps: if ANIMATIONS_FPS.contains(&data[12]) { data[12] } else { default.animations_fps },
             timeout: data[2] as u16,
             splash: data[3] & 1 != 0,
             remember_last: data[3] & 2 != 0,
@@ -152,7 +170,7 @@ impl Saved {
             language: if usize::from(language) <= languages().count() { language } else { 0 },
             keyboard: if usize::from(keyboard) <= crate::parse::keymap::LAYOUTS.len() { keyboard } else { 0 },
         };
-        Some(Saved { settings, base: Some(u32::from_le_bytes([data[13], data[14], data[15], data[16]])) })
+        Some(Saved { settings, base: Some(u32::from_le_bytes([data[15], data[16], data[17], data[18]])) })
     }
 }
 
@@ -168,6 +186,8 @@ mod tests {
                 style: 2,
                 pointer_speed: 4,
                 pointer_acceleration: false,
+                animations: 1,
+                animations_fps: 30,
                 accent: 3,
                 splash: true,
                 remember_last: true,
@@ -178,7 +198,7 @@ mod tests {
             },
             base: Some(0x0403_0201),
         };
-        assert_eq!(s.encode(), [7, 1, 30, 3, 0x80, 0x07, 0xb0, 0x04, 3, 2, 0x14, 2, 3, 1, 2, 3, 4]);
+        assert_eq!(s.encode(), [7, 1, 30, 3, 0x80, 0x07, 0xb0, 0x04, 3, 2, 0x14, 1, 30, 2, 3, 1, 2, 3, 4]);
         assert_eq!(Saved::decode(&s.encode()), Some(s));
     }
 
@@ -189,7 +209,7 @@ mod tests {
         let mut data = Saved { settings: Settings { language: 99, keyboard: 99, ..d }, base: None }.encode();
         let s = Saved::decode(&data).unwrap().settings;
         assert_eq!((s.language, s.keyboard), (0, 0), "unknown: automatic");
-        data[11] = 1;
+        data[13] = 1;
         assert_eq!(Saved::decode(&data).unwrap().settings.language, 1);
     }
 
@@ -199,7 +219,7 @@ mod tests {
         let s = Saved::decode(&old).unwrap();
         let d = Settings::default();
         assert_eq!((s.settings.theme, s.settings.keyboard, s.base), (1, 3, Some(0x0403_0201)));
-        assert_eq!((s.settings.pointer_speed, s.settings.pointer_acceleration), (d.pointer_speed, d.pointer_acceleration));
+        assert_eq!(s.settings, Settings { theme: 1, timeout: 30, splash: true, remember_last: true, mode: (1920, 1200), accent: 3, style: 2, language: 2, keyboard: 3, ..d });
         // Its stamp, made without the pointer, still matches.
         let v6_stamp = d.body()[..9].iter().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(*b)).wrapping_mul(0x0100_0193));
         assert_eq!(stamp(&d), v6_stamp);
@@ -210,6 +230,8 @@ mod tests {
         let d = Settings::default();
         assert_ne!(stamp(&Settings { style: 3, ..d }), stamp(&d));
         assert_ne!(stamp(&Settings { pointer_speed: 3, ..d }), stamp(&d));
+        assert_ne!(stamp(&Settings { animations_fps: 30, ..d }), stamp(&d));
+        assert_ne!(stamp(&Settings { animations: 1, ..d }), stamp(&Settings { animations_fps: 1, ..d }));
     }
 
     #[test]

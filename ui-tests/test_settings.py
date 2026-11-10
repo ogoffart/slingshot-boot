@@ -192,9 +192,10 @@ def test_up_down_go_from_setting_to_setting_across_sections(window):
     press(window, keys.RightArrow)
     assert checked(window, "accent-picker") == ["Teal"]
     assert checked(window, "theme-picker") == ["Dark"]
-    # Wallpaper, the resolution, then Startup's first setting.
-    press(window, keys.DownArrow)
-    press(window, keys.DownArrow)
+    # Wallpaper, the resolution, the animations and their frames per second,
+    # then Startup's first setting.
+    for _ in range(4):
+        press(window, keys.DownArrow)
     assert shown() == ["Appearance"]
     press(window, keys.DownArrow)
     wait_until(lambda: shown() == ["Startup"])
@@ -204,7 +205,7 @@ def test_up_down_go_from_setting_to_setting_across_sections(window):
     # ↑ from the first setting: Appearance's last one, then up to the theme.
     press(window, keys.UpArrow)
     wait_until(lambda: shown() == ["Appearance"])
-    for _ in range(3):
+    for _ in range(5):
         press(window, keys.UpArrow)
     press(window, keys.RightArrow)
     assert checked(window, "theme-picker") == ["Light"]

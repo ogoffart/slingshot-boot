@@ -161,7 +161,7 @@ export component AppWindow inherits Window {
             // The tabs' order: Boot, System, Settings, Install.
             root.transition-direction = s > root.screen ? 1 : -1;
             root.transition-start = animation-tick();
-            root.transitioning = root.animate-screens;
+            root.transitioning = Theme.motion;
             transition-timer.restart();
             root.screen = s;
             root.screen-changed(s);
@@ -200,9 +200,6 @@ export component AppWindow inherits Window {
     // on, and fades in. Only animates while it happens (the software
     // renderer redraws the whole screen each frame).
     property <bool> transitioning;
-    // Off when the whole screen can't be redrawn fast enough (the software
-    // renderer on a 4K screen): the new screen then shows at once.
-    in property <bool> animate-screens: true;
     property <duration> transition-start;
     property <int> transition-direction: 1;
     property <float> transition-progress: root.transitioning

@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
+use core::time::Duration;
 
 /// The logical size the UI is designed for. The scale factor is picked so
 /// that the logical size is at least this.
@@ -34,9 +35,9 @@ pub struct Hub {
     pub on_mode_changed: Callback<dyn Fn(usize, usize)>,
     /// Called when the pointer diagnostics change.
     pub on_pointer_status: Callback<dyn Fn(&str)>,
-    /// Called with whether redrawing the whole screen is too slow to
-    /// animate (a large screen, a slow machine): measured on full redraws.
-    pub on_slow_rendering: Callback<dyn Fn(bool)>,
+    /// Called with how long redrawing the whole screen took, each time it
+    /// does (a large screen, a slow machine: too slow to animate).
+    pub on_full_redraw: Callback<dyn Fn(Duration)>,
     /// Called once, after the first frame, when the devices are connected:
     /// whether drivers were started too (file systems they read).
     pub on_devices_connected: Callback<dyn Fn(bool)>,
@@ -71,9 +72,9 @@ impl Hub {
     }
 
     #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
-    pub fn slow_rendering(&self, slow: bool) {
-        if let Some(cb) = &*self.on_slow_rendering.borrow() {
-            cb(slow);
+    pub fn full_redraw(&self, took: Duration) {
+        if let Some(cb) = &*self.on_full_redraw.borrow() {
+            cb(took);
         }
     }
 

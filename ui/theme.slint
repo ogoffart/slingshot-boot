@@ -7,8 +7,9 @@ export global Theme {
     // The themes offered in Settings (`THEMES` in settings.rs).
     out property <[string]> theme-names: [@tr("Dark"), @tr("Light")];
     in-out property <int> theme-index: 0;
-    // Whether full redraws are fast enough for motion (cards coming in,
-    // the row sliding); set from the measured redraw time.
+    // The screen animations: the transitions, the cards coming in, the row
+    // sliding. Set from Settings (on, off, or while full redraws are fast
+    // enough).
     in-out property <bool> motion: true;
     // Set by Rust while cards come or go (a USB stick): only then does the
     // row slide, not when the window gets its size at startup.

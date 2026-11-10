@@ -326,17 +326,19 @@ component StepPicker inherits Rectangle {
     }
 }
 
-// A number of seconds, 0 being "Never": typed (digits, Backspace) or
-// stepped (← →, the arrows).
-component SecondsField inherits Rectangle {
+// A number, typed (digits, Backspace) or stepped (← →, the arrows). By
+// default seconds, 0 being "Never".
+component NumberField inherits Rectangle {
     in property <int> value;
+    in property <int> minimum: 0;
     in property <int> maximum: 255;
+    in property <string> text: root.value == 0 && root.typed == "" ? @tr("Never") : @tr("{} s", root.value);
     out property <bool> has-focus: fs.has-focus;
     callback changed(int);
     // The digits typed since the field got the focus or was stepped.
     property <string> typed;
     function set(v: int) {
-        root.changed(clamp(v, 0, root.maximum));
+        root.changed(clamp(v, root.minimum, root.maximum));
     }
     function step(d: int) {
         root.typed = "";
@@ -356,7 +358,7 @@ component SecondsField inherits Rectangle {
         IconButton {
             y: 2px;
             icon: "chevron-left";
-            opacity: root.value > 0 ? 1 : 0.35;
+            opacity: root.value > root.minimum ? 1 : 0.35;
             clicked => {
                 fs.focus();
                 root.step(-1);
@@ -364,7 +366,7 @@ component SecondsField inherits Rectangle {
         }
         Text {
             horizontal-stretch: 1;
-            text: root.value == 0 && root.typed == "" ? @tr("Never") : @tr("{} s", root.value);
+            text: root.text;
             font-size: 15px;
             color: Theme.text;
             horizontal-alignment: center;
@@ -524,10 +526,15 @@ component Section inherits FocusScope {
         }
         reject
     }
-    VerticalLayout {
-        spacing: root.spacing;
-        alignment: root.alignment;
-        @children
+    // Scrolls when taller than the panel; the focus scrolls it too.
+    vertical-stretch: 1;
+    Flickable {
+        content-height: max(self.height, layout.preferred-height);
+        layout := VerticalLayout {
+            spacing: root.spacing;
+            alignment: root.alignment;
+            @children
+        }
     }
 }
 
@@ -609,6 +616,12 @@ export global SettingsPage {
     in-out property <int> pointer-speed: 2;
     in-out property <bool> pointer-acceleration: true;
     callback pointer-changed(/* speed */ int, /* acceleration */ bool);
+    // The screen animations: an index in `ANIMATIONS` (on, off, auto), and
+    // the frames per second below which "auto" turns them off.
+    in-out property <int> animations: 2;
+    in-out property <int> animations-fps: 20;
+    out property <bool> animations-automatic: animations == 2;
+    callback animations-changed(int, /* fps */ int);
 
     in-out property <bool> confirm-reset-visible;
     callback reset-settings();
@@ -839,14 +852,18 @@ export component SettingsScreen inherits Rectangle {
                 request: root.focus-request;
                 pending <=> root.pending-focus;
                 take-focus(at-end) => {
-                    if at-end {
-                        mode-picker.focus();
+                    if at-end && SettingsPage.animations-automatic {
+                        fps-field.focus();
+                    } else if at-end {
+                        animations-picker.focus();
                     } else {
                         theme-picker.focus();
                     }
                 }
                 step(d) => {
-                    let n = (mode-picker.has-focus || mode-apply.has-focus ? 3
+                    let n = (fps-field.has-focus ? 5
+                        : animations-picker.has-focus ? 4
+                        : mode-picker.has-focus || mode-apply.has-focus ? 3
                         : wallpaper-picker.has-focus ? 2
                         : accent-picker.has-focus ? 1 : 0) + d;
                     if n == 0 {
@@ -857,6 +874,10 @@ export component SettingsScreen inherits Rectangle {
                         wallpaper-picker.focus();
                     } else if n == 3 {
                         mode-picker.focus();
+                    } else if n == 4 {
+                        animations-picker.focus();
+                    } else if n == 5 && SettingsPage.animations-automatic {
+                        fps-field.focus();
                     } else {
                         return false;
                     }
@@ -950,6 +971,41 @@ export component SettingsScreen inherits Rectangle {
                             : @tr("Applied right away. Reverts after 10 s unless you keep it.");
                         font-size: 13px;
                         color: Theme.text-muted;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Screen animations"); }
+                    animations-picker := SegmentedControl {
+                        max-width: root.control-width;
+                        options: [@tr("On"), @tr("Off"), @tr("Automatic")];
+                        current <=> SettingsPage.animations;
+                        activated(i) => {
+                            SettingsPage.animations-changed(i, SettingsPage.animations-fps);
+                        }
+                    }
+                    // Not an `if`: `step` focuses the field.
+                    HorizontalLayout {
+                        visible: SettingsPage.animations-automatic;
+                        height: SettingsPage.animations-automatic ? self.preferred-height : 0px;
+                        spacing: 16px;
+                        alignment: start;
+                        fps-field := NumberField {
+                            width: 200px;
+                            minimum: 1;
+                            maximum: 60;
+                            value: SettingsPage.animations-fps;
+                            text: @tr("{} fps", self.value);
+                            changed(v) => {
+                                SettingsPage.animations-changed(SettingsPage.animations, v);
+                            }
+                        }
+                        Text {
+                            text: @tr("Automatic: off when the screen draws fewer frames per second.");
+                            font-size: 13px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
@@ -1090,7 +1146,7 @@ export component SettingsScreen inherits Rectangle {
                     HorizontalLayout {
                         spacing: 16px;
                         alignment: start;
-                        timeout-picker := SecondsField {
+                        timeout-picker := NumberField {
                             width: 200px;
                             value: SettingsPage.timeout-seconds;
                             changed(v) => {
@@ -1191,7 +1247,6 @@ export component SettingsScreen inherits Rectangle {
                 index: 3;
                 at-end: root.enter-at-end;
                 leave(d) => { root.leave-section(d) }
-                vertical-stretch: 1;
                 spacing: 16px;
                 // The focus on the first row when asked (the rows take it
                 // when they're made), or on the buttons without rows.
