@@ -7,7 +7,7 @@
 //! - which volumes a kernel command line needs (`rd.luks.uuid=`,
 //!   `rd.luks.name=`, `cryptdevice=`, by LUKS or partition UUID);
 //! - a small extra initrd (a "newc" cpio archive, which the kernel unpacks
-//!   over the others) with the volume key and a systemd unit that opens the
+//!   before the others) with the volume key and a systemd unit that opens the
 //!   volume with it (`cryptsetup open --volume-key-file`): no second key
 //!   derivation. The passphrase is there too, as a key file
 //!   (`/etc/cryptsetup-keys.d/<name>.key`, which systemd-cryptsetup looks

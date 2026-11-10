@@ -431,18 +431,29 @@ impl Luks {
             return None;
         }
         let (initrds, rest) = handoff::split_initrds(options);
-        let mut data = Vec::new();
+        let (archive, extra) = handoff::archive(&volumes, options);
+        let archive = Secret(archive);
+        // The archive first: the kernel doesn't always find one after a
+        // compressed initrd (its lz4 decoder reads on into it), and the
+        // distribution's has none of its files. Copied in once the initrds
+        // are read: no copy of the keys is left when one can't be.
+        let mut files = Vec::new();
         for initrd in &initrds {
             let Some(file) = super::dir::read_file(handle, initrd) else {
                 log::info!("initrd {initrd}: cannot read it");
                 return None;
             };
+            files.push(file);
+        }
+        // Each file copied once, into a buffer of the right size.
+        let start = archive.0.len().next_multiple_of(4);
+        let mut data = Vec::with_capacity(start + files.iter().map(|f| f.len().next_multiple_of(4)).sum::<usize>());
+        data.resize(start, 0);
+        for file in files {
             data.extend_from_slice(&file);
             data.resize(data.len().next_multiple_of(4), 0);
         }
-        let (archive, extra) = handoff::archive(&volumes, options);
-        data.extend_from_slice(&archive);
-        drop(Secret(archive));
+        data[..archive.0.len()].copy_from_slice(&archive.0);
         log::info!("handing {} unlocked disk(s) over: {} bytes of initrd", volumes.len(), data.len());
         let command_line = if extra.is_empty() { rest } else { format!("{rest} {extra}") };
         Some((command_line, Handoff::install(data)?))
