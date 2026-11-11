@@ -141,19 +141,6 @@ fn cancelled() -> bool {
     false
 }
 
-/// A lane runner that stops computing once `CANCEL` is set.
-struct Stoppable<'a>(&'a dyn argon2::LaneRunner);
-
-// SAFETY: runs the lanes with the runner it wraps.
-unsafe impl argon2::LaneRunner for Stoppable<'_> {
-    fn run(&self, lanes: usize, segment: &(dyn Fn(usize) + Sync)) {
-        self.0.run(lanes, segment);
-    }
-    fn stop(&self) -> bool {
-        cancelled() || self.0.stop()
-    }
-}
-
 impl Keyslot {
     /// The bytes of the area the stripes take (whole 512-byte sectors): each
     /// stripe is the size of the volume key, not of the area's key.
@@ -564,14 +551,14 @@ impl Attempt {
         self.lanes
     }
 
-    /// The slow part: tries each key slot in turn, with Argon2's lanes run
-    /// by `lanes`. Doesn't allocate.
-    pub fn run(&mut self, lanes: &dyn argon2::LaneRunner) {
+    /// The slow part: tries each key slot in turn, the segments of each
+    /// slice of Argon2 computed by `compute`. Doesn't allocate. Stops with
+    /// `Cancelled` between slices once `CANCEL` is set, so `compute` may
+    /// return with segments left then.
+    pub fn run(&mut self, compute: &dyn Fn(&argon2::Segments<'_>)) {
         // Within the reserved capacity: doesn't allocate.
         self.blocks.resize(self.block_count, argon2::Block::default());
-        let lanes = Stoppable(lanes);
-        let result = (0..self.slots.len()).find_map(|i| match self.try_slot(i, &lanes) {
-            _ if cancelled() => Some(Err(Error::Cancelled)),
+        let result = (0..self.slots.len()).find_map(|i| match self.try_slot(i, compute) {
             Ok(false) => None,
             r => Some(r.map(|_| i)),
         });
@@ -582,15 +569,23 @@ impl Attempt {
         self.blocks.iter_mut().for_each(zeroize::Zeroize::zeroize);
     }
 
-    fn try_slot(&mut self, i: usize, lanes: &dyn argon2::LaneRunner) -> Result<bool, Error> {
+    fn try_slot(&mut self, i: usize, compute: &dyn Fn(&argon2::Segments<'_>)) -> Result<bool, Error> {
         let (slot, material) = &mut self.slots[i];
         let key = &mut self.key[..slot.area_key_size];
         match &slot.kdf {
             Kdf::Pbkdf2 { hash, iterations, salt } => pbkdf2(hash, &self.passphrase, salt, *iterations, key)?,
-            kdf @ Kdf::Argon2 { salt, .. } => argon2(kdf, key.len())
-                .ok_or(Error::Malformed("argon2 parameters"))?
-                .hash_password_into_with_memory_and_lanes(&self.passphrase, salt, &mut *key, &mut self.blocks[..], lanes)
-                .map_err(|_| Error::Malformed("argon2"))?,
+            kdf @ Kdf::Argon2 { salt, .. } => {
+                let argon2 = argon2(kdf, key.len()).ok_or(Error::Malformed("argon2 parameters"))?;
+                let mut hashing = argon2
+                    .start_hash_password_into(&self.passphrase, salt, &mut *key, &mut self.blocks[..])
+                    .map_err(|_| Error::Malformed("argon2"))?;
+                while let Some(segments) = hashing.next_segments() {
+                    if cancelled() {
+                        return Err(Error::Cancelled);
+                    }
+                    compute(&segments);
+                }
+            }
         }
         // In place: each slot is tried once per attempt.
         decrypt_area(key, material)?;
@@ -638,18 +633,14 @@ pub fn unlock(
     read: impl FnMut(u64, usize) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
     let mut attempt = Attempt::new(header, passphrase, read)?;
-    attempt.run(&OneByOne);
+    attempt.run(&one_by_one);
     attempt.result().map(<[u8]>::to_vec)
 }
 
-/// Argon2's lanes one after the other, on this processor.
-pub struct OneByOne;
-
-// SAFETY: each lane once, in turn.
-unsafe impl argon2::LaneRunner for OneByOne {
-    fn run(&self, lanes: usize, segment: &(dyn Fn(usize) + Sync)) {
-        (0..lanes).for_each(segment);
-    }
+/// Computes the segments one after the other on this processor, stopping
+/// between them once `CANCEL` is set.
+pub fn one_by_one(segments: &argon2::Segments<'_>) {
+    while !cancelled() && segments.work_one() {}
 }
 
 #[cfg(test)]
@@ -662,10 +653,10 @@ mod tests {
     /// Its volume key, from `cryptsetup luksDump --dump-volume-key`, is in
     /// tests/luks2-pbkdf2.key.
     fn check(image: &[u8], expected_key_hex: &str) {
-        let size = header_size(image).unwrap();
-        let header = parse(&image[..size as usize]).unwrap();
+        let _alone = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let header = header(image);
         assert!(!header.uuid.is_empty());
-        let read = |offset: u64, len: usize| image.get(offset as usize..offset as usize + len).map(<[u8]>::to_vec);
+        let read = reader(image);
         let key = unlock(&header, b"slingshot", read).unwrap();
         let hex: String = key.iter().map(|b| alloc::format!("{b:02x}")).collect();
         assert_eq!(hex, expected_key_hex.trim());
@@ -676,6 +667,18 @@ mod tests {
     fn pbkdf2_volume() {
         check(include_bytes!("../../tests/luks2-pbkdf2.img"), include_str!("../../tests/luks2-pbkdf2.key"));
     }
+
+    fn header(image: &[u8]) -> Header {
+        parse(&image[..header_size(image).unwrap() as usize]).unwrap()
+    }
+
+    /// Reads the volume `image`, for `Attempt`.
+    fn reader(image: &[u8]) -> impl Fn(u64, usize) -> Option<Vec<u8>> + Copy + '_ {
+        |offset, len| image.get(offset as usize..offset as usize + len).map(<[u8]>::to_vec)
+    }
+
+    /// Attempts run one at a time: `CANCEL` stops them all.
+    static ATTEMPTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The test volume's header with `from` replaced by `to` in its JSON
     /// (the checksum isn't checked).
@@ -719,20 +722,6 @@ mod tests {
         assert_eq!(&sha512[..4], &[0x86, 0x7f, 0x70, 0xcf]);
     }
 
-    /// Each lane on a thread of its own: the vendored argon2's LaneRunner.
-    struct Threads;
-
-    // SAFETY: each lane once, joined before returning.
-    unsafe impl argon2::LaneRunner for Threads {
-        fn run(&self, lanes: usize, segment: &(dyn Fn(usize) + Sync)) {
-            std::thread::scope(|s| {
-                for lane in 0..lanes {
-                    s.spawn(move || segment(lane));
-                }
-            });
-        }
-    }
-
     #[test]
     fn argon2_lanes_in_parallel() {
         let params = argon2::Params::new(256, 3, 4, Some(32)).unwrap();
@@ -740,9 +729,36 @@ mod tests {
         let (mut one, mut threads) = ([0u8; 32], [0u8; 32]);
         a.hash_password_into(b"slingshot", b"saltsaltsaltsalt", &mut one).unwrap();
         let mut memory = alloc::vec![argon2::Block::default(); 256];
-        a.hash_password_into_with_memory_and_lanes(b"slingshot", b"saltsaltsaltsalt", &mut threads, &mut memory, &Threads)
-            .unwrap();
+        // Each lane on a thread of its own, as on the firmware's processors.
+        let mut hashing = a.start_hash_password_into(b"slingshot", b"saltsaltsaltsalt", &mut threads, &mut memory).unwrap();
+        while let Some(segments) = hashing.next_segments() {
+            std::thread::scope(|s| {
+                for _ in 0..segments.lanes() {
+                    s.spawn(|| segments.work());
+                }
+            });
+        }
         assert_eq!(one, threads);
+    }
+
+    /// The Argon2id volume's 16 slices (4 passes), cancelled after 3: the
+    /// check stops there.
+    #[test]
+    fn cancelled_argon2() {
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        let _alone = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let image = include_bytes!("../../tests/luks2-argon2id.img");
+        let mut attempt = Attempt::new(&header(image), b"slingshot", reader(image)).unwrap();
+        let slices = AtomicUsize::new(0);
+        attempt.run(&|segments| {
+            one_by_one(segments);
+            if slices.fetch_add(1, Ordering::Relaxed) == 2 {
+                CANCEL.store(true, Ordering::Release);
+            }
+        });
+        CANCEL.store(false, Ordering::Release);
+        assert_eq!(attempt.result().err(), Some(Error::Cancelled));
+        assert_eq!(slices.load(Ordering::Relaxed), 3);
     }
 
     #[test]

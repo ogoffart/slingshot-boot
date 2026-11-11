@@ -26,9 +26,9 @@ ogoffart/slingshot-boot`.
 
 ## What makes it reproducible
 
-- **Same inputs:** `Cargo.lock` (`--locked`), the vendored crates, Slint
-  pinned to a commit, and the Rust version Cargo.toml names (another version
-  gives other bytes: the script warns).
+- **Same inputs:** `Cargo.lock` (`--locked`; it pins the patched crates'
+  commits), Slint pinned to a commit, and the Rust version Cargo.toml
+  names (another version gives other bytes: the script warns).
 - **No build machine paths** (panic messages carry source file names):
   `scripts/build-efi.sh` maps the source tree to `/slingshot`, Cargo's home to
   `/cargo` and the Rust installation to `/rust` (`--remap-path-prefix`).

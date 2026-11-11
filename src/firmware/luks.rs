@@ -367,7 +367,7 @@ impl Luks {
                     let mut attempt = unsafe { Box::from_raw(attempt) };
                     if !RAN.load(Ordering::Acquire) {
                         log::info!("that processor can't run AVX2 code: checking on this one");
-                        attempt.run(&luks::OneByOne);
+                        attempt.run(&luks::one_by_one);
                     }
                     log::info!("passphrase checked in {} ms", took());
                     if let Some(finish) = finish.take() {
@@ -387,7 +387,7 @@ impl Luks {
                     // The screen doesn't change until it's done, but
                     // Escape still stops it.
                     luks::set_poll(Some(escape_pressed));
-                    attempt.run(&luks::OneByOne);
+                    attempt.run(&luks::one_by_one);
                     luks::set_poll(None);
                     log::info!("passphrase checked in {} ms", took());
                     if let Some(finish) = finish.take() {
@@ -531,11 +531,9 @@ struct Crew {
     /// Bumped for each slice of lanes to compute, and to quit.
     round: AtomicUsize,
     quit: AtomicBool,
-    /// The round's work: a `*const &(dyn Fn(usize) + Sync)`.
+    /// The round's work: a `*const argon2::Segments`, which gives each
+    /// segment out once.
     job: AtomicPtr<()>,
-    lanes: AtomicUsize,
-    /// The next lane to take.
-    next: AtomicUsize,
     /// The helpers done with the round.
     parked: AtomicUsize,
 }
@@ -547,8 +545,6 @@ static CREW: Crew = Crew {
     round: AtomicUsize::new(0),
     quit: AtomicBool::new(false),
     job: AtomicPtr::new(core::ptr::null_mut()),
-    lanes: AtomicUsize::new(0),
-    next: AtomicUsize::new(0),
     parked: AtomicUsize::new(0),
 };
 
@@ -595,20 +591,6 @@ fn enable_avx2() -> bool {
     }
 }
 
-/// Takes the round's lanes until there are none left.
-fn work() {
-    // SAFETY: the job lives until every helper is parked (`WithHelpers::run`).
-    let job = unsafe { *CREW.job.load(Ordering::Acquire).cast::<&(dyn Fn(usize) + Sync)>() };
-    let lanes = CREW.lanes.load(Ordering::Acquire);
-    loop {
-        let lane = CREW.next.fetch_add(1, Ordering::AcqRel);
-        if lane >= lanes {
-            break;
-        }
-        job(lane);
-    }
-}
-
 extern "efiapi" fn help(_arg: *mut c_void) {
     let _returning = Returning;
     if enable_avx2() != AVX2.load(Ordering::Acquire) {
@@ -630,30 +612,26 @@ extern "efiapi" fn help(_arg: *mut c_void) {
         if CREW.quit.load(Ordering::Acquire) {
             return;
         }
-        work();
+        // SAFETY: the segments live until every helper is parked (`with_helpers`).
+        let segments = unsafe { &*CREW.job.load(Ordering::Acquire).cast::<argon2::Segments<'_>>() };
+        segments.work();
         CREW.parked.fetch_add(1, Ordering::AcqRel);
     }
 }
 
-/// The lanes shared with the helpers that joined.
-struct WithHelpers(usize);
-
-// SAFETY: each lane is taken once (`next`), and `run` returns once all the
-// lanes are done and every helper is back.
-unsafe impl argon2::LaneRunner for WithHelpers {
-    fn run(&self, lanes: usize, segment: &(dyn Fn(usize) + Sync)) {
-        if self.0 == 0 {
-            return argon2::LaneRunner::run(&luks::OneByOne, lanes, segment);
-        }
-        CREW.job.store((&raw const segment).cast_mut().cast(), Ordering::Release);
-        CREW.lanes.store(lanes, Ordering::Release);
-        CREW.next.store(0, Ordering::Release);
-        CREW.parked.store(0, Ordering::Release);
-        CREW.round.fetch_add(1, Ordering::AcqRel);
-        work();
-        while CREW.parked.load(Ordering::Acquire) < self.0 {
-            core::hint::spin_loop();
-        }
+/// Computes `segments` with the `helpers` that joined, returning once
+/// they're all done: the parking (acquire) makes what they wrote visible to
+/// the next slice.
+fn with_helpers(helpers: usize, segments: &argon2::Segments<'_>) {
+    if helpers == 0 {
+        return luks::one_by_one(segments);
+    }
+    CREW.job.store((&raw const *segments).cast_mut().cast(), Ordering::Release);
+    CREW.parked.store(0, Ordering::Release);
+    CREW.round.fetch_add(1, Ordering::AcqRel);
+    segments.work();
+    while CREW.parked.load(Ordering::Acquire) < helpers {
+        core::hint::spin_loop();
     }
 }
 
@@ -667,7 +645,8 @@ extern "efiapi" fn run_attempt(arg: *mut c_void) {
         // SAFETY: `start_on_other_processors` passes a valid attempt that
         // nothing else touches until the event is signaled.
         let attempt = unsafe { &mut *arg.cast::<Attempt>() };
-        attempt.run(&WithHelpers(CREW.joined.load(Ordering::Acquire) & !CLOSED));
+        let helpers = CREW.joined.load(Ordering::Acquire) & !CLOSED;
+        attempt.run(&|segments| with_helpers(helpers, segments));
         RAN.store(true, Ordering::Release);
     }
     CREW.quit.store(true, Ordering::Release);

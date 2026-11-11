@@ -21,6 +21,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acpi"
 version = "7.0.0-pre1"
+source = "git+https://github.com/ogoffart/acpi?branch=olivier%2Fslingshot#6ce5a8280b56b10029216f26cad311fe1170a31e"
 dependencies = [
  "bit_field",
  "bitflags 2.13.2",
@@ -164,6 +165,7 @@ dependencies = [
 [[package]]
 name = "argon2"
 version = "0.6.0"
+source = "git+https://github.com/RustCrypto/password-hashes?rev=refs%2Fpull%2F956%2Fhead#ce14bed202fd798843319e9ee9566f02d18f352b"
 dependencies = [
  "base64ct",
  "blake2",
@@ -449,6 +451,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -950,6 +953,7 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]

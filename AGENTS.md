@@ -23,7 +23,7 @@ Notes for developers and coding agents. The README is for users: keep build and 
 - Startup: the menu is drawn first, from what's already connected. Then the platform connects the drivers in slices of
   about 10 ms per turn of the event loop, finds the mice and the touchpad, and the app rescans the disks
   (`Hub::devices_connected`).
-- `vendor/`: the `acpi` and `argon2` crates, patched (vendor/README.md).
+- Patched dependencies (`acpi`, `argon2`): `[patch.crates-io]` in Cargo.toml says why.
 - `ui/`: the `.slint` files: `main.slint` (the window, its state and the keyboard), one file per screen, `top-bar`,
   `footer`, `dialogs` and `widgets`. What the Rust code shows and handles is in a global per screen (`BootMenu`,
   `System`, `SettingsPage`, `Install`) and per dialog it fills, read where it's used; AppWindow keeps the window's state
@@ -115,9 +115,9 @@ uses the System V calling convention, not "efiapi".
 
 `src/parse/luks.rs` checks passphrases (tested against volumes made by cryptsetup, in `tests/`),
 `src/parse/handoff.rs` builds the extra initrd, and `src/firmware/luks.rs` finds the partitions, runs the check on
-other processors (MP services; `vendor/argon2`'s `LaneRunner` computes Argon2's lanes in parallel) and offers the
-initrds through the LINUX_EFI_INITRD_MEDIA protocol. The simulator's "Simulated Linux (encrypted)" entry uses the
-test volume (passphrase "slingshot").
+other processors (MP services; argon2's `Hashing` gives out Argon2's slices, whose lanes run in parallel)
+and offers the initrds through the LINUX_EFI_INITRD_MEDIA protocol. The simulator's "Simulated Linux (encrypted)"
+entry uses the test volume (passphrase "slingshot").
 
 To test the handoff end to end: a disk image with a LUKS2 partition, a dracut initrd with and without
 `--install /usr/sbin/cryptsetup` (both handoff paths), and QEMU with `-smp 2 -m 2G`. Without KVM, use a light Argon2
