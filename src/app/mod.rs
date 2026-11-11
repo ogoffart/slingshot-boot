@@ -373,6 +373,13 @@ struct State {
     /// The default entry's passphrase was asked for at startup (once: not
     /// again when its start is cancelled or fails).
     passphrase_asked: bool,
+    /// The firmware connects the disks after the first frame
+    /// (`Hub::devices_connected`); the desktop has them all at once.
+    devices_connected: bool,
+    /// On the splash, its countdown held until the disks are connected: the
+    /// default entry's encrypted disk may be among them, and its passphrase
+    /// is then asked instead.
+    waiting_for_disks: bool,
     config: Rc<Config>,
     /// The settings without anything saved: built-in, then slingshot.toml.
     defaults: Settings,
@@ -702,7 +709,8 @@ fn passphrase_first(ui: &AppWindow, st: &mut State, backend: &dyn Backend) -> bo
 /// what the disks can start, and, when drivers were started (a file system
 /// they read can hold systemd-boot's entries), the boot data again. The
 /// firmware's entries don't change.
-fn devices_connected(ui: &AppWindow, st: &mut State, backend: &dyn Backend, drivers: bool) {
+fn devices_connected(ui: &AppWindow, st: &mut State, backend: &dyn Backend, tick: &Timer, drivers: bool) {
+    st.devices_connected = true;
     if drivers {
         let boot = backend.boot_data();
         ui.set_options_editor(options_editor(&st.config, &boot));
@@ -713,9 +721,33 @@ fn devices_connected(ui: &AppWindow, st: &mut State, backend: &dyn Backend, driv
         refresh_found(ui, st, backend);
     }
     // The encrypted disk may only be known now (QEMU connects its NVMe
-    // disks then): still on the splash, untouched, its passphrase first.
-    if ui.get_splash_visible() && st.countdown_left > 0 {
-        passphrase_first(ui, st, backend);
+    // disks then): still on the splash, untouched, its passphrase first,
+    // else the countdown.
+    if core::mem::take(&mut st.waiting_for_disks) && !passphrase_first(ui, st, backend) {
+        count_down(ui, st, tick, st.settings.timeout as i32);
+    }
+}
+
+/// Starts the countdown to the default entry, `seconds` long.
+fn count_down(ui: &AppWindow, st: &mut State, tick: &Timer, seconds: i32) {
+    st.countdown_left = seconds;
+    // Count whole seconds from now, in step with the animation.
+    tick.restart();
+    let menu = ui.global::<BootMenu>();
+    menu.set_countdown(-1);
+    menu.set_countdown_total(seconds);
+    menu.set_countdown(seconds);
+}
+
+/// Whether `card` starts with an encrypted disk (`rd.luks.*`), found yet or
+/// not.
+fn wants_encrypted_disk(card: &Card) -> bool {
+    cfg_select! {
+        feature = "luks" => card.options().is_some_and(|o| !crate::parse::handoff::wanted_volumes(o).is_empty()),
+        _ => {
+            let _ = card;
+            false
+        }
     }
 }
 
@@ -1059,6 +1091,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         revert_left: -1,
         countdown_left: -1,
         passphrase_asked: false,
+        devices_connected: !cfg!(target_os = "uefi"),
+        waiting_for_disks: false,
         config: config.clone(),
         defaults,
         builtin,
@@ -1153,6 +1187,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let state = state.clone();
         move || {
             let mut st = state.borrow_mut();
+            st.waiting_for_disks = false;
             if st.countdown_left >= 0 {
                 st.countdown_left = -1;
                 if let Some(ui) = ui_weak.upgrade() {
@@ -1280,12 +1315,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 log::info!("a system hibernated: {}", if sure { "resuming it" } else { "not sure which" });
                 ui.set_splash_visible(false);
                 // Unless the timeout is "never": then it's chosen too.
-                st.countdown_left = if sure && settings.timeout != 0 { 3 } else { -1 };
-                tick.restart();
-                let menu = ui.global::<BootMenu>();
-                menu.set_countdown(-1);
-                menu.set_countdown_total(3);
-                menu.set_countdown(st.countdown_left);
+                count_down(&ui, &mut st, &tick, if sure && settings.timeout != 0 { 3 } else { -1 });
                 return;
             }
             // Never count down into the firmware setup.
@@ -1294,14 +1324,17 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 return;
             }
             if settings.timeout > 0 && bootable {
-                st.countdown_left = settings.timeout as i32;
-                // Count whole seconds from now, in step with the animation.
-                tick.restart();
-                let menu = ui.global::<BootMenu>();
-                menu.set_countdown(-1);
-                menu.set_countdown_total(settings.timeout as i32);
-                menu.set_countdown(settings.timeout as i32);
                 ui.set_splash_visible(settings.splash);
+                let default = st.all_cards.get(st.default_card);
+                if settings.splash && !st.devices_connected && default.is_some_and(wants_encrypted_disk) {
+                    // Not a countdown its passphrase would cut short: no
+                    // countdown until the disks are there.
+                    st.waiting_for_disks = true;
+                    st.countdown_left = -1;
+                    ui.global::<BootMenu>().set_countdown(-1);
+                } else {
+                    count_down(&ui, &mut st, &tick, settings.timeout as i32);
+                }
             } else {
                 st.countdown_left = -1;
                 ui.global::<BootMenu>().set_countdown(-1);
@@ -1741,10 +1774,10 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         let backend = backend.clone();
         let update_mode_label = update_mode_label.clone();
         {
-            let (ui_weak, state, backend) = (ui.as_weak(), state.clone(), backend.clone());
+            let (ui_weak, state, backend, tick) = (ui.as_weak(), state.clone(), backend.clone(), tick.clone());
             *hub.on_devices_connected.borrow_mut() = Some(Box::new(move |drivers| {
                 if let Some(ui) = ui_weak.upgrade() {
-                    devices_connected(&ui, &mut state.borrow_mut(), &*backend, drivers);
+                    devices_connected(&ui, &mut state.borrow_mut(), &*backend, &tick, drivers);
                 }
             }));
         }
