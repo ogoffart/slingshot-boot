@@ -106,39 +106,8 @@ pub enum Error {
     /// Not enough memory for the key derivation.
     OutOfMemory,
     WrongPassphrase,
-    /// `CANCEL` was set while checking.
+    /// Stopped while checking (`Attempt::run`'s `stop`).
     Cancelled,
-}
-
-/// Set (from another processor, or the UI) to stop the passphrase check
-/// being run: `Attempt::run` then gives `Error::Cancelled` soon after.
-pub static CANCEL: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
-/// When the check runs on the processor that draws the screen (no other
-/// one to run it), nothing reads the keyboard meanwhile: this, set with
-/// `set_poll`, is asked between steps whether to stop (Escape pressed).
-static POLL: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
-
-/// `poll`, asked while checking on this processor; `None` after.
-pub fn set_poll(poll: Option<fn() -> bool>) {
-    POLL.store(poll.map_or(0, |f| f as usize), core::sync::atomic::Ordering::Release);
-}
-
-fn cancelled() -> bool {
-    use core::sync::atomic::Ordering;
-    if CANCEL.load(Ordering::Acquire) {
-        return true;
-    }
-    let poll = POLL.load(Ordering::Acquire);
-    if poll != 0 {
-        // SAFETY: stored by `set_poll` from a `fn() -> bool`.
-        let poll: fn() -> bool = unsafe { core::mem::transmute(poll) };
-        if poll() {
-            CANCEL.store(true, Ordering::Release);
-            return true;
-        }
-    }
-    false
 }
 
 impl Keyslot {
@@ -314,20 +283,20 @@ fn hash_size(hash: &str) -> Result<usize, Error> {
     Ok(if hash == "sha512" { 64 } else { 32 })
 }
 
-/// `hash` was checked by `check_hash`. Stops early, with `Cancelled`, when
-/// `CANCEL` is set: millions of iterations take seconds.
-fn pbkdf2(hash: &str, password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8]) -> Result<(), Error> {
+/// `hash` was checked by `check_hash`. Stops early, with `Cancelled`, once
+/// `stop` says so: millions of iterations take seconds.
+fn pbkdf2(hash: &str, password: &[u8], salt: &[u8], iterations: u32, out: &mut [u8], stop: &dyn Fn() -> bool) -> Result<(), Error> {
     use hmac::KeyInit;
     let bad = |_| Error::Malformed("key");
     if hash == "sha512" {
-        pbkdf2_with(hmac::Hmac::<sha2::Sha512>::new_from_slice(password).map_err(bad)?, salt, iterations, out)
+        pbkdf2_with(hmac::Hmac::<sha2::Sha512>::new_from_slice(password).map_err(bad)?, salt, iterations, out, stop)
     } else {
-        pbkdf2_with(hmac::Hmac::<sha2::Sha256>::new_from_slice(password).map_err(bad)?, salt, iterations, out)
+        pbkdf2_with(hmac::Hmac::<sha2::Sha256>::new_from_slice(password).map_err(bad)?, salt, iterations, out, stop)
     }
 }
 
 /// PBKDF2 (RFC 8018) with `prf`, HMAC keyed with the password.
-fn pbkdf2_with<M: hmac::Mac + Clone>(prf: M, salt: &[u8], iterations: u32, out: &mut [u8]) -> Result<(), Error> {
+fn pbkdf2_with<M: hmac::Mac + Clone>(prf: M, salt: &[u8], iterations: u32, out: &mut [u8], stop: &dyn Fn() -> bool) -> Result<(), Error> {
     let mut result = Ok(());
     for (i, chunk) in out.chunks_mut(<M as hmac::digest::OutputSizeUser>::output_size()).enumerate() {
         let mut mac = prf.clone();
@@ -336,7 +305,7 @@ fn pbkdf2_with<M: hmac::Mac + Clone>(prf: M, salt: &[u8], iterations: u32, out: 
         let mut u = mac.finalize().into_bytes();
         let mut block = u.clone();
         for n in 1..iterations {
-            if n % 4096 == 0 && cancelled() {
+            if n % 4096 == 0 && stop() {
                 result = Err(Error::Cancelled);
                 break;
             }
@@ -553,12 +522,12 @@ impl Attempt {
 
     /// The slow part: tries each key slot in turn, the segments of each
     /// slice of Argon2 computed by `compute`. Doesn't allocate. Stops with
-    /// `Cancelled` between slices once `CANCEL` is set, so `compute` may
-    /// return with segments left then.
-    pub fn run(&mut self, compute: &dyn Fn(&argon2::Segments<'_>)) {
+    /// `Cancelled` once `stop` says so, asked between slices (so `compute`
+    /// may return with segments left then) and during PBKDF2.
+    pub fn run(&mut self, compute: &dyn Fn(&argon2::Segments<'_>), stop: &dyn Fn() -> bool) {
         // Within the reserved capacity: doesn't allocate.
         self.blocks.resize(self.block_count, argon2::Block::default());
-        let result = (0..self.slots.len()).find_map(|i| match self.try_slot(i, compute) {
+        let result = (0..self.slots.len()).find_map(|i| match self.try_slot(i, compute, stop) {
             Ok(false) => None,
             r => Some(r.map(|_| i)),
         });
@@ -569,18 +538,23 @@ impl Attempt {
         self.blocks.iter_mut().for_each(zeroize::Zeroize::zeroize);
     }
 
-    fn try_slot(&mut self, i: usize, compute: &dyn Fn(&argon2::Segments<'_>)) -> Result<bool, Error> {
+    /// `run` on this processor, stopping between segments too.
+    pub fn run_here(&mut self, stop: &dyn Fn() -> bool) {
+        self.run(&|segments| one_by_one(segments, stop), stop);
+    }
+
+    fn try_slot(&mut self, i: usize, compute: &dyn Fn(&argon2::Segments<'_>), stop: &dyn Fn() -> bool) -> Result<bool, Error> {
         let (slot, material) = &mut self.slots[i];
         let key = &mut self.key[..slot.area_key_size];
         match &slot.kdf {
-            Kdf::Pbkdf2 { hash, iterations, salt } => pbkdf2(hash, &self.passphrase, salt, *iterations, key)?,
+            Kdf::Pbkdf2 { hash, iterations, salt } => pbkdf2(hash, &self.passphrase, salt, *iterations, key, stop)?,
             kdf @ Kdf::Argon2 { salt, .. } => {
                 let argon2 = argon2(kdf, key.len()).ok_or(Error::Malformed("argon2 parameters"))?;
                 let mut hashing = argon2
                     .start_hash_password_into(&self.passphrase, salt, &mut *key, &mut self.blocks[..])
                     .map_err(|_| Error::Malformed("argon2"))?;
                 while let Some(segments) = hashing.next_segments() {
-                    if cancelled() {
+                    if stop() {
                         return Err(Error::Cancelled);
                     }
                     compute(&segments);
@@ -594,7 +568,7 @@ impl Attempt {
         wipe(material);
         for digest in self.digests.iter().filter(|d| d.keyslots.contains(&slot.id)) {
             let out = &mut self.digest[..digest.digest.len()];
-            pbkdf2(&digest.hash, candidate, &digest.salt, digest.iterations, out)?;
+            pbkdf2(&digest.hash, candidate, &digest.salt, digest.iterations, out, stop)?;
             if same(out, &digest.digest) {
                 return Ok(true);
             }
@@ -633,14 +607,14 @@ pub fn unlock(
     read: impl FnMut(u64, usize) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
     let mut attempt = Attempt::new(header, passphrase, read)?;
-    attempt.run(&one_by_one);
+    attempt.run_here(&|| false);
     attempt.result().map(<[u8]>::to_vec)
 }
 
 /// Computes the segments one after the other on this processor, stopping
-/// between them once `CANCEL` is set.
-pub fn one_by_one(segments: &argon2::Segments<'_>) {
-    while !cancelled() && segments.work_one() {}
+/// between them once `stop` says so.
+pub fn one_by_one(segments: &argon2::Segments<'_>, stop: &dyn Fn() -> bool) {
+    while !stop() && segments.work_one() {}
 }
 
 #[cfg(test)]
@@ -653,7 +627,6 @@ mod tests {
     /// Its volume key, from `cryptsetup luksDump --dump-volume-key`, is in
     /// tests/luks2-pbkdf2.key.
     fn check(image: &[u8], expected_key_hex: &str) {
-        let _alone = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let header = header(image);
         assert!(!header.uuid.is_empty());
         let read = reader(image);
@@ -676,9 +649,6 @@ mod tests {
     fn reader(image: &[u8]) -> impl Fn(u64, usize) -> Option<Vec<u8>> + Copy + '_ {
         |offset, len| image.get(offset as usize..offset as usize + len).map(<[u8]>::to_vec)
     }
-
-    /// Attempts run one at a time: `CANCEL` stops them all.
-    static ATTEMPTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The test volume's header with `from` replaced by `to` in its JSON
     /// (the checksum isn't checked).
@@ -714,11 +684,11 @@ mod tests {
     #[test]
     fn pbkdf2_test_vectors() {
         let mut ours = [0u8; 100];
-        pbkdf2("sha256", b"password", b"salt", 4096, &mut ours).unwrap();
+        pbkdf2("sha256", b"password", b"salt", 4096, &mut ours, &|| false).unwrap();
         // RFC 7914's test vector for PBKDF2-HMAC-SHA256 (c = 4096), first bytes.
         assert_eq!(&ours[..8], &[0xc5, 0xe4, 0x78, 0xd5, 0x92, 0x88, 0xc8, 0x41]);
         let mut sha512 = [0u8; 64];
-        pbkdf2("sha512", b"password", b"salt", 1, &mut sha512).unwrap();
+        pbkdf2("sha512", b"password", b"salt", 1, &mut sha512, &|| false).unwrap();
         assert_eq!(&sha512[..4], &[0x86, 0x7f, 0x70, 0xcf]);
     }
 
@@ -745,20 +715,16 @@ mod tests {
     /// check stops there.
     #[test]
     fn cancelled_argon2() {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        let _alone = ATTEMPTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let image = include_bytes!("../../tests/luks2-argon2id.img");
         let mut attempt = Attempt::new(&header(image), b"slingshot", reader(image)).unwrap();
-        let slices = AtomicUsize::new(0);
+        let slices = core::cell::Cell::new(0);
+        let stop = || slices.get() == 3;
         attempt.run(&|segments| {
-            one_by_one(segments);
-            if slices.fetch_add(1, Ordering::Relaxed) == 2 {
-                CANCEL.store(true, Ordering::Release);
-            }
-        });
-        CANCEL.store(false, Ordering::Release);
+            one_by_one(segments, &stop);
+            slices.set(slices.get() + 1);
+        }, &stop);
         assert_eq!(attempt.result().err(), Some(Error::Cancelled));
-        assert_eq!(slices.load(Ordering::Relaxed), 3);
+        assert_eq!(slices.get(), 3);
     }
 
     #[test]

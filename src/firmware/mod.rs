@@ -240,6 +240,9 @@ struct UefiBackend {
     media: core::cell::RefCell<Vec<usize>>,
     /// What `boot_data` read, for `rescan`.
     last: core::cell::RefCell<LastRead>,
+    /// Shared with the platform and the application.
+    hub: Rc<crate::app::Hub>,
+    boot_once: sdboot::OncePerBoot,
     #[cfg(feature = "luks")]
     luks: Rc<luks::Luks>,
 }
@@ -266,6 +269,89 @@ impl UefiBackend {
             return chainload::start_file(fs, program, &options);
         }
         chainload::start_file(fs, program, options)
+    }
+
+    /// `Backend::start`, without the redraw after a program returned.
+    fn start_target(&self, target: &Target) -> StartResult {
+        // Nothing starts while other processors still run a (cancelled)
+        // passphrase check: what starts may take their memory.
+        #[cfg(feature = "luks")]
+        {
+            if !luks::wait_for_processors() {
+                return StartResult::Failed(tr("A passphrase check is still running. Try again in a moment."));
+            }
+            // Only a kernel started here gets the unlocked disks' keys (it
+            // takes them, `handoff`): anything else starts without them,
+            // and without the decrypted disks unless it's a file, which
+            // may be on one.
+            let kernel = match target {
+                Target::Found { .. } | Target::Program { .. } => true,
+                Target::LoaderEntry { program, .. } => !program.is_empty(),
+                Target::Firmware(_) | Target::File { .. } => false,
+            };
+            if !kernel {
+                self.luks.forget_all(!matches!(target, Target::File { .. }));
+            }
+        }
+        loader_interface::starting(match target {
+            Target::LoaderEntry { id, .. } => Some(id.as_str()),
+            _ => None,
+        });
+        let boot = match target {
+            Target::Firmware(n) => *n,
+            Target::File { volume, path } => {
+                let fs = self.volumes.borrow().get(*volume).map(|v| v.1.clone()).unwrap_or_default();
+                return started(chainload::start_file(&fs, path, ""), path);
+            }
+            Target::Found { fs, program, options } => return started(self.start_kernel(fs, program, options), program),
+            Target::Program { path, options } => {
+                return started(self.start_kernel(&own_fs_device_path(), path, options), path);
+            }
+            Target::LoaderEntry { systemd_boot, id, program, options } => {
+                // The kernel (or EFI program) directly, like systemd-boot does.
+                if !program.is_empty() {
+                    let fs = self.entries_fs.borrow().clone();
+                    // Boot counting: a try counts before the start, as with
+                    // systemd-boot. A unified kernel image is itself the
+                    // counted file, so it's started under its new name.
+                    let mut program = program.clone();
+                    let counted = self.counted_entries.borrow().iter().find(|(i, _)| i == id).map(|(_, p)| p.clone());
+                    if let Some(path) = counted
+                        && let Some(next) = sdboot::count_try(&fs, &path)
+                        && program.eq_ignore_ascii_case(&path)
+                    {
+                        program = next;
+                    }
+                    match self.start_kernel(&fs, &program, options) {
+                        Some(chainload::Outcome::Returned(status)) => {
+                            return StartResult::Returned(chainload::describe_status(status));
+                        }
+                        // systemd-boot would be refused the same kernel.
+                        Some(chainload::Outcome::Refused) => return StartResult::Failed(refused()),
+                        _ => log::info!("{id}: cannot load {program} directly"),
+                    }
+                }
+                // Else through systemd-boot, which boots it without its menu.
+                let Some(boot) = systemd_boot else {
+                    return StartResult::Failed(not_loaded(program));
+                };
+                if let Err(e) = sdboot::select_one_shot(id) {
+                    return StartResult::Failed(status_text(e));
+                }
+                *boot
+            }
+        };
+        // Start it directly; if it can't be loaded here, let the firmware
+        // start it after a reset.
+        match chainload::start_boot_option(boot) {
+            chainload::Outcome::Returned(status) => StartResult::Returned(chainload::describe_status(status)),
+            chainload::Outcome::Refused => StartResult::Failed(refused()),
+            chainload::Outcome::NotLoaded => {
+                log::info!("Boot{boot:04X}: not loadable here, BootNext and reset");
+                // Only returns on failure: the machine resets otherwise.
+                StartResult::Failed(bootvars::boot_next_and_reset(boot).err().map(status_text).unwrap_or_default())
+            }
+        }
     }
 }
 
@@ -312,7 +398,7 @@ impl Backend for UefiBackend {
         let own_file = bootvars::own_file_path();
         // Boot Loader Specification entries, with or without systemd-boot:
         // Slingshot starts them itself.
-        let loader_entries = sdboot::read_config(&own_file).map(|(config, fs, counted)| {
+        let loader_entries = sdboot::read_config(&own_file, &self.boot_once).map(|(config, fs, counted)| {
             *self.entries_fs.borrow_mut() = fs;
             *self.counted_entries.borrow_mut() = counted;
             config
@@ -618,17 +704,6 @@ impl Backend for UefiBackend {
         self.luks.open(id)
     }
 
-    fn set_keymap(&self, keymap: crate::parse::keymap::Keymap) {
-        *platform::KEYMAP.0.borrow_mut() = Some(keymap);
-    }
-
-    fn set_pointer(&self, factor: f32, acceleration: bool) {
-        use core::sync::atomic::Ordering::Relaxed;
-        log::info!("pointer: speed ×{factor}, acceleration {}", if acceleration { "on" } else { "off" });
-        platform::POINTER_FACTOR.store(factor.to_bits(), Relaxed);
-        platform::POINTER_ACCELERATION.store(acceleration, Relaxed);
-    }
-
     fn language(&self) -> Option<String> {
         // PlatformLang: an RFC 4646 tag ("fr-FR"), NUL-terminated ASCII.
         let (data, _) = uefi::runtime::get_variable_boxed(uefi::cstr16!("PlatformLang"), &uefi::runtime::VariableVendor::GLOBAL_VARIABLE).ok()?;
@@ -637,85 +712,12 @@ impl Backend for UefiBackend {
     }
 
     fn start(&self, target: &Target) -> StartResult {
-        // Nothing starts while other processors still run a (cancelled)
-        // passphrase check: what starts may take their memory.
-        #[cfg(feature = "luks")]
-        {
-            if !luks::wait_for_processors() {
-                return StartResult::Failed(tr("A passphrase check is still running. Try again in a moment."));
-            }
-            // Only a kernel started here gets the unlocked disks' keys (it
-            // takes them, `handoff`): anything else starts without them,
-            // and without the decrypted disks unless it's a file, which
-            // may be on one.
-            let kernel = match target {
-                Target::Found { .. } | Target::Program { .. } => true,
-                Target::LoaderEntry { program, .. } => !program.is_empty(),
-                Target::Firmware(_) | Target::File { .. } => false,
-            };
-            if !kernel {
-                self.luks.forget_all(!matches!(target, Target::File { .. }));
-            }
+        let result = self.start_target(target);
+        // The program drew on the screen.
+        if matches!(result, StartResult::Returned(_)) {
+            self.hub.full_redraw.set(true);
         }
-        loader_interface::starting(match target {
-            Target::LoaderEntry { id, .. } => Some(id.as_str()),
-            _ => None,
-        });
-        let boot = match target {
-            Target::Firmware(n) => *n,
-            Target::File { volume, path } => {
-                let fs = self.volumes.borrow().get(*volume).map(|v| v.1.clone()).unwrap_or_default();
-                return started(chainload::start_file(&fs, path, ""), path);
-            }
-            Target::Found { fs, program, options } => return started(self.start_kernel(fs, program, options), program),
-            Target::Program { path, options } => {
-                return started(self.start_kernel(&own_fs_device_path(), path, options), path);
-            }
-            Target::LoaderEntry { systemd_boot, id, program, options } => {
-                // The kernel (or EFI program) directly, like systemd-boot does.
-                if !program.is_empty() {
-                    let fs = self.entries_fs.borrow().clone();
-                    // Boot counting: a try counts before the start, as with
-                    // systemd-boot. A unified kernel image is itself the
-                    // counted file, so it's started under its new name.
-                    let mut program = program.clone();
-                    let counted = self.counted_entries.borrow().iter().find(|(i, _)| i == id).map(|(_, p)| p.clone());
-                    if let Some(path) = counted
-                        && let Some(next) = sdboot::count_try(&fs, &path)
-                        && program.eq_ignore_ascii_case(&path)
-                    {
-                        program = next;
-                    }
-                    match self.start_kernel(&fs, &program, options) {
-                        Some(chainload::Outcome::Returned(status)) => {
-                            return StartResult::Returned(chainload::describe_status(status));
-                        }
-                        // systemd-boot would be refused the same kernel.
-                        Some(chainload::Outcome::Refused) => return StartResult::Failed(refused()),
-                        _ => log::info!("{id}: cannot load {program} directly"),
-                    }
-                }
-                // Else through systemd-boot, which boots it without its menu.
-                let Some(boot) = systemd_boot else {
-                    return StartResult::Failed(not_loaded(program));
-                };
-                if let Err(e) = sdboot::select_one_shot(id) {
-                    return StartResult::Failed(status_text(e));
-                }
-                *boot
-            }
-        };
-        // Start it directly; if it can't be loaded here, let the firmware
-        // start it after a reset.
-        match chainload::start_boot_option(boot) {
-            chainload::Outcome::Returned(status) => StartResult::Returned(chainload::describe_status(status)),
-            chainload::Outcome::Refused => StartResult::Failed(refused()),
-            chainload::Outcome::NotLoaded => {
-                log::info!("Boot{boot:04X}: not loadable here, BootNext and reset");
-                // Only returns on failure: the machine resets otherwise.
-                StartResult::Failed(bootvars::boot_next_and_reset(boot).err().map(status_text).unwrap_or_default())
-            }
-        }
+        result
     }
 
     /// From what `boot_data` read: only the entries' descriptions and what the
@@ -760,7 +762,8 @@ impl Backend for UefiBackend {
 }
 
 pub fn main() -> Status {
-    loader_interface::started();
+    // Before anything else takes some time.
+    let started = platform::timer_tick();
     // The firmware resets the machine after 5 minutes unless the watchdog
     // is disabled.
     let _ = uefi::boot::set_watchdog_timer(0, 0x10000, None);
@@ -775,7 +778,7 @@ pub fn main() -> Status {
     };
     log::info!("Slingshot {} starting ({build})", env!("CARGO_PKG_VERSION"));
     log_firmware_times();
-    loader_interface::announce(&own_fs_device_path(), &bootvars::own_file_path());
+    loader_interface::announce(started, &own_fs_device_path(), &bootvars::own_file_path());
 
     // The drivers and the other devices: after the first frame
     // (`Connecting`, run by the platform a slice at a time).
@@ -792,6 +795,8 @@ pub fn main() -> Status {
         batteries: Default::default(),
         media: Default::default(),
         last: Default::default(),
+        hub: hub.clone(),
+        boot_once: Default::default(),
         order_attributes,
         #[cfg(feature = "luks")]
         luks: Default::default(),

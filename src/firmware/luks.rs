@@ -282,7 +282,7 @@ impl Luks {
     /// Stops the passphrase check under way: its result is
     /// `Error::Cancelled`, soon (Argon2 stops at its next slice).
     pub fn cancel(&self) {
-        luks::CANCEL.store(true, Ordering::Release);
+        CANCEL.store(true, Ordering::Release);
     }
 
     pub fn unlock(self: &Rc<Self>, volume: usize, passphrase: Secret, done: UnlockDone) {
@@ -297,7 +297,7 @@ impl Luks {
             // SAFETY: no other processor runs it any more.
             drop(unsafe { Box::from_raw(previous) });
         }
-        luks::CANCEL.store(false, Ordering::Release);
+        CANCEL.store(false, Ordering::Release);
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
         // Before `Attempt::new` builds argon2 (and sha2), which looks once
@@ -345,15 +345,7 @@ impl Luks {
         match events {
             Some(mut events) => {
                 self.timer.start(slint::TimerMode::Repeated, Duration::from_millis(30), move || {
-                    // The firmware signals an event once it has seen its
-                    // processor finish: closing it before is a use after free.
-                    events.retain(|event| {
-                        let done = boot::check_event(event).unwrap_or(false);
-                        if done {
-                            let _ = boot::close_event(unsafe { event.unsafe_clone() });
-                        }
-                        !done
-                    });
+                    close_signaled(&mut events);
                     if !events.is_empty() {
                         return;
                     }
@@ -367,7 +359,7 @@ impl Luks {
                     let mut attempt = unsafe { Box::from_raw(attempt) };
                     if !RAN.load(Ordering::Acquire) {
                         log::info!("that processor can't run AVX2 code: checking on this one");
-                        attempt.run(&luks::one_by_one);
+                        attempt.run_here(&cancelled);
                     }
                     log::info!("passphrase checked in {} ms", took());
                     if let Some(finish) = finish.take() {
@@ -386,9 +378,11 @@ impl Luks {
                     let mut attempt = unsafe { Box::from_raw(attempt) };
                     // The screen doesn't change until it's done, but
                     // Escape still stops it.
-                    luks::set_poll(Some(escape_pressed));
-                    attempt.run(&luks::one_by_one);
-                    luks::set_poll(None);
+                    let (last, pressed) = (Cell::new(0), Cell::new(false));
+                    attempt.run_here(&|| {
+                        pressed.set(pressed.get() || escape_pressed(&last));
+                        pressed.get()
+                    });
                     log::info!("passphrase checked in {} ms", took());
                     if let Some(finish) = finish.take() {
                         finish(attempt);
@@ -472,14 +466,14 @@ fn describe(e: &luks::Error) -> String {
 }
 
 /// Whether Escape was pressed (the other keys pressed meanwhile are
-/// dropped: nothing is typed while checking). Asked at most every 50 ms.
-fn escape_pressed() -> bool {
-    static LAST: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// dropped: nothing is typed while checking). Asked at most every 50 ms:
+/// `last` is when it was, in ms.
+fn escape_pressed(last: &Cell<u64>) -> bool {
     let now = super::platform::timer_tick() * 1000 / super::platform::timer_freq();
-    if now.saturating_sub(LAST.load(Ordering::Relaxed)) < 50 {
+    if now.saturating_sub(last.get()) < 50 {
         return false;
     }
-    LAST.store(now, Ordering::Relaxed);
+    last.set(now);
     let mut escape = false;
     uefi::system::with_stdin(|stdin| {
         while let Ok(Some(key)) = stdin.read_key() {
@@ -498,6 +492,14 @@ fn escape_pressed() -> bool {
 
 /// The programs started on other processors that haven't returned.
 static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+/// Set by this processor to stop the passphrase check the others run.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Whether `CANCEL` is set: the check's `stop` on the other processors.
+fn cancelled() -> bool {
+    CANCEL.load(Ordering::Acquire)
+}
 
 /// Counts a program on another processor as returned when dropped.
 struct Returning;
@@ -624,7 +626,7 @@ extern "efiapi" fn help(_arg: *mut c_void) {
 /// the next slice.
 fn with_helpers(helpers: usize, segments: &argon2::Segments<'_>) {
     if helpers == 0 {
-        return luks::one_by_one(segments);
+        return luks::one_by_one(segments, &cancelled);
     }
     CREW.job.store((&raw const *segments).cast_mut().cast(), Ordering::Release);
     CREW.parked.store(0, Ordering::Release);
@@ -646,11 +648,20 @@ extern "efiapi" fn run_attempt(arg: *mut c_void) {
         // nothing else touches until the event is signaled.
         let attempt = unsafe { &mut *arg.cast::<Attempt>() };
         let helpers = CREW.joined.load(Ordering::Acquire) & !CLOSED;
-        attempt.run(&|segments| with_helpers(helpers, segments));
+        attempt.run(&|segments| with_helpers(helpers, segments), &cancelled);
         RAN.store(true, Ordering::Release);
     }
     CREW.quit.store(true, Ordering::Release);
     CREW.round.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Closes the events that are signaled, keeping the others. The firmware
+/// signals one once it has seen its processor finish: closing it before is
+/// a use after free.
+fn close_signaled(events: &mut Vec<Event>) {
+    for event in events.extract_if(.., |e| boot::check_event(e).unwrap_or(false)) {
+        let _ = boot::close_event(event);
+    }
 }
 
 /// Starts `program(arg)` on the processor `ap`; its event is signaled when
@@ -708,13 +719,7 @@ fn start_on_other_processors(attempt: *mut Attempt, lanes: usize) -> Option<Vec<
         CREW.quit.store(true, Ordering::Release);
         CREW.round.fetch_add(1, Ordering::AcqRel);
         while !events.is_empty() {
-            events.retain(|e| {
-                let done = boot::check_event(e).unwrap_or(false);
-                if done {
-                    let _ = boot::close_event(unsafe { e.unsafe_clone() });
-                }
-                !done
-            });
+            close_signaled(&mut events);
         }
         return None;
     };

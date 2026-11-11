@@ -47,6 +47,17 @@ pub struct Hub {
     pub requested_mode: Cell<Option<(usize, usize)>>,
     pub current_size: Cell<(usize, usize)>,
     pub pointer_status: RefCell<String>,
+    /// The layout the firmware's keys are typed with; none: as it sends
+    /// them. Desktops have their own.
+    #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
+    pub keymap: RefCell<Option<crate::parse::keymap::Keymap>>,
+    /// The pointer's speed factor and acceleration; none: ×1, accelerated.
+    #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
+    pub pointer: Cell<Option<(f32, bool)>>,
+    /// Set after another program ran (and drew on the screen): the event
+    /// loop restores the display mode and repaints everything.
+    #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
+    pub full_redraw: Cell<bool>,
 }
 
 impl Hub {

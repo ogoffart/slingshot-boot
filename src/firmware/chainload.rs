@@ -93,7 +93,6 @@ fn run_image(image: uefi::Handle, options: &[u8]) -> Option<Outcome> {
     // A program that returns is unloaded by the firmware when it called
     // Exit(); unload in case it just returned from its entry point.
     let _ = boot::unload_image(image);
-    super::platform::request_full_redraw();
     Some(Outcome::Returned(status))
 }
 

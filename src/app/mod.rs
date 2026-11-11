@@ -84,15 +84,18 @@ fn keymap(backend: &dyn Backend, config: &Config, choice: u8) -> crate::parse::k
 }
 
 /// Types with that layout (see `keymap`) from now on.
-fn use_keymap(backend: &dyn Backend, config: &Config, choice: u8) {
+fn use_keymap(backend: &dyn Backend, hub: &Hub, config: &Config, choice: u8) {
     let keymap = keymap(backend, config, choice);
     log::info!("keyboard layout: {}", keymap.name);
-    backend.set_keymap(keymap);
+    *hub.keymap.borrow_mut() = Some(keymap);
 }
 
-/// Moves the pointer at the speed and with the acceleration of `settings`.
-fn use_pointer(backend: &dyn Backend, settings: &Settings) {
-    backend.set_pointer(settings::POINTER_FACTORS[usize::from(settings.pointer_speed)], settings.pointer_acceleration);
+/// Moves the pointer at the speed of `settings` (`POINTER_FACTORS`), and
+/// with its acceleration, fast moves further.
+fn use_pointer(hub: &Hub, settings: &Settings) {
+    let factor = settings::POINTER_FACTORS[usize::from(settings.pointer_speed)];
+    log::info!("pointer: speed ×{factor}, acceleration {}", if settings.pointer_acceleration { "on" } else { "off" });
+    hub.pointer.set(Some((factor, settings.pointer_acceleration)));
 }
 
 /// The screen animations, after the slowest full redraw: off when it's
@@ -1036,7 +1039,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     config.defaults.apply(&mut defaults);
     let settings = initial_settings(caps.configure, &config, defaults, saved);
     show_settings(&ui, &settings);
-    use_pointer(&*backend, &settings);
+    use_pointer(&hub, &settings);
     show_language_choices(&ui, &*backend, &config, &settings);
     // F10 too, not only the card.
     ui.set_firmware_setup_supported(boot.firmware_setup_supported && config.firmware_setup);
@@ -1433,7 +1436,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             start(title, Box::new(move || backend.start(&target)));
         });
         let stop_countdown = Rc::new(stop_countdown.clone());
-        use_keymap(&*backend, &config, settings.keyboard);
+        use_keymap(&*backend, &hub, &config, settings.keyboard);
         unlock::wire(&ui, backend.clone(), direct, stop_countdown)
     };
     // Shared by the firmware setup card and F10.
@@ -1633,13 +1636,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     page.on_timeout_changed(on_setting(|s, seconds| s.timeout = seconds.min(255) as u16));
     {
         // Applied right away.
-        let (state, backend) = (state.clone(), backend.clone());
+        let (state, hub) = (state.clone(), hub.clone());
         page.on_pointer_changed(move |speed, acceleration| {
             let mut st = state.borrow_mut();
             st.settings.pointer_speed = speed.clamp(0, settings::POINTER_SPEEDS.len() as i32 - 1) as u8;
             st.settings.pointer_acceleration = acceleration;
             st.settings_dirty = true;
-            use_pointer(&*backend, &st.settings);
+            use_pointer(&hub, &st.settings);
         });
     }
     {
@@ -1921,13 +1924,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         });
     }
     {
-        let (state, ui_weak, backend) = (state.clone(), ui.as_weak(), backend.clone());
+        let (state, ui_weak, backend, hub) = (state.clone(), ui.as_weak(), backend.clone(), hub.clone());
         ui.global::<SettingsPage>().on_keyboard_selected(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut st = state.borrow_mut();
             st.settings.keyboard = index.max(0) as u8;
             st.settings_dirty = true;
-            use_keymap(&*backend, &st.config, st.settings.keyboard);
+            use_keymap(&*backend, &hub, &st.config, st.settings.keyboard);
             ui.global::<SettingsPage>().set_keyboard_index(index);
         });
     }

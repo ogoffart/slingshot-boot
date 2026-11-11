@@ -56,12 +56,20 @@ fn is_xbootldr(handle: uefi::Handle) -> bool {
     })
 }
 
+/// What `read_config` reads or does once per boot, though it runs again
+/// (`boot_data`, when the language changes).
+#[derive(Default)]
+pub struct OncePerBoot {
+    one_shot: core::cell::OnceCell<Option<String>>,
+    measured: core::cell::Cell<bool>,
+}
+
 /// Finds the file system with Boot Loader Specification entries (systemd-boot's
 /// configuration, on the ESP) and reads them. Leaves out entries that start
 /// `own_file` (Slingshot itself). Also returns that file system's device path,
 /// to start the entries from, and the files of the entries with a boot
 /// counter, for [`count_try`].
-pub fn read_config(own_file: &str) -> Option<(LoaderConfig, Vec<u8>, Vec<Counted>)> {
+pub fn read_config(own_file: &str, once: &OncePerBoot) -> Option<(LoaderConfig, Vec<u8>, Vec<Counted>)> {
     let handles = boot::find_handles::<SimpleFileSystem>().ok()?;
     // Slingshot's own partition, then an XBOOTLDR one, then the others
     // (Fedora's /boot), all on Slingshot's disk. Never a USB stick's or
@@ -104,16 +112,14 @@ pub fn read_config(own_file: &str) -> Option<(LoaderConfig, Vec<u8>, Vec<Counted
         // (LoaderEntryOneShot), else `bootctl set-default`
         // (LoaderEntryDefault), else the `default` pattern of loader.conf,
         // else the first entry.
-        let one_shot = super::loader_interface::take_one_shot();
+        let one_shot = once.one_shot.get_or_init(super::loader_interface::take_one_shot).clone();
         let default_var = one_shot.clone().or_else(|| get_string_var(cstr16!("LoaderEntryDefault")));
         let loader_conf = read_file(handle, "\\loader\\loader.conf");
-        // Measured once, like systemd-boot does at its start (boot_data is
-        // read again when the language changes).
-        if let Some(conf) = &loader_conf {
-            static MEASURED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-            if !MEASURED.swap(true, core::sync::atomic::Ordering::Relaxed) {
-                super::measure::loader_conf(conf.as_bytes());
-            }
+        // Measured once, like systemd-boot does at its start.
+        if let Some(conf) = &loader_conf
+            && !once.measured.replace(true)
+        {
+            super::measure::loader_conf(conf.as_bytes());
         }
         let (entries, default) = bls::menu(
             &confs,
@@ -192,12 +198,9 @@ pub fn count_try(fs_device_path: &[u8], path: &str) -> Option<String> {
     // A rename is a SetInfo with the new name (in the same directory): the
     // file isn't copied, which matters for a 50 MB unified kernel image.
     let name = CString16::try_from(new_name).ok()?;
-    // EFI_FILE_INFO: 80 bytes, then the UCS-2 name.
-    let mut storage = alloc::vec![0u64; (80 + 2 * (new_name.len() + 1)) / 8 + 2];
-    // SAFETY: The u64 buffer is aligned for FileInfo and lives as long as the bytes.
-    let bytes = unsafe { core::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), storage.len() * 8) };
+    let mut buffer = alloc::boxed::Box::new(super::dir::InfoBuffer([0; 4096]));
     let renamed = FileInfo::new(
-        bytes,
+        &mut buffer.0,
         info.file_size(),
         info.physical_size(),
         *info.create_time(),

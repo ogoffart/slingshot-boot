@@ -450,12 +450,6 @@ pub trait Backend {
     fn open_unlocked(&self, _id: usize) -> Result<(), String> {
         Err(String::from("not supported here"))
     }
-    /// The keyboard layout the firmware's keys are translated with.
-    /// Desktops have their own.
-    fn set_keymap(&self, _keymap: crate::parse::keymap::Keymap) {}
-    /// How fast the pointer moves: `factor` times, and with `acceleration`,
-    /// fast moves go further. Desktops have their own.
-    fn set_pointer(&self, _factor: f32, _acceleration: bool) {}
     /// The machine's language, as a locale or language tag ("fr_FR.UTF-8",
     /// "de-DE"), when slingshot.toml doesn't say.
     fn language(&self) -> Option<String> {

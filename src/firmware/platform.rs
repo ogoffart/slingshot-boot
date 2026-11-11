@@ -247,26 +247,6 @@ impl Display {
     }
 }
 
-/// The keyboard layout (`Backend::set_keymap`); none: as the firmware sends.
-pub struct KeymapCell(pub core::cell::RefCell<Option<crate::parse::keymap::Keymap>>);
-// SAFETY: the firmware runs Slingshot on one processor (the other one
-// only checks passphrases, and doesn't touch this).
-unsafe impl Sync for KeymapCell {}
-pub static KEYMAP: KeymapCell = KeymapCell(core::cell::RefCell::new(None));
-
-/// Set after another program ran (and drew on the screen): the event loop
-/// restores the display mode and repaints everything.
-static FULL_REDRAW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-
-/// The pointer's speed (an `f32`'s bits, 1.0 to start) and acceleration
-/// (`Backend::set_pointer`).
-pub static POINTER_FACTOR: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0x3f80_0000);
-pub static POINTER_ACCELERATION: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
-
-pub fn request_full_redraw() {
-    FULL_REDRAW.store(true, core::sync::atomic::Ordering::Relaxed);
-}
-
 struct Mouse {
     relative: Option<ScopedProtocol<Pointer>>,
     /// USB mice that no firmware driver handles: read by Slingshot.
@@ -417,7 +397,7 @@ impl slint::platform::Platform for Platform {
                 }
             }
 
-            if FULL_REDRAW.swap(false, core::sync::atomic::Ordering::Relaxed) {
+            if self.shared.full_redraw.take() {
                 // The program may have changed the mode (or switched to text).
                 let (w, h) = display.gop.current_mode_info().resolution();
                 if (w, h) != (display.width, display.height) {
@@ -450,7 +430,7 @@ impl slint::platform::Platform for Platform {
                 let typed = match key {
                     UefiKey::Printable(c) if char::from(c) >= ' ' => {
                         let altgr = shift_state.contains(KeyShiftState::RIGHT_ALT);
-                        let typed = KEYMAP.0.borrow().as_ref().and_then(|k| k.type_key(&mut dead_key, char::from(c), altgr));
+                        let typed = self.shared.keymap.borrow().as_ref().and_then(|k| k.type_key(&mut dead_key, char::from(c), altgr));
                         if typed.is_some() && altgr {
                             shift_state.remove(KeyShiftState::RIGHT_ALT);
                         }
@@ -547,13 +527,13 @@ impl slint::platform::Platform for Platform {
             let distance: f32 = pointer_events.iter().filter_map(|e| e.0).map(|(dx, dy)| libm::hypotf(dx, dy)).sum();
             let mut gain = scale;
             if distance > 0. {
-                use core::sync::atomic::Ordering::Relaxed;
                 let now = slint::platform::Platform::duration_since_start(self);
                 let since = now - last_move;
                 let ms = if moving || since < Duration::from_millis(50) { (since.as_secs_f32() * 1000.).max(1.) } else { 10. };
                 last_move = now;
-                gain *= f32::from_bits(POINTER_FACTOR.load(Relaxed));
-                if POINTER_ACCELERATION.load(Relaxed) {
+                let (factor, acceleration) = self.shared.pointer.get().unwrap_or((1., true));
+                gain *= factor;
+                if acceleration {
                     // Under 0.4 px per ms (about 5 cm/s), as it comes.
                     gain *= (1. + (distance / ms - 0.4) * 0.5).clamp(1., 3.);
                 }

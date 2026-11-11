@@ -95,16 +95,11 @@ pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
         let file = root.open(&name, FileMode::Read, FileAttribute::empty()).map_err(|e| format!("{:?}", e.status()))?;
         file.into_directory().ok_or("not a folder")?
     };
-    // EFI_FILE_INFO is 80 bytes, then a name of up to 255 UCS-2 characters
-    // on usual file systems: 4 KB is plenty. u64s, for the alignment.
-    let mut storage = alloc::vec![0u64; 512];
     let mut entries = Vec::new();
+    let mut buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
     loop {
-        // SAFETY: The bytes of `storage`, which outlives them.
-        let buf = unsafe { core::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), storage.len() * 8) };
-        match dir.read_entry(buf) {
+        match dir.read_entry(&mut buffer.0) {
             Ok(Some(info)) => {
-                let info: &FileInfo = info;
                 let name = format!("{}", info.file_name());
                 if name != "." && name != ".." {
                     entries.push(Entry { name, is_dir: info.is_directory(), size: info.file_size() });
@@ -116,6 +111,11 @@ pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
     }
     Ok(entries)
 }
+
+/// Bytes for a `FileInfo`: 80, then a name of up to 255 UCS-2 characters
+/// on usual file systems.
+#[repr(C, align(8))]
+pub struct InfoBuffer(pub [u8; 4096]);
 
 /// Opens `path` on the file system `handle`.
 fn open(handle: Handle, path: &str, mode: FileMode) -> Option<uefi::proto::media::file::FileHandle> {
@@ -143,10 +143,7 @@ pub const SMALL: usize = 1 << 20;
 /// Like `read_file`, `None` if the file is larger than `max` bytes.
 pub fn read_at_most(handle: Handle, path: &str, max: usize) -> Option<Vec<u8>> {
     let mut file = open(handle, path, FileMode::Read)?.into_regular_file()?;
-    let mut storage = alloc::vec![0u64; 512];
-    // SAFETY: The bytes of `storage`, which outlives them.
-    let buf = unsafe { core::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), storage.len() * 8) };
-    let size = usize::try_from(file.get_info::<FileInfo>(buf).ok()?.file_size()).ok()?;
+    let size = usize::try_from(file.get_boxed_info::<FileInfo>().ok()?.file_size()).ok()?;
     if size > max {
         log::info!("{path}: {size} bytes, too large");
         return None;
