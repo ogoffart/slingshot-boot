@@ -33,7 +33,7 @@ fn set_string(name: &CStr16, value: &str) {
 /// microseconds since the processor started, as systemd-boot measures
 /// them: `LoaderTimeInitUSec` and `LoaderTimeExecUSec`.
 fn usec(ticks: u64) -> u64 {
-    (u128::from(ticks) * 1_000_000 / u128::from(super::platform::timer_freq())) as u64
+    (u128::from(ticks) * 1_000_000 / u128::from(crate::uefi_platform::timer_freq())) as u64
 }
 
 /// Once the firmware is ready (the image's device path can be read):
@@ -66,7 +66,7 @@ pub fn starting(entry: Option<&str>) {
     if let Some(id) = entry {
         set_string(cstr16!("LoaderEntrySelected"), id);
     }
-    set_string(cstr16!("LoaderTimeExecUSec"), &format!("{}", usec(super::platform::timer_tick())));
+    set_string(cstr16!("LoaderTimeExecUSec"), &format!("{}", usec(crate::uefi_platform::timer_tick())));
 }
 
 /// `LoaderEntryOneShot` (`bootctl reboot --boot-loader-entry`, `systemctl

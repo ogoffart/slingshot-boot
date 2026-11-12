@@ -49,7 +49,7 @@ fn get_string_var(name: &uefi::CStr16) -> Option<String> {
 /// XBOOTLDR, where some systems put the kernels and the entries).
 fn is_xbootldr(handle: uefi::Handle) -> bool {
     use uefi::proto::media::partition::PartitionInfo;
-    let Some(info) = super::platform::open_shared::<PartitionInfo>(handle) else { return false };
+    let Some(info) = crate::uefi_platform::open_shared::<PartitionInfo>(handle) else { return false };
     info.gpt_partition_entry().is_some_and(|e| {
         let kind = { e.partition_type_guid };
         kind.0 == uefi::guid!("bc13c2ff-59e6-4262-a352-b275fd6f7172")
@@ -80,7 +80,7 @@ pub fn read_config(own_file: &str, once: &OncePerBoot) -> Option<(LoaderConfig, 
     let mut handles: Vec<(u8, uefi::Handle)> = handles
         .into_iter()
         .filter_map(|h| {
-            let dp = super::platform::open_shared::<uefi::proto::device_path::DevicePath>(h)?.as_bytes().to_vec();
+            let dp = crate::uefi_platform::open_shared::<uefi::proto::device_path::DevicePath>(h)?.as_bytes().to_vec();
             if dp == own {
                 Some((0, h))
             } else if !own_disk.is_empty() && crate::parse::load_option::disk_part(&dp) == own_disk {
@@ -137,7 +137,7 @@ pub fn read_config(own_file: &str, once: &OncePerBoot) -> Option<(LoaderConfig, 
             .into_iter()
             .map(LoaderEntry::from)
             .collect();
-        let device_path = super::platform::open_shared::<uefi::proto::device_path::DevicePath>(handle)
+        let device_path = crate::uefi_platform::open_shared::<uefi::proto::device_path::DevicePath>(handle)
             .map(|dp| dp.as_bytes().to_vec())
             .unwrap_or_default();
         let pattern = default_var.or_else(|| loader_conf.as_deref().and_then(bls::loader_conf_default));
@@ -191,7 +191,7 @@ pub fn count_try(fs_device_path: &[u8], path: &str) -> Option<String> {
     let new_name = next.rsplit('\\').next()?;
     let fs_dp: &DevicePath = fs_device_path.try_into().ok()?;
     let handle = boot::locate_device_path::<SimpleFileSystem>(&mut &*fs_dp).ok()?;
-    let mut sfs = super::platform::open_shared::<SimpleFileSystem>(handle)?;
+    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle)?;
     let mut root = sfs.open_volume().ok()?;
     let mut file = root.open(&CString16::try_from(path).ok()?, FileMode::ReadWrite, FileAttribute::empty()).ok()?;
     let info = file.get_boxed_info::<FileInfo>().ok()?;

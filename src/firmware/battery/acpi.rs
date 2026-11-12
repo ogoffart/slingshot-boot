@@ -30,7 +30,7 @@ use uefi::runtime;
 use uefi::table::cfg::ConfigTableEntry;
 
 use super::super::nvram::VENDOR;
-use super::super::platform::{timer_freq, timer_tick};
+use crate::uefi_platform::{timer_freq, timer_tick};
 use super::{NO_PROBE, PROBING};
 use crate::parse::battery::Power;
 use crate::parse::battery::acpi::{self as battery, AmlValue};

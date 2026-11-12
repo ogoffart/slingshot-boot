@@ -13,7 +13,7 @@ use uefi::{CString16, Handle};
 
 /// `len` bytes at `offset` of the disk or partition `handle`.
 pub fn read_disk(handle: Handle, media_id: u32, offset: u64, len: usize) -> Option<Vec<u8>> {
-    let disk = super::platform::open_shared::<uefi::proto::media::disk::DiskIo>(handle)?;
+    let disk = crate::uefi_platform::open_shared::<uefi::proto::media::disk::DiskIo>(handle)?;
     let mut data = zeroed(len)?;
     disk.read_disk(media_id, offset, &mut data).ok()?;
     Some(data)
@@ -35,14 +35,14 @@ pub fn unreadable_partitions() -> Vec<Unreadable> {
     let mut found = Vec::new();
     let Ok(handles) = uefi::boot::find_handles::<BlockIO>() else { return found };
     for handle in handles {
-        let Some(block) = super::platform::open_shared::<BlockIO>(handle) else { continue };
+        let Some(block) = crate::uefi_platform::open_shared::<BlockIO>(handle) else { continue };
         let media = block.media();
         let (partition, present) = (media.is_logical_partition(), media.is_media_present());
         let (media_id, size) = (media.media_id(), (media.last_block() + 1) * u64::from(media.block_size()));
         drop(block);
-        let Some(dp) = super::platform::open_shared::<DevicePath>(handle).map(|d| d.as_bytes().to_vec()) else { continue };
+        let Some(dp) = crate::uefi_platform::open_shared::<DevicePath>(handle).map(|d| d.as_bytes().to_vec()) else { continue };
         let what = crate::parse::load_option::describe_volume(&dp).1;
-        let readable = super::platform::open_shared::<SimpleFileSystem>(handle).is_some();
+        let readable = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).is_some();
         // Whole devices too: a disk formatted without a partition table.
         if !present || readable {
             log::info!(
@@ -86,7 +86,7 @@ pub struct Entry {
 /// size), so `uefi::fs` reads nothing from them. This reads into a buffer
 /// that fits any entry, as rEFInd does.
 pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
-    let mut sfs = super::platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
+    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
     let mut root = sfs.open_volume().map_err(|e| format!("{:?}", e.status()))?;
     let mut dir = if path.is_empty() || path == "\\" {
         root
@@ -119,7 +119,7 @@ pub struct InfoBuffer(pub [u8; 4096]);
 
 /// Opens `path` on the file system `handle`.
 fn open(handle: Handle, path: &str, mode: FileMode) -> Option<uefi::proto::media::file::FileHandle> {
-    let mut sfs = super::platform::open_shared::<SimpleFileSystem>(handle)?;
+    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle)?;
     let mut root = sfs.open_volume().ok()?;
     root.open(&CString16::try_from(path).ok()?, mode, FileAttribute::empty()).ok()
 }

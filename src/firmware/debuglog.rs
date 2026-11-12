@@ -68,8 +68,8 @@ impl log::Log for Logger {
         true
     }
     fn log(&self, record: &log::Record) {
-        let ticks = super::platform::timer_tick().saturating_sub(START.load(Ordering::Relaxed));
-        let ms = ticks.saturating_mul(1000) / super::platform::timer_freq();
+        let ticks = crate::uefi_platform::timer_tick().saturating_sub(START.load(Ordering::Relaxed));
+        let ms = ticks.saturating_mul(1000) / crate::uefi_platform::timer_freq();
         let mut line = alloc::format!("[{ms:>6} ms] [{}] {}: {}\n", record.level(), record.target(), record.args());
         // A line made of what a disk holds (a title, a command line) can be
         // huge: cut, so it never takes the whole buffer.
@@ -99,9 +99,9 @@ impl log::Log for Logger {
 static LOGGER: Logger = Logger;
 
 pub fn init() {
-    START.store(super::platform::timer_tick(), Ordering::Relaxed);
+    START.store(crate::uefi_platform::timer_tick(), Ordering::Relaxed);
     // Measured now (10 ms), not in the middle of a line.
-    super::platform::timer_freq();
+    crate::uefi_platform::timer_freq();
     let _ = log::set_logger(&LOGGER);
     log::set_max_level(log::LevelFilter::Info);
 }

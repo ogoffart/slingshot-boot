@@ -58,7 +58,7 @@ fn open(handle: uefi::Handle) -> Option<UsbMouse> {
     if has_pointer(handle) {
         return None;
     }
-    let mut io = super::platform::open_shared::<UsbIo>(handle)?;
+    let mut io = crate::uefi_platform::open_shared::<UsbIo>(handle)?;
     let interface = io.interface_descriptor().ok()?;
     if (interface.interface_class, interface.interface_subclass, interface.interface_protocol)
         != (HID_CLASS, BOOT_SUBCLASS, MOUSE_PROTOCOL)

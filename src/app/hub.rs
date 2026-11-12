@@ -43,8 +43,6 @@ pub struct Hub {
     pub on_devices_connected: Callback<dyn Fn(bool)>,
     /// Usable display modes (width, height), sorted by size.
     pub modes: RefCell<Vec<(usize, usize)>>,
-    /// The mode requested by the application, applied by the event loop.
-    pub requested_mode: Cell<Option<(usize, usize)>>,
     pub current_size: Cell<(usize, usize)>,
     pub pointer_status: RefCell<String>,
     /// The layout the firmware's keys are typed with; none: as it sends
@@ -54,10 +52,6 @@ pub struct Hub {
     /// The pointer's speed factor and acceleration; none: ×1, accelerated.
     #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
     pub pointer: Cell<Option<(f32, bool)>>,
-    /// Set after another program ran (and drew on the screen): the event
-    /// loop restores the display mode and repaints everything.
-    #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
-    pub full_redraw: Cell<bool>,
 }
 
 impl Hub {

@@ -95,7 +95,7 @@ pub fn shim_active() -> bool {
 /// Asks shim whether `data` is signed by a key it trusts.
 pub fn shim_verify(data: &[u8]) -> bool {
     let Ok(handle) = boot::get_handle_for_protocol::<ShimLock>() else { return false };
-    let Some(shim) = super::platform::open_shared::<ShimLock>(handle) else { return false };
+    let Some(shim) = crate::uefi_platform::open_shared::<ShimLock>(handle) else { return false };
     let Ok(size) = u32::try_from(data.len()) else { return false };
     // SAFETY: shim reads `size` bytes of `data`.
     let status = unsafe { (shim.verify)(data.as_ptr().cast(), size) };
@@ -140,8 +140,8 @@ unsafe extern "efiapi" fn security_hook(this: *const Security, status: u32, devi
 /// Loads `data` (the file at `device_path`), which shim verified, with the
 /// firmware's security check approving exactly this buffer.
 pub fn load_verified(device_path: &DevicePath, data: &[u8]) -> uefi::Result<Handle> {
-    let security2 = boot::get_handle_for_protocol::<Security2>().ok().and_then(super::platform::open_shared::<Security2>);
-    let security = boot::get_handle_for_protocol::<Security>().ok().and_then(super::platform::open_shared::<Security>);
+    let security2 = boot::get_handle_for_protocol::<Security2>().ok().and_then(crate::uefi_platform::open_shared::<Security2>);
+    let security = boot::get_handle_for_protocol::<Security>().ok().and_then(crate::uefi_platform::open_shared::<Security>);
     APPROVED_PTR.store(data.as_ptr() as usize, Ordering::Relaxed);
     APPROVED_LEN.store(data.len(), Ordering::Relaxed);
     // SAFETY: the protocols are the firmware's, alive during boot services;

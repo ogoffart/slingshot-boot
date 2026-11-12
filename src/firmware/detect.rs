@@ -76,7 +76,7 @@ impl Texts {
 /// after the firmware listed the disks.
 fn removable(handle: uefi::Handle, fs: &[u8], devices: &[Vec<u8>]) -> Option<(FoundEntry, Texts)> {
     use uefi::proto::media::block::BlockIO;
-    let block = super::platform::open_shared::<BlockIO>(handle)?;
+    let block = crate::uefi_platform::open_shared::<BlockIO>(handle)?;
     if !block.media().is_removable_media() && !crate::parse::load_option::is_usb_device(&usb_part(fs)) {
         return None;
     }
@@ -121,7 +121,7 @@ pub fn scan(started: &[(Vec<u8>, String)], devices: &[Vec<u8>], entries_fs: &[u8
     let Ok(handles) = uefi::boot::find_handles::<SimpleFileSystem>() else { return Vec::new() };
     let mut all = Vec::new();
     for handle in handles {
-        let fs: Vec<u8> = super::platform::open_shared::<DevicePath>(handle).map(|dp| dp.as_bytes().to_vec()).unwrap_or_default();
+        let fs: Vec<u8> = crate::uefi_platform::open_shared::<DevicePath>(handle).map(|dp| dp.as_bytes().to_vec()).unwrap_or_default();
         if let Some(f) = removable(handle, &fs, devices)
             && !detect::already_started(started, &fs, &f.0.program)
         {

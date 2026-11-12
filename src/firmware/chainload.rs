@@ -34,7 +34,7 @@ fn file_system_paths() -> Vec<Vec<u8>> {
     let Ok(handles) = boot::find_handles::<SimpleFileSystem>() else { return Vec::new() };
     handles
         .iter()
-        .filter_map(|h| super::platform::open_shared::<DevicePath>(*h))
+        .filter_map(|h| crate::uefi_platform::open_shared::<DevicePath>(*h))
         .map(|dp| dp.as_bytes().to_vec())
         .collect()
 }

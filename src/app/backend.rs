@@ -458,10 +458,11 @@ pub trait Backend {
     fn start(&self, target: &Target) -> StartResult;
     fn reboot_to_firmware_setup(&self) -> StartResult;
 
-    /// Switches the display to `width`×`height`. The platform applies it and
-    /// then calls `hub.on_mode_changed`.
-    fn request_mode(&self, hub: &Hub, _window: &slint::Window, width: usize, height: usize) {
-        hub.requested_mode.set(Some((width, height)));
+    /// Switches the display to `width`×`height`: the window gets that size,
+    /// and the platform switches the display mode, then calls
+    /// `hub.on_mode_changed`.
+    fn request_mode(&self, _hub: &Hub, window: &slint::Window, width: usize, height: usize) {
+        window.set_size(slint::PhysicalSize::new(width as u32, height as u32));
     }
 
     /// Called once the UI is created, before the event loop runs.

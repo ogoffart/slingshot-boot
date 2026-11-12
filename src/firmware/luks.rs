@@ -39,7 +39,7 @@ use crate::parse::handoff::{self, Unlocked};
 use crate::parse::luks::{self, Attempt, Decryptor, Header};
 
 use super::dir::read_disk as read;
-use super::platform::open_shared;
+use crate::uefi_platform::open_shared;
 
 /// A partition with a LUKS2 header.
 struct Disk {
@@ -337,8 +337,8 @@ impl Luks {
         let attempt = Box::into_raw(attempt);
         self.in_flight.set(attempt);
         let in_flight = self.in_flight.clone();
-        let started = super::platform::timer_tick();
-        let took = move || (super::platform::timer_tick() - started) * 1000 / super::platform::timer_freq();
+        let started = crate::uefi_platform::timer_tick();
+        let took = move || (crate::uefi_platform::timer_tick() - started) * 1000 / crate::uefi_platform::timer_freq();
         let events = start_on_other_processors(attempt, lanes);
         let timer = Rc::downgrade(&self.timer);
         let mut finish = Some(finish);
@@ -469,7 +469,7 @@ fn describe(e: &luks::Error) -> String {
 /// dropped: nothing is typed while checking). Asked at most every 50 ms:
 /// `last` is when it was, in ms.
 fn escape_pressed(last: &Cell<u64>) -> bool {
-    let now = super::platform::timer_tick() * 1000 / super::platform::timer_freq();
+    let now = crate::uefi_platform::timer_tick() * 1000 / crate::uefi_platform::timer_freq();
     if now.saturating_sub(last.get()) < 50 {
         return false;
     }

@@ -3,9 +3,10 @@
 
 //! Slingshot: a graphical UEFI boot manager built with Slint.
 //!
-//! - Built for `target_os = "uefi"`: the boot manager. [`firmware`] has the
-//!   Slint platform (display, input, event loop) and reads and writes the
-//!   firmware variables.
+//! - Built for `target_os = "uefi"`: the boot manager. [`firmware`] reads and
+//!   writes the firmware variables, starts the systems, and runs the UI on
+//!   [`uefi_platform`], a Slint platform for UEFI that knows nothing else of
+//!   Slingshot.
 //! - Built for a desktop: [`desktop`]: `slingshot config` (the default), the
 //!   same UI configuring this computer, and `slingshot simulate`, the UI in
 //!   a winit window with simulated firmware.
@@ -25,6 +26,7 @@ mod tr;
 cfg_select! {
     target_os = "uefi" => {
         mod firmware;
+        mod uefi_platform;
 
         #[uefi::entry]
         fn main() -> uefi::Status {
