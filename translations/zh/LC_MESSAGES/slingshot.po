@@ -15,16 +15,16 @@ msgstr "和"
 msgid " · {} new"
 msgstr " · 新电池 {}"
 
-#: src/firmware/mod.rs:373
+#: src/firmware/mod.rs:364
 msgid "1 memory device"
 msgstr "1 个内存设备"
 
-#: src/app/cards.rs:355
+#: src/app/cards.rs:372
 msgid "1 other entry"
 msgstr "1 个其他启动项"
 
 #: src/firmware/luks.rs:292
-#: src/firmware/mod.rs:645
+#: src/firmware/mod.rs:625
 msgid "A passphrase check is still running. Try again in a moment."
 msgstr "仍在检查密码短语，请稍后再试。"
 
@@ -52,7 +52,7 @@ msgstr "ATA 磁盘"
 msgid "Accent color"
 msgstr "强调色"
 
-#: src/app/mod.rs:838
+#: src/app/mod.rs:876
 msgid "Add Slingshot to systemd-boot's menu"
 msgstr "将 Slingshot 添加到 systemd-boot 菜单"
 
@@ -60,7 +60,7 @@ msgstr "将 Slingshot 添加到 systemd-boot 菜单"
 msgid "Add to boot menu"
 msgstr "添加到启动菜单"
 
-#: src/app/mod.rs:2160
+#: src/app/mod.rs:2228
 msgid "Added “{}” as Boot{}"
 msgstr "已将“{}”添加为 Boot{}"
 
@@ -68,8 +68,8 @@ msgstr "已将“{}”添加为 Boot{}"
 msgid "Add…"
 msgstr "添加…"
 
-#: src/app/mod.rs:519
-#: src/app/mod.rs:539
+#: src/app/mod.rs:529
+#: src/app/mod.rs:549
 msgid "All disks"
 msgstr "所有磁盘"
 
@@ -97,11 +97,11 @@ msgstr "立即生效。若不保留，10 秒后恢复。"
 msgid "Apply"
 msgstr "应用"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Apr"
 msgstr "4月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "April"
 msgstr "4月"
 
@@ -109,11 +109,11 @@ msgstr "4月"
 msgid "At startup, show"
 msgstr "启动时显示"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Aug"
 msgstr "8月"
 
-#: src/app/backend.rs:593
+#: src/app/backend.rs:587
 msgid "August"
 msgstr "8月"
 
@@ -121,12 +121,12 @@ msgstr "8月"
 msgid "Auto"
 msgstr "自动"
 
-#: src/app/mod.rs:150
-#: src/app/mod.rs:152
+#: src/app/mod.rs:153
+#: src/app/mod.rs:155
 msgid "Automatic ({})"
 msgstr "自动（{}）"
 
-#: src/app/cards.rs:335
+#: src/app/cards.rs:352
 msgid "Back"
 msgstr "返回"
 
@@ -134,11 +134,11 @@ msgstr "返回"
 msgid "Back to boot"
 msgstr "返回启动"
 
-#: src/app/mod.rs:543
+#: src/app/mod.rs:553
 msgid "Back to the top folder"
 msgstr "返回顶层文件夹"
 
-#: src/app/mod.rs:543
+#: src/app/mod.rs:553
 msgid "Back to {}"
 msgstr "返回 {}"
 
@@ -155,7 +155,7 @@ msgstr "电池"
 msgid "Blue"
 msgstr "蓝色"
 
-#: src/firmware/mod.rs:389
+#: src/firmware/mod.rs:380
 msgid "Board {}"
 msgstr "主板 {}"
 
@@ -177,7 +177,7 @@ msgstr "启动菜单"
 msgid "Boot order"
 msgstr "启动顺序"
 
-#: src/app/mod.rs:2219
+#: src/app/mod.rs:2287
 msgid "Boot order saved to the firmware"
 msgstr "启动顺序已保存到固件"
 
@@ -191,7 +191,7 @@ msgstr "固件内置"
 msgid "Cancel"
 msgstr "取消"
 
-#: src/app/mod.rs:564
+#: src/app/mod.rs:574
 msgid "Cannot read this folder: {}"
 msgstr "无法读取此文件夹：{}"
 
@@ -235,7 +235,7 @@ msgstr "选择图片"
 msgid "Choose…"
 msgstr "选择…"
 
-#: src/app/mod.rs:1240
+#: src/app/mod.rs:1281
 msgid "Clock set to {}"
 msgstr "时钟已设为 {}"
 
@@ -248,20 +248,20 @@ msgstr "关闭"
 msgid "Copies it to the boot partition and adds it to the computer's boot menu. Nothing starts differently yet."
 msgstr "将其复制到启动分区，并添加到电脑的启动菜单。启动方式暂时不变。"
 
-#: src/app/mod.rs:2164
+#: src/app/mod.rs:2232
 msgid "Could not add a boot entry: {}"
 msgstr "无法添加启动项：{}"
 
-#: src/app/mod.rs:1939
-#: src/app/mod.rs:2055
+#: src/app/mod.rs:2007
+#: src/app/mod.rs:2123
 msgid "Could not add the picture: {}"
 msgstr "无法添加图片：{}"
 
-#: src/app/store.rs:76
+#: src/app/store.rs:82
 msgid "Could not reset the settings: {}"
 msgstr "无法重置设置：{}"
 
-#: src/app/mod.rs:937
+#: src/app/mod.rs:975
 msgid "Could not restart: {}"
 msgstr "无法重启：{}"
 
@@ -269,23 +269,27 @@ msgstr "无法重启：{}"
 msgid "Could not save slingshot.toml: {}"
 msgstr "无法保存 slingshot.toml：{}"
 
-#: src/app/mod.rs:2221
+#: src/app/mod.rs:2289
 msgid "Could not save the boot order: {}"
 msgstr "无法保存启动顺序：{}"
 
-#: src/app/store.rs:62
+#: src/app/store.rs:68
 msgid "Could not save the settings: {}"
 msgstr "无法保存设置：{}"
 
-#: src/app/mod.rs:1242
+#: src/app/mod.rs:1283
 msgid "Could not set the clock: {}"
 msgstr "无法设置时钟：{}"
 
-#: src/app/mod.rs:1381
+#: src/app/mod.rs:1586
+msgid "Couldn't save the changes"
+msgstr "无法保存更改"
+
+#: src/app/mod.rs:1418
 msgid "Couldn't save the log: {}"
 msgstr "无法保存日志：{}"
 
-#: src/app/mod.rs:1359
+#: src/app/mod.rs:1398
 msgid "Couldn't start {}"
 msgstr "无法启动 {}"
 
@@ -314,11 +318,11 @@ msgstr "深色"
 msgid "Date and time"
 msgstr "日期和时间"
 
-#: src/app/backend.rs:617
+#: src/app/backend.rs:611
 msgid "Dec"
 msgstr "12月"
 
-#: src/app/backend.rs:593
+#: src/app/backend.rs:587
 msgid "December"
 msgstr "12月"
 
@@ -399,16 +403,16 @@ msgstr "快"
 msgid "Faster"
 msgstr "更快"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Feb"
 msgstr "2月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "February"
 msgstr "2月"
 
 #: src/desktop/simulator.rs:375
-#: src/firmware/mod.rs:416
+#: src/firmware/mod.rs:407
 msgid "Firmware"
 msgstr "固件"
 
@@ -428,7 +432,7 @@ msgstr "启动顺序中的第一项"
 msgid "Focus"
 msgstr "聚焦"
 
-#: src/app/mod.rs:554
+#: src/app/mod.rs:564
 msgid "Folder"
 msgstr "文件夹"
 
@@ -440,11 +444,11 @@ msgstr "已找到"
 msgid "French (AZERTY)"
 msgstr "法语（AZERTY）"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Fri"
 msgstr "周五"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Friday"
 msgstr "星期五"
 
@@ -490,7 +494,7 @@ msgstr "密码短语错误，请重试。"
 msgid "Install"
 msgstr "安装"
 
-#: src/app/mod.rs:834
+#: src/app/mod.rs:872
 msgid "Install Slingshot"
 msgstr "安装 Slingshot"
 
@@ -510,27 +514,27 @@ msgstr "意大利语"
 msgid "Its entries are cards in Slingshot"
 msgstr "其条目在 Slingshot 中显示为卡片"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Jan"
 msgstr "1月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "January"
 msgstr "1月"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Jul"
 msgstr "7月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "July"
 msgstr "7月"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Jun"
 msgstr "6月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "June"
 msgstr "6月"
 
@@ -559,7 +563,7 @@ msgstr "按键提示"
 msgid "Keyboard layout"
 msgstr "键盘布局"
 
-#: src/firmware/mod.rs:399
+#: src/firmware/mod.rs:390
 msgid "Keys enrolled, not enforced"
 msgstr "已注册密钥，未强制执行"
 
@@ -584,7 +588,7 @@ msgstr "浅色"
 msgid "Linux"
 msgstr "Linux"
 
-#: src/app/mod.rs:1380
+#: src/app/mod.rs:1417
 msgid "Log saved as {}"
 msgstr "日志已保存为 {}"
 
@@ -592,33 +596,33 @@ msgstr "日志已保存为 {}"
 msgid "Made {}"
 msgstr "生产于 {}"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Mar"
 msgstr "3月"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:586
 msgid "March"
 msgstr "3月"
 
-#: src/app/backend.rs:592
-#: src/app/backend.rs:616
+#: src/app/backend.rs:586
+#: src/app/backend.rs:610
 msgid "May"
 msgstr "5月"
 
 #: src/desktop/simulator.rs:373
-#: src/firmware/mod.rs:408
+#: src/firmware/mod.rs:399
 msgid "Memory"
 msgstr "内存"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Mon"
 msgstr "周一"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Monday"
 msgstr "星期一"
 
-#: src/app/cards.rs:354
+#: src/app/cards.rs:371
 msgid "More…"
 msgstr "更多…"
 
@@ -643,7 +647,7 @@ msgstr "网络 · {}"
 msgid "Never"
 msgstr "从不"
 
-#: src/firmware/mod.rs:401
+#: src/firmware/mod.rs:392
 msgid "No Secure Boot variables"
 msgstr "没有安全启动变量"
 
@@ -651,11 +655,11 @@ msgstr "没有安全启动变量"
 msgid "No boot entries found in the firmware."
 msgstr "固件中未找到启动项。"
 
-#: src/app/mod.rs:550
+#: src/app/mod.rs:560
 msgid "No folders or EFI programs here."
 msgstr "这里没有文件夹或 EFI 程序。"
 
-#: src/app/mod.rs:550
+#: src/app/mod.rs:560
 msgid "No folders or pictures here."
 msgstr "这里没有文件夹或图片。"
 
@@ -665,7 +669,7 @@ msgstr "无壁纸"
 
 #: ui/install-screen.slint:155
 #: ui/widgets.slint:672
-#: src/app/mod.rs:598
+#: src/app/mod.rs:608
 msgid "None"
 msgstr "无"
 
@@ -673,11 +677,11 @@ msgstr "无"
 msgid "Normal"
 msgstr "正常"
 
-#: src/firmware/luks.rs:467
+#: src/firmware/luks.rs:461
 msgid "Not enough memory to check the passphrase."
 msgstr "内存不足，无法检查密码短语。"
 
-#: src/app/mod.rs:2125
+#: src/app/mod.rs:2193
 msgid "Not found: {}"
 msgstr "未找到：{}"
 
@@ -689,15 +693,15 @@ msgstr "未安装"
 msgid "Not on every boot"
 msgstr "不在每次启动时"
 
-#: src/firmware/mod.rs:401
+#: src/firmware/mod.rs:392
 msgid "Not supported"
 msgstr "不支持"
 
-#: src/app/backend.rs:617
+#: src/app/backend.rs:611
 msgid "Nov"
 msgstr "11月"
 
-#: src/app/backend.rs:593
+#: src/app/backend.rs:587
 msgid "November"
 msgstr "11月"
 
@@ -705,22 +709,22 @@ msgstr "11月"
 msgid "OK"
 msgstr "确定"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Oct"
 msgstr "10月"
 
-#: src/app/backend.rs:593
+#: src/app/backend.rs:587
 msgid "October"
 msgstr "10月"
 
 #: ui/install-screen.slint:176
-#: src/firmware/mod.rs:399
-#: src/firmware/mod.rs:400
+#: src/firmware/mod.rs:390
+#: src/firmware/mod.rs:391
 msgid "Off"
 msgstr "关"
 
 #: ui/install-screen.slint:176
-#: src/firmware/mod.rs:398
+#: src/firmware/mod.rs:389
 msgid "On"
 msgstr "开"
 
@@ -803,7 +807,7 @@ msgid "Press any key for the boot menu"
 msgstr "按任意键进入启动菜单"
 
 #: src/desktop/simulator.rs:372
-#: src/firmware/mod.rs:407
+#: src/firmware/mod.rs:398
 msgid "Processor"
 msgstr "处理器"
 
@@ -840,7 +844,7 @@ msgstr "重启"
 msgid "Restart now"
 msgstr "立即重启"
 
-#: src/app/mod.rs:1390
+#: src/app/mod.rs:1427
 msgid "Restarting…"
 msgstr "正在重启…"
 
@@ -868,11 +872,11 @@ msgstr "SATA 磁盘"
 msgid "SCSI disk"
 msgstr "SCSI 磁盘"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Sat"
 msgstr "周六"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Saturday"
 msgstr "星期六"
 
@@ -893,9 +897,9 @@ msgstr "保存新的启动顺序？"
 msgid "Save to firmware…"
 msgstr "保存到固件…"
 
-#: src/app/mod.rs:1519
-#: src/app/mod.rs:1637
-#: src/app/mod.rs:1657
+#: src/app/mod.rs:1584
+#: src/app/mod.rs:1705
+#: src/app/mod.rs:1725
 msgid "Saved in slingshot.toml"
 msgstr "已保存到 slingshot.toml"
 
@@ -913,19 +917,19 @@ msgstr "栏目"
 
 #: ui/install-screen.slint:175
 #: src/desktop/simulator.rs:376
-#: src/firmware/mod.rs:417
+#: src/firmware/mod.rs:408
 msgid "Secure Boot"
 msgstr "安全启动"
 
-#: src/firmware/mod.rs:190
+#: src/firmware/mod.rs:180
 msgid "Secure Boot is on, and this program isn't signed by a key this computer trusts. Sign it, or turn Secure Boot off in the firmware setup."
 msgstr "安全启动已开启，而此程序未使用这台电脑信任的密钥签名。请为其签名，或在固件设置中关闭安全启动。"
 
-#: src/firmware/mod.rs:403
+#: src/firmware/mod.rs:394
 msgid "Secure Boot off"
 msgstr "安全启动已关闭"
 
-#: src/firmware/mod.rs:403
+#: src/firmware/mod.rs:394
 msgid "Secure Boot on"
 msgstr "安全启动已开启"
 
@@ -933,11 +937,11 @@ msgstr "安全启动已开启"
 msgid "Select"
 msgstr "选择"
 
-#: src/app/backend.rs:616
+#: src/app/backend.rs:610
 msgid "Sep"
 msgstr "9月"
 
-#: src/app/backend.rs:593
+#: src/app/backend.rs:587
 msgid "September"
 msgstr "9月"
 
@@ -967,15 +971,15 @@ msgstr "设置已锁定"
 msgid "Settings are saved in slingshot.toml, next to Slingshot"
 msgstr "设置保存在 Slingshot 旁边的 slingshot.toml 中"
 
-#: src/app/mod.rs:1712
+#: src/app/mod.rs:1780
 msgid "Settings reset to their defaults"
 msgstr "设置已恢复为默认值"
 
-#: src/app/store.rs:59
+#: src/app/store.rs:65
 msgid "Settings saved in slingshot.toml"
 msgstr "设置已保存到 slingshot.toml"
 
-#: src/firmware/mod.rs:400
+#: src/firmware/mod.rs:391
 msgid "Setup mode · no keys enrolled"
 msgstr "设置模式 · 未注册密钥"
 
@@ -996,7 +1000,7 @@ msgstr "显示"
 msgid "Shut down"
 msgstr "关机"
 
-#: src/app/mod.rs:1390
+#: src/app/mod.rs:1427
 msgid "Shutting down…"
 msgstr "正在关机…"
 
@@ -1018,11 +1022,11 @@ msgstr "Slingshot（模拟器）"
 msgid "Slingshot can't read this disk's data."
 msgstr "Slingshot 无法读取此磁盘的数据。"
 
-#: src/app/mod.rs:2036
+#: src/app/mod.rs:2104
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr "Slingshot 无法读取 {} 磁盘：这台电脑没有相应的驱动。"
 
-#: src/firmware/luks.rs:469
+#: src/firmware/luks.rs:463
 msgid "Slingshot can't unlock this kind of encrypted disk."
 msgstr "Slingshot 无法解锁这类加密磁盘。"
 
@@ -1060,11 +1064,11 @@ msgstr "启动"
 msgid "Start Slingshot"
 msgstr "启动 Slingshot"
 
-#: src/app/mod.rs:836
+#: src/app/mod.rs:874
 msgid "Start Slingshot on every boot"
 msgstr "每次启动时运行 Slingshot"
 
-#: src/app/mod.rs:835
+#: src/app/mod.rs:873
 msgid "Start Slingshot once, on the next restart"
 msgstr "下次重启时运行一次 Slingshot"
 
@@ -1092,7 +1096,7 @@ msgstr "正在启动"
 msgid "Starting in {} s"
 msgstr "{} 秒后启动"
 
-#: src/app/mod.rs:1371
+#: src/app/mod.rs:1408
 msgid "Starting {}…"
 msgstr "正在启动 {}…"
 
@@ -1104,15 +1108,15 @@ msgstr "启动次数"
 msgid "Startup"
 msgstr "启动"
 
-#: src/app/mod.rs:837
+#: src/app/mod.rs:875
 msgid "Stop starting Slingshot on every boot"
 msgstr "不再每次启动时运行 Slingshot"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Sun"
 msgstr "周日"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Sunday"
 msgstr "星期日"
 
@@ -1135,15 +1139,15 @@ msgstr "青色"
 msgid "The default entry"
 msgstr "默认启动项"
 
-#: src/firmware/luks.rs:468
+#: src/firmware/luks.rs:462
 msgid "The disk couldn't be read."
 msgstr "无法读取该磁盘。"
 
-#: src/app/mod.rs:530
+#: src/app/mod.rs:540
 msgid "The firmware can't read any disk."
 msgstr "固件无法读取任何磁盘。"
 
-#: src/firmware/mod.rs:185
+#: src/firmware/mod.rs:175
 msgid "The firmware couldn't load {}. It may not be an EFI program for this computer, or the file is damaged or missing."
 msgstr "固件无法加载 {}。它可能不是适用于这台电脑的 EFI 程序，或者文件已损坏或丢失。"
 
@@ -1167,7 +1171,7 @@ msgstr "菜单的语言、按键输入的字符（包括密码短语），以及
 msgid "The last one started"
 msgstr "上次启动的"
 
-#: src/app/cards.rs:336
+#: src/app/cards.rs:353
 msgid "The main entries"
 msgstr "主要启动项"
 
@@ -1191,7 +1195,7 @@ msgstr "以下命令将以 root 身份运行（会询问你的密码）：\n\n"
 msgid "This computer"
 msgstr "这台电脑"
 
-#: src/firmware/luks.rs:779
+#: src/firmware/luks.rs:763
 msgid "This disk is empty."
 msgstr "此磁盘是空的。"
 
@@ -1205,7 +1209,7 @@ msgid "This disk is locked."
 msgstr "此磁盘已锁定。"
 
 #: src/firmware/luks.rs:228
-#: src/firmware/luks.rs:470
+#: src/firmware/luks.rs:464
 msgid "This disk's encryption couldn't be read."
 msgstr "无法读取此磁盘的加密信息。"
 
@@ -1217,11 +1221,11 @@ msgstr "这台电脑"
 msgid "This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen."
 msgstr "这会写入固件中的 BootOrder。原始顺序会被保留，可在此界面恢复。"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Thu"
 msgstr "周四"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Thursday"
 msgstr "星期四"
 
@@ -1229,11 +1233,11 @@ msgstr "星期四"
 msgid "Title"
 msgstr "标题"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Tue"
 msgstr "周二"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Tuesday"
 msgstr "星期二"
 
@@ -1269,7 +1273,7 @@ msgstr "USB · 可移动"
 msgid "Under More…"
 msgstr "在“更多…”中"
 
-#: src/app/mod.rs:839
+#: src/app/mod.rs:877
 msgid "Uninstall Slingshot"
 msgstr "卸载 Slingshot"
 
@@ -1277,11 +1281,11 @@ msgstr "卸载 Slingshot"
 msgid "Uninstall…"
 msgstr "卸载…"
 
-#: src/firmware/mod.rs:347
+#: src/firmware/mod.rs:338
 msgid "Unknown processor"
 msgstr "未知处理器"
 
-#: src/firmware/mod.rs:411
+#: src/firmware/mod.rs:402
 msgid "Unknown system"
 msgstr "未知系统"
 
@@ -1294,7 +1298,7 @@ msgstr "解锁"
 msgid "Unlock the encrypted disk"
 msgstr "解锁加密磁盘"
 
-#: src/app/mod.rs:2021
+#: src/app/mod.rs:2089
 msgid "Unlocked, but its files can't be shown: this computer has no driver for what's inside."
 msgstr "已解锁，但无法显示其中的文件：这台电脑没有读取其内容的驱动。"
 
@@ -1303,7 +1307,7 @@ msgstr "已解锁，但无法显示其中的文件：这台电脑没有读取其
 msgid "Update"
 msgstr "更新"
 
-#: src/firmware/mod.rs:398
+#: src/firmware/mod.rs:389
 msgid "User mode · keys enrolled"
 msgstr "用户模式 · 已注册密钥"
 
@@ -1320,11 +1324,11 @@ msgstr "电压"
 msgid "Wallpaper"
 msgstr "壁纸"
 
-#: src/app/backend.rs:614
+#: src/app/backend.rs:608
 msgid "Wed"
 msgstr "周三"
 
-#: src/app/backend.rs:589
+#: src/app/backend.rs:583
 msgid "Wednesday"
 msgstr "星期三"
 
@@ -1344,20 +1348,20 @@ msgstr "密码错误。"
 msgid "macOS"
 msgstr "macOS"
 
-#: src/app/mod.rs:1390
+#: src/app/mod.rs:1427
 msgid "restart"
 msgstr "重启"
 
-#: src/app/mod.rs:1390
+#: src/app/mod.rs:1427
 msgid "shut down"
 msgstr "关机"
 
-#: src/firmware/mod.rs:489
-#: src/firmware/mod.rs:512
+#: src/firmware/mod.rs:480
+#: src/firmware/mod.rs:503
 msgid "unlocked"
 msgstr "已解锁"
 
-#: src/firmware/mod.rs:356
+#: src/firmware/mod.rs:347
 msgid "up to {} GHz"
 msgstr "最高 {} GHz"
 
@@ -1369,11 +1373,11 @@ msgstr "{}%"
 msgid "{} boot"
 msgstr "{} 启动"
 
-#: src/firmware/mod.rs:350
+#: src/firmware/mod.rs:341
 msgid "{} cores"
 msgstr "{} 核"
 
-#: src/firmware/mod.rs:420
+#: src/firmware/mod.rs:411
 msgid "{} firmware {} · {} · {}"
 msgstr "{} 固件 {} · {} · {}"
 
@@ -1385,7 +1389,7 @@ msgstr "{} 小时"
 msgid "{} h {} min"
 msgstr "{} 小时 {} 分钟"
 
-#: src/app/mod.rs:2034
+#: src/app/mod.rs:2102
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr "{} 的加密方式 Slingshot 无法解锁。"
 
@@ -1397,7 +1401,7 @@ msgstr "{} 处于休眠状态：启动它即可从中断处继续。"
 msgid "{} left"
 msgstr "剩余 {}"
 
-#: src/firmware/mod.rs:373
+#: src/firmware/mod.rs:364
 msgid "{} memory devices"
 msgstr "{} 个内存设备"
 
@@ -1413,7 +1417,7 @@ msgstr "共 {} 种模式，最高 {}。立即生效；10 秒内不保留则恢�
 msgid "{} of {}"
 msgstr "{} / {}"
 
-#: src/app/cards.rs:355
+#: src/app/cards.rs:372
 msgid "{} other entries"
 msgstr "{} 个其他启动项"
 
@@ -1425,7 +1429,7 @@ msgstr "{} 秒"
 msgid "{} starts in {} s. Press any key to stay here."
 msgstr "{1} 秒后启动 {0}。按任意键留在此处。"
 
-#: src/firmware/mod.rs:353
+#: src/firmware/mod.rs:344
 msgid "{} threads"
 msgstr "{} 线程"
 
@@ -1433,11 +1437,11 @@ msgstr "{} 线程"
 msgid "{} until full"
 msgstr "{} 后充满"
 
-#: src/app/backend.rs:621
+#: src/app/backend.rs:615
 msgid "{} {} {}"
 msgstr "{2}{1}日 {0}"
 
-#: src/app/backend.rs:598
+#: src/app/backend.rs:592
 msgid "{} {} {} {}"
 msgstr "{3}年{2}{1}日 {0}"
 

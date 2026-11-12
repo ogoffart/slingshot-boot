@@ -46,14 +46,20 @@ pub(super) fn initial_settings(in_file: bool, config: &Config, defaults: Setting
     settings
 }
 
+/// `config` with `st.settings` as its defaults, for slingshot.toml.
+pub(super) fn with_settings(st: &State, config: Config) -> Config {
+    let settings = st.settings;
+    let defaults = config::SettingsDefaults::between(&st.builtin, &settings);
+    let language = chosen_language(settings.language).map(String::from);
+    let keyboard = usize::from(settings.keyboard).saturating_sub(1);
+    Config { defaults, language, keyboard, ..config }
+}
+
 /// Saves `st.settings`: what to say, or the error.
 pub(super) fn save_settings(in_file: bool, st: &mut State, backend: &dyn Backend) -> Result<Option<String>, String> {
     let settings = st.settings;
     if in_file {
-        let defaults = config::SettingsDefaults::between(&st.builtin, &settings);
-        let language = chosen_language(settings.language).map(String::from);
-        let keyboard = usize::from(settings.keyboard).saturating_sub(1);
-        let new = Config { defaults, language, keyboard, ..(*st.config).clone() };
+        let new = with_settings(st, (*st.config).clone());
         commit_config(st, backend, new, true)?;
         st.defaults = settings;
         Ok(Some(tr("Settings saved in slingshot.toml")))

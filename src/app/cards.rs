@@ -239,13 +239,26 @@ fn custom_card(rule: &config::EntryRule, index: usize) -> Option<Card> {
     })
 }
 
+/// The entry started last (`Card::key`), and who asks for it to be the
+/// default.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Last<'a> {
+    pub key: Option<&'a str>,
+    /// Settings' "the one started last": over slingshot.toml's default.
+    pub settings: bool,
+    /// systemd-boot's `@saved`: under it.
+    pub saved: bool,
+}
+
 /// Applies the `[[entry]]` rules of slingshot.toml to the cards: renames,
 /// changes icons and kernel options, sorts them between the main row and
 /// "More…", adds the entries of the file's own (before the firmware setup),
 /// and picks the default: the systemd-boot entry `one_shot` (`bootctl
-/// reboot --boot-loader-entry`) this time, else the rules'. Returns the new
-/// default; it's always on the main row.
-pub fn apply_rules(cards: &mut Vec<Card>, default: usize, config: &Config, one_shot: Option<&str>) -> usize {
+/// reboot --boot-loader-entry`) this time, else the one started last when
+/// Settings ask, else a `default = true` rule's, else the one started last
+/// when systemd-boot asks (`@saved`), else the firmware's (`default`).
+/// Returns the new default; it's always on the main row.
+pub fn apply_rules(cards: &mut Vec<Card>, default: usize, config: &Config, one_shot: Option<&str>, last: Last) -> usize {
     let mut kept = Vec::with_capacity(cards.len());
     let mut new_default = None;
     let mut rule_default = None;
@@ -314,9 +327,13 @@ pub fn apply_rules(cards: &mut Vec<Card>, default: usize, config: &Config, one_s
         kept.insert(setup + n, card);
     }
     *cards = kept;
-    // The one-shot entry, else a `default = true` rule, else the firmware's
-    // default, else the first card.
-    let default = one_shot_default.or(rule_default).or(new_default).unwrap_or(0);
+    let last_card = last.key.and_then(|key| cards.iter().position(|c| c.key().as_deref() == Some(key)));
+    let default = one_shot_default
+        .or(last_card.filter(|_| last.settings))
+        .or(rule_default)
+        .or(last_card.filter(|_| last.saved))
+        .or(new_default)
+        .unwrap_or(0);
     if let Some(card) = cards.get_mut(default) {
         card.more = false;
     }
@@ -514,7 +531,7 @@ mod tests {
         sd.entries[1].title = "Arch (fallback)".into();
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], true);
         let config = config::parse("[[entry]]\nmatch = \"EFI Shell\"\nmore = false\n");
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         assert_eq!(
             kinds(&cards),
             [
@@ -542,7 +559,7 @@ mod tests {
     fn entries_of_your_own_before_the_firmware_setup_as_default() {
         let config = config::parse("[[entry]]\ntitle = \"Kernel\"\nlinux = \"/vmlinuz\"\n");
         let (mut cards, default) = build_cards(&[], None, &[], true);
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         assert_eq!(cards[default].title, "Kernel");
     }
 
@@ -555,7 +572,7 @@ mod tests {
         );
         assert!(config.warnings.is_empty(), "{:?}", config.warnings);
         let (mut cards, default) = build_cards(&options, None, &[], false);
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         let (main, _) = view(&cards, default, Level::Main);
         assert_eq!(titles(&main), ["Windows Boot Manager", "More…"]);
         let (more, _) = view(&cards, default, Level::More);
@@ -567,7 +584,7 @@ mod tests {
         let options = [option(1, "Windows Boot Manager", false)];
         let config = config::parse("[[entry]]\nmatch = \"Firmware setup\"\ndefault = true\n");
         let (mut cards, default) = build_cards(&options, None, &[], true);
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         assert_eq!((default, cards[default].more), (1, false));
         let (main, _) = view(&cards, default, Level::Main);
         assert_eq!(titles(&main), ["Windows Boot Manager", "Firmware setup"], "no More… card when nothing is under it");
@@ -597,7 +614,7 @@ mod tests {
         );
         assert!(config.warnings.is_empty(), "{:?}", config.warnings);
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], true);
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         assert_eq!(titles(&cards), ["first", "second", "Windows Boot Manager", "Debug", "Memtest", "Firmware setup"]);
         assert_eq!(default, 3);
         assert_eq!(cards[0].options(), Some("initrd=\\initramfs.img root=LABEL=a rw quiet"), "initrds kept");
@@ -630,7 +647,7 @@ mod tests {
         );
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], true);
         assert_eq!(default, 0, "BootOrder starts with the USB entry");
-        let default = apply_rules(&mut cards, default, &config, None);
+        let default = apply_rules(&mut cards, default, &config, None, Last::default());
         assert_eq!(titles(&cards), ["EFI USB Device", "first", "Arch (fallback)", "Windows Boot Manager", "Firmware setup"]);
         assert!(cards[0].more);
         assert_eq!(cards[2].kind, "disk");
@@ -639,17 +656,35 @@ mod tests {
         // The firmware's default is under More…: it comes back to the main row.
         let config = config::parse("[[entry]]\nmatch = \"EFI USB Device\"\nmore = true\n");
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], false);
-        assert_eq!(apply_rules(&mut cards, default, &config, None), 0);
+        assert_eq!(apply_rules(&mut cards, default, &config, None, Last::default()), 0);
         assert!(!cards[0].more);
 
         // No rules: unchanged.
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], false);
         let config = Config::default();
-        assert_eq!(apply_rules(&mut cards, 1, &config, None), 1);
+        assert_eq!(apply_rules(&mut cards, 1, &config, None, Last::default()), 1);
         assert_eq!(cards.len(), 4);
         assert_eq!(default, 0);
     }
 
+
+    #[test]
+    fn the_one_started_last() {
+        let options = [option(4, "Linux Boot Manager", true), option(5, "Windows Boot Manager", false)];
+        let sd = loader(0);
+        let windows = config::parse("[[entry]]\nmatch = \"Windows*\"\ndefault = true\n");
+        let gone = config::parse("[[entry]]\nmatch = \"Gone\"\ndefault = true\n");
+        let default = |config: &Config, one_shot, settings, saved| {
+            let (mut cards, default) = build_cards(&options, Some(&sd), &[], false);
+            let last = Last { key: Some("entry:second.conf"), settings, saved };
+            let i = apply_rules(&mut cards, default, config, one_shot, last);
+            cards[i].title.clone()
+        };
+        assert_eq!(default(&windows, None, true, false), "second", "Settings: over the rule");
+        assert_eq!(default(&windows, None, false, true), "Windows Boot Manager", "@saved: under it");
+        assert_eq!(default(&gone, None, false, true), "second", "@saved: the rule's entry isn't there");
+        assert_eq!(default(&windows, Some("first.conf"), true, true), "first", "the one-shot entry first");
+    }
 
     #[test]
     fn one_shot_is_the_default_on_the_main_row() {
@@ -657,10 +692,10 @@ mod tests {
         let sd = loader(0);
         let config = config::parse("[[entry]]\nmatch = \"second.conf\"\nmore = true\n[[entry]]\nmatch = \"Windows*\"\ndefault = true\n");
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], false);
-        assert_eq!(apply_rules(&mut cards, default, &config, Some("second.conf")), 1, "over the rule's default");
+        assert_eq!(apply_rules(&mut cards, default, &config, Some("second.conf"), Last::default()), 1, "over the rule's default");
         assert!(!cards[1].more);
         let (mut cards, default) = build_cards(&options, Some(&sd), &[], false);
-        assert_eq!(apply_rules(&mut cards, default, &config, Some("gone.conf")), 2, "not there: the rule's");
+        assert_eq!(apply_rules(&mut cards, default, &config, Some("gone.conf"), Last::default()), 2, "not there: the rule's");
     }
 
     #[test]
@@ -675,7 +710,7 @@ mod tests {
         let options = [option(1, "Ubuntu", false)];
         let all = [found("macOS 14.5", "apple"), found("Windows", "windows"), found("Fedora", "linux")];
         let (mut cards, default) = build_cards(&options, None, &all, true);
-        let default = apply_rules(&mut cards, default, &Config::default(), None);
+        let default = apply_rules(&mut cards, default, &Config::default(), None, Last::default());
         let placed: Vec<(&str, bool)> = cards.iter().map(|c| (c.title.as_str(), c.more)).collect();
         assert_eq!(
             placed,

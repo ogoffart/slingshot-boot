@@ -16,9 +16,9 @@ mod store;
 mod unlock;
 
 pub use backend::*;
-use cards::{Action, Card, Level, apply_rules, browse_card, build_cards, view};
+use cards::{Action, Card, Last, Level, apply_rules, browse_card, build_cards, view};
 use config::{Config, ICONS, SettingsAccess};
-use store::{commit_config, initial_settings, reset_settings, save_settings};
+use store::{commit_config, initial_settings, reset_settings, save_settings, with_settings};
 pub use hub::*;
 pub use settings::*;
 
@@ -620,6 +620,14 @@ impl State {
     }
 }
 
+/// A dialog, for what mustn't go unnoticed: the footer's status line is
+/// small and short.
+fn show_error(ui: &AppWindow, title: &str, text: &str) {
+    ui.set_error_title(title.into());
+    ui.set_error_text(text.into());
+    ui.set_error_visible(true);
+}
+
 /// Shows `settings` in the theme and the Settings screen.
 fn show_settings(ui: &AppWindow, settings: &Settings) {
     let theme = ui.global::<Theme>();
@@ -644,21 +652,16 @@ fn show_cards(ui: &AppWindow, st: &mut State) {
         st.firmware_setup_supported && st.config.firmware_setup,
     );
     let one_shot = st.loader_entries.as_ref().and_then(|l| l.one_shot.as_deref());
-    st.default_card = apply_rules(&mut cards, default_card, &st.config, one_shot);
-    // Else the one started last, when asked (Settings, or systemd-boot's
-    // `@saved`).
-    let remember = st.settings.remember_last || st.loader_entries.as_ref().is_some_and(|l| l.saved);
     let last = st
         .last_started
         .clone()
         .or_else(|| st.loader_entries.as_ref().and_then(|l| l.last_booted.as_ref()).map(|id| format!("entry:{id}")));
-    let one_shot_shown = one_shot.is_some_and(|id| cards.iter().any(|c| c.id() == Some(id)));
-    if !one_shot_shown
-        && let Some(i) = last.filter(|_| remember).and_then(|key| cards.iter().position(|c| c.key().as_deref() == Some(&key)))
-    {
-        st.default_card = i;
-        cards[i].more = false;
-    }
+    let last = Last {
+        key: last.as_deref(),
+        settings: st.settings.remember_last,
+        saved: st.loader_entries.as_ref().is_some_and(|l| l.saved),
+    };
+    st.default_card = apply_rules(&mut cards, default_card, &st.config, one_shot, last);
     // Starting any file is like the EFI shell: not when Settings are hidden
     // (a locked-down machine); behind the password when they have one.
     if !matches!(st.config.settings_access, SettingsAccess::Hidden) && st.can_browse {
@@ -1392,9 +1395,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                         // the status line is small and short.
                         if let Some(ui) = ui_weak.upgrade() {
                             ui.set_starting_title(SharedString::new());
-                            ui.set_error_title(trf("Couldn't start {}", &[&title]).into());
-                            ui.set_error_text(e.into());
-                            ui.set_error_visible(true);
+                            show_error(&ui, &trf("Couldn't start {}", &[&title]), &e);
                         }
                     }
                 }
@@ -1546,13 +1547,44 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 icon: (customize.get_icon() as usize).checked_sub(1).and_then(|i| ICONS.get(i)).copied(),
                 image: (customize.get_picture() as usize).checked_sub(1).and_then(|i| st.pictures.get(i)).cloned(),
             };
-            let new = config::change_entry(&st.config, &card.match_title, card.id(), card.custom, &change);
+            let mut new = config::change_entry(&st.config, &card.match_title, card.id(), card.custom, &change);
+            // A default newly chosen here (the box is ticked when it already
+            // is): not the one started last any more (Settings), saved in the
+            // same file when settings are.
+            let was_default = ui.global::<BootMenu>().get_default_entry() == index;
+            let last_off = change.default && !was_default && st.settings.remember_last;
+            if last_off {
+                st.settings.remember_last = false;
+                if caps.configure {
+                    new = with_settings(&st, new);
+                }
+            }
             let saved = commit_config(&mut st, &*backend, new, false);
+            let settings_saved = if !last_off || saved.is_err() {
+                Ok(())
+            } else if caps.configure {
+                st.defaults = st.settings;
+                Ok(())
+            } else {
+                save_settings(false, &mut st, &*backend).map(drop)
+            };
+            if last_off {
+                let both = saved.is_ok() && settings_saved.is_ok();
+                st.settings.remember_last = !both;
+                st.settings_dirty &= !both;
+                show_settings(&ui, &st.settings);
+            }
+            // The entry's changes are in slingshot.toml even if the settings
+            // couldn't be saved.
             if saved.is_ok() {
                 show_cards(&ui, &mut st);
             }
             drop(st);
-            show_status(&saved.map_or_else(|e| e, |()| tr("Saved in slingshot.toml")));
+            match saved.and(settings_saved) {
+                Ok(()) => show_status(&tr("Saved in slingshot.toml")),
+                // Not in the footer: something wasn't saved.
+                Err(e) => show_error(&ui, &tr("Couldn't save the changes"), &e),
+            }
         });
     }
     // E: start a Linux entry once with other kernel options.
