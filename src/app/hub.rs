@@ -36,8 +36,8 @@ pub struct Hub {
     /// Called when the pointer diagnostics change.
     pub on_pointer_status: Callback<dyn Fn(&str)>,
     /// Called with how long redrawing the whole screen took, each time it
-    /// does (a large screen, a slow machine: too slow to animate).
-    pub on_full_redraw: Callback<dyn Fn(Duration)>,
+    /// does (a large screen, a slow machine: too slow to animate), and when.
+    pub on_full_redraw: Callback<dyn Fn(Duration, Duration)>,
     /// Called once, after the first frame, when the devices are connected:
     /// whether drivers were started too (file systems they read).
     pub on_devices_connected: Callback<dyn Fn(bool)>,
@@ -77,9 +77,9 @@ impl Hub {
     }
 
     #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
-    pub fn full_redraw(&self, took: Duration) {
+    pub fn full_redraw(&self, took: Duration, at: Duration) {
         if let Some(cb) = &*self.on_full_redraw.borrow() {
-            cb(took);
+            cb(took, at);
         }
     }
 

@@ -93,9 +93,9 @@ pub trait Hooks {
     /// Pointers of these kinds sent something, called each time one more
     /// kind does.
     fn pointer_working(&self, _relative: bool, _absolute: bool) {}
-    /// A frame was drawn: the part of the screen it covered (0 to 1), and
-    /// how long it took.
-    fn frame_drawn(&self, _covered: f32, _took: Duration) {}
+    /// A frame was drawn: the part of the screen it covered (0 to 1), how
+    /// long it took, and when it was done (Slint's time).
+    fn frame_drawn(&self, _covered: f32, _took: Duration, _at: Duration) {}
     /// The first frame is on the screen: slower work can start (in Slint
     /// timers, between frames and input).
     fn first_frame(&self) {}
@@ -303,9 +303,9 @@ impl<H: Hooks> slint::platform::Platform for UefiPlatform<H> {
             window.draw_if_needed(|renderer| {
                 let render_start = self.now();
                 let region = renderer.render(&mut display.fb, display.width);
-                let took = self.now() - render_start;
+                let done = self.now();
                 let covered: usize = region.iter().map(|(_, s)| s.width as usize * s.height as usize).sum();
-                self.hooks.frame_drawn(covered as f32 / (display.width * display.height) as f32, took);
+                self.hooks.frame_drawn(covered as f32 / (display.width * display.height) as f32, done - render_start, done);
                 for (origin, size) in region.iter() {
                     display.blit_from_fb(origin.x as usize, origin.y as usize, size.width as usize, size.height as usize);
                 }

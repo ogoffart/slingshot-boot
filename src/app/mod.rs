@@ -98,13 +98,13 @@ fn use_pointer(hub: &Hub, settings: &Settings) {
     hub.pointer.set(Some((factor, settings.pointer_acceleration)));
 }
 
-/// The screen animations, after the slowest full redraw: off when it's
-/// slower than a frame at slingshot.toml's `animations-fps` (0: always on).
-/// Screens take more or less time to draw: the slowest one's transitions
-/// would stutter, and deciding on each would turn them on and off at every
-/// screen.
+/// The screen animations, after the slowest recent full redraw: off when
+/// it's slower than a frame at slingshot.toml's `animations-fps` (0: always
+/// on). Screens take more or less time to draw: the slowest one's
+/// transitions would stutter, and deciding on each would turn them on and
+/// off at every screen.
 fn update_animations(ui: &AppWindow, st: &mut State) {
-    let Some(took) = st.full_redraw else { return };
+    let Some((took, _)) = st.full_redraw else { return };
     let fps = st.config.animations_fps;
     let slow = fps > 0 && took > Duration::from_secs(1) / u32::from(fps);
     if slow != st.slow_rendering {
@@ -363,9 +363,9 @@ struct State {
     edited: Vec<usize>,
     settings: Settings,
     settings_dirty: bool,
-    /// How long the slowest full redraw took (since the resolution changed),
-    /// and whether that's too slow for the screen animations.
-    full_redraw: Option<Duration>,
+    /// How long the slowest recent full redraw took, and when; whether
+    /// that's too slow for the screen animations.
+    full_redraw: Option<(Duration, Duration)>,
     slow_rendering: bool,
     /// Index in the mode list shown in the Settings resolution picker.
     mode_candidate: usize,
@@ -1818,10 +1818,16 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         }
         {
             let (state, ui_weak) = (state.clone(), ui.as_weak());
-            *hub.on_full_redraw.borrow_mut() = Some(Box::new(move |took| {
+            *hub.on_full_redraw.borrow_mut() = Some(Box::new(move |took, at| {
                 if let Some(ui) = ui_weak.upgrade() {
                     let mut st = state.borrow_mut();
-                    st.full_redraw = st.full_redraw.max(Some(took));
+                    // The slowest of the last 30 s: the machine's speed
+                    // changes (on battery, hot), and a slow screen still
+                    // counts for a while.
+                    let keep = st.full_redraw.is_some_and(|(slowest, when)| slowest >= took && at - when < Duration::from_secs(30));
+                    if !keep {
+                        st.full_redraw = Some((took, at));
+                    }
                     update_animations(&ui, &mut st);
                 }
             }));

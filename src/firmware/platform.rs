@@ -148,9 +148,9 @@ impl Hooks for Slingshot {
     /// A redraw of (nearly) the whole screen, after a mode change or during a
     /// screen transition, says whether full-screen animations can keep up.
     /// The first one is left out: it decodes the images and the glyphs too.
-    fn frame_drawn(&self, covered: f32, took: Duration) {
+    fn frame_drawn(&self, covered: f32, took: Duration, at: Duration) {
         if covered >= 0.9 && self.warmed_up.replace(true) {
-            self.hub.full_redraw(took);
+            self.hub.full_redraw(took, at);
         }
     }
 
