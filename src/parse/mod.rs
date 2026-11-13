@@ -41,11 +41,6 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Overwrites `data` with zeros, in a way the compiler keeps.
-pub fn wipe(data: &mut [u8]) {
-    zeroize::Zeroize::zeroize(data);
-}
-
 /// The architecture in EFI file names: `BOOTX64.EFI`, `systemd-bootaa64.efi`.
 #[cfg(target_arch = "aarch64")]
 pub const EFI_ARCH: &str = "aa64";

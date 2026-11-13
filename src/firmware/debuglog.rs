@@ -26,7 +26,8 @@ struct Buffer {
 // SAFETY: `data` is only touched with `lock` held.
 unsafe impl Sync for Buffer {}
 
-/// The timer when Slingshot started: each line says the milliseconds since.
+/// The `uptime` in ms when Slingshot started: each line says the
+/// milliseconds since.
 static START: AtomicU64 = AtomicU64::new(0);
 
 static BUFFER: Buffer = Buffer { lock: AtomicBool::new(false), data: UnsafeCell::new(Vec::new()) };
@@ -47,11 +48,7 @@ impl Buffer {
 fn write_port(bytes: &[u8]) {
     for b in bytes {
         cfg_select! {
-            target_arch = "x86_64" => {
-                // SAFETY: Writing to the debug console port has no other
-                // effect in QEMU.
-                unsafe { core::arch::asm!("out dx, al", in("dx") 0x402u16, in("al") *b) };
-            }
+            target_arch = "x86_64" => super::port::outb(0x402, *b),
             target_arch = "aarch64" => {
                 // SAFETY: The data register of the PL011 UART of QEMU's
                 // `virt` machine, identity-mapped by the firmware.
@@ -68,8 +65,7 @@ impl log::Log for Logger {
         true
     }
     fn log(&self, record: &log::Record) {
-        let ticks = crate::uefi_platform::timer_tick().saturating_sub(START.load(Ordering::Relaxed));
-        let ms = ticks.saturating_mul(1000) / crate::uefi_platform::timer_freq();
+        let ms = (crate::uefi_platform::uptime().as_millis() as u64).saturating_sub(START.load(Ordering::Relaxed));
         let mut line = alloc::format!("[{ms:>6} ms] [{}] {}: {}\n", record.level(), record.target(), record.args());
         // A line made of what a disk holds (a title, a command line) can be
         // huge: cut, so it never takes the whole buffer.
@@ -99,9 +95,9 @@ impl log::Log for Logger {
 static LOGGER: Logger = Logger;
 
 pub fn init() {
-    START.store(crate::uefi_platform::timer_tick(), Ordering::Relaxed);
-    // Measured now (10 ms), not in the middle of a line.
-    crate::uefi_platform::timer_freq();
+    // The timer's frequency is measured now (10 ms), not in the middle of
+    // a line.
+    START.store(crate::uefi_platform::uptime().as_millis() as u64, Ordering::Relaxed);
     let _ = log::set_logger(&LOGGER);
     log::set_max_level(log::LevelFilter::Info);
 }

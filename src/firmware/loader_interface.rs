@@ -7,6 +7,7 @@
 //! loader) and systemd-gpt-auto-generator (which partition is the ESP).
 
 use alloc::format;
+use core::time::Duration;
 
 use uefi::runtime::{self, VariableAttributes, VariableVendor};
 use uefi::{CStr16, cstr16, guid};
@@ -29,18 +30,11 @@ fn set_string(name: &CStr16, value: &str) {
     set(name, &crate::parse::ucs2_bytes(value));
 }
 
-/// `ticks` of the platform's timer (the time stamp counter on x86) in
-/// microseconds since the processor started, as systemd-boot measures
-/// them: `LoaderTimeInitUSec` and `LoaderTimeExecUSec`.
-fn usec(ticks: u64) -> u64 {
-    (u128::from(ticks) * 1_000_000 / u128::from(crate::uefi_platform::timer_freq())) as u64
-}
-
 /// Once the firmware is ready (the image's device path can be read):
 /// what Slingshot is, where it was started from, what it supports.
-/// `started` is the timer when Slingshot started.
-pub fn announce(started: u64, own_fs_device_path: &[u8], own_file: &str) {
-    set_string(cstr16!("LoaderTimeInitUSec"), &format!("{}", usec(started)));
+/// `started` is the `uptime` when Slingshot started.
+pub fn announce(started: Duration, own_fs_device_path: &[u8], own_file: &str) {
+    set_string(cstr16!("LoaderTimeInitUSec"), &format!("{}", started.as_micros()));
     set_string(cstr16!("LoaderInfo"), concat!("Slingshot ", env!("CARGO_PKG_VERSION")));
     let vendor = alloc::string::String::from_utf16_lossy(uefi::system::firmware_vendor().to_u16_slice());
     set_string(cstr16!("LoaderFirmwareInfo"), &li::firmware_info(&vendor, uefi::system::firmware_revision()));
@@ -66,7 +60,7 @@ pub fn starting(entry: Option<&str>) {
     if let Some(id) = entry {
         set_string(cstr16!("LoaderEntrySelected"), id);
     }
-    set_string(cstr16!("LoaderTimeExecUSec"), &format!("{}", usec(crate::uefi_platform::timer_tick())));
+    set_string(cstr16!("LoaderTimeExecUSec"), &format!("{}", crate::uefi_platform::uptime().as_micros()));
 }
 
 /// `LoaderEntryOneShot` (`bootctl reboot --boot-loader-entry`, `systemctl

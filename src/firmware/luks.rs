@@ -337,8 +337,8 @@ impl Luks {
         let attempt = Box::into_raw(attempt);
         self.in_flight.set(attempt);
         let in_flight = self.in_flight.clone();
-        let started = crate::uefi_platform::timer_tick();
-        let took = move || (crate::uefi_platform::timer_tick() - started) * 1000 / crate::uefi_platform::timer_freq();
+        let started = crate::uefi_platform::uptime();
+        let took = move || (crate::uefi_platform::uptime() - started).as_millis();
         let events = start_on_other_processors(attempt, lanes);
         let timer = Rc::downgrade(&self.timer);
         let mut finish = Some(finish);
@@ -469,7 +469,7 @@ fn describe(e: &luks::Error) -> String {
 /// dropped: nothing is typed while checking). Asked at most every 50 ms:
 /// `last` is when it was, in ms.
 fn escape_pressed(last: &Cell<u64>) -> bool {
-    let now = crate::uefi_platform::timer_tick() * 1000 / crate::uefi_platform::timer_freq();
+    let now = crate::uefi_platform::uptime().as_millis() as u64;
     if now.saturating_sub(last.get()) < 50 {
         return false;
     }
@@ -961,7 +961,7 @@ fn wipe_data() {
     let (data, len) = (DATA.swap(core::ptr::null_mut(), Ordering::AcqRel), LEN.swap(0, Ordering::AcqRel));
     if !data.is_null() {
         // SAFETY: `Handoff` keeps the buffer alive while DATA points to it.
-        crate::parse::wipe(unsafe { core::slice::from_raw_parts_mut(data, len) });
+        zeroize::Zeroize::zeroize(unsafe { core::slice::from_raw_parts_mut(data, len) });
     }
 }
 

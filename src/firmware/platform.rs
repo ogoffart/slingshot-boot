@@ -16,7 +16,7 @@ use uefi::boot;
 use uefi::proto::console::pointer::{AbsolutePointer, Pointer};
 
 use crate::app::{Hub, scale_factor_for};
-use crate::uefi_platform::{Hooks, PointerReport, timer_freq, timer_tick};
+use crate::uefi_platform::{Hooks, PointerReport, uptime};
 
 pub struct Slingshot {
     hub: Rc<Hub>,
@@ -60,9 +60,9 @@ impl Slingshot {
 /// on some machines) a slice of about 10 ms at a time, between frames and
 /// input: then the mice and the touchpad they make available, and the app
 /// rescans the disks.
-fn connect(mut connecting: super::Connecting, started: u64, hub: Rc<Hub>, pointers: Rc<Pointers>) {
-    let slice = timer_tick();
-    if !connecting.step(|| (timer_tick() - slice) * 1000 / timer_freq() >= 10) {
+fn connect(mut connecting: super::Connecting, started: Duration, hub: Rc<Hub>, pointers: Rc<Pointers>) {
+    let slice = uptime();
+    if !connecting.step(|| uptime() - slice >= Duration::from_millis(10)) {
         slint::Timer::single_shot(Duration::ZERO, move || connect(connecting, started, hub, pointers));
         return;
     }
@@ -73,7 +73,7 @@ fn connect(mut connecting: super::Connecting, started: u64, hub: Rc<Hub>, pointe
     }
     log::info!(
         "devices connected in {} ms, USB mice read by Slingshot: {}",
-        (timer_tick() - started) * 1000 / timer_freq(),
+        (uptime() - started).as_millis(),
         pointers.usb.borrow().len()
     );
     report_pointer_handles(&hub, "once connected");
@@ -156,6 +156,6 @@ impl Hooks for Slingshot {
 
     /// The menu is on the screen: now the drivers and the other devices.
     fn first_frame(&self) {
-        connect(super::Connecting::start(), timer_tick(), self.hub.clone(), self.pointers.clone());
+        connect(super::Connecting::start(), uptime(), self.hub.clone(), self.pointers.clone());
     }
 }

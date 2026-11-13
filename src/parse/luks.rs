@@ -21,8 +21,7 @@ use alloc::vec::Vec;
 use base64::Engine;
 use serde_json::Value;
 use sha2::Digest;
-
-use super::wipe;
+use zeroize::Zeroize;
 
 const MAGIC: &[u8; 6] = b"LUKS\xba\xbe";
 
@@ -317,8 +316,8 @@ fn pbkdf2_with<M: hmac::Mac + Clone>(prf: M, salt: &[u8], iterations: u32, out: 
             }
         }
         chunk.copy_from_slice(&block[..chunk.len()]);
-        wipe(&mut u);
-        wipe(&mut block);
+        u.zeroize();
+        block.zeroize();
         if result.is_err() {
             break;
         }
@@ -415,7 +414,7 @@ fn diffuse<H: Digest>(d: &mut [u8]) {
         h.update(&*block);
         let mut out = h.finalize();
         block.copy_from_slice(&out[..block.len()]);
-        wipe(&mut out);
+        out.zeroize();
     }
 }
 
@@ -533,9 +532,9 @@ impl Attempt {
         });
         self.result = Some(result.unwrap_or(Err(Error::WrongPassphrase)));
         // The derived keys and Argon2's memory are no longer needed.
-        wipe(&mut self.key);
-        wipe(&mut self.passphrase);
-        self.blocks.iter_mut().for_each(zeroize::Zeroize::zeroize);
+        self.key[..].zeroize();
+        self.passphrase[..].zeroize();
+        self.blocks.iter_mut().for_each(Zeroize::zeroize);
     }
 
     /// `run` on this processor, stopping between segments too.
@@ -565,7 +564,7 @@ impl Attempt {
         decrypt_area(key, material)?;
         let candidate = &mut self.candidate[..slot.key_size];
         af_merge(material, candidate, slot.stripes, &slot.af_hash);
-        wipe(material);
+        material[..].zeroize();
         for digest in self.digests.iter().filter(|d| d.keyslots.contains(&slot.id)) {
             let out = &mut self.digest[..digest.digest.len()];
             pbkdf2(&digest.hash, candidate, &digest.salt, digest.iterations, out, stop)?;
@@ -588,11 +587,11 @@ impl Attempt {
 
 impl Drop for Attempt {
     fn drop(&mut self) {
-        wipe(&mut self.passphrase);
-        wipe(&mut self.key);
-        wipe(&mut self.candidate);
+        self.passphrase.zeroize();
+        self.key.zeroize();
+        self.candidate.zeroize();
         for (_, material) in &mut self.slots {
-            wipe(material);
+            material.zeroize();
         }
     }
 }

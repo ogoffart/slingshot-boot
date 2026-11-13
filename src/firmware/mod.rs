@@ -20,6 +20,10 @@ mod measure;
 mod luks;
 mod nvram;
 mod platform;
+// Without the battery feature, only the debug console's `outb` is used.
+#[cfg(all(target_arch = "x86_64", any(feature = "battery", feature = "debugcon")))]
+#[cfg_attr(not(feature = "battery"), allow(dead_code))]
+mod port;
 mod sdboot;
 mod secureboot;
 mod sysinfo;
@@ -741,7 +745,7 @@ impl Backend for UefiBackend {
 
 pub fn main() -> Status {
     // Before anything else takes some time.
-    let started = crate::uefi_platform::timer_tick();
+    let started = crate::uefi_platform::uptime();
     // The firmware resets the machine after 5 minutes unless the watchdog
     // is disabled.
     let _ = uefi::boot::set_watchdog_timer(0, 0x10000, None);

@@ -268,7 +268,7 @@ impl Cpio {
         }
         let mut bigger = Vec::with_capacity((self.data.len() + extra).max(2 * self.data.capacity()));
         bigger.extend_from_slice(&self.data);
-        super::wipe(&mut self.data);
+        zeroize::Zeroize::zeroize(&mut self.data);
         self.data = bigger;
     }
 

@@ -30,6 +30,7 @@ use acpi::aml::resource::{MemoryRangeDescriptor, Resource, SerialBus};
 
 use super::battery::acpi::Acpi;
 use super::i2c::{self, I2c, Timing};
+use super::port::{inl, outl, pci_select};
 use crate::parse::battery::acpi::AmlValue;
 use crate::parse::hid::{self, MouseLayout, MouseReport, TouchLayout};
 
@@ -63,24 +64,13 @@ fn hex(data: &[u8]) -> String {
 }
 
 // PCI configuration space, segment 0, through the legacy ports.
-fn pci_address(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
-    0x8000_0000 | (bus as u32) << 16 | (device as u32) << 11 | (function as u32) << 8 | (offset as u32 & 0xfc)
-}
 fn pci_read(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
-    let v: u32;
-    // SAFETY: The PCI configuration ports.
-    unsafe {
-        core::arch::asm!("out dx, eax", in("dx") 0xcf8u16, in("eax") pci_address(bus, device, function, offset), options(nomem, nostack));
-        core::arch::asm!("in eax, dx", out("eax") v, in("dx") 0xcfcu16, options(nomem, nostack));
-    }
-    v
+    pci_select(bus, device, function, offset);
+    inl(0xcfc)
 }
 fn pci_write(bus: u8, device: u8, function: u8, offset: u8, value: u32) {
-    // SAFETY: As above.
-    unsafe {
-        core::arch::asm!("out dx, eax", in("dx") 0xcf8u16, in("eax") pci_address(bus, device, function, offset), options(nomem, nostack));
-        core::arch::asm!("out dx, eax", in("dx") 0xcfcu16, in("eax") value, options(nomem, nostack));
-    }
+    pci_select(bus, device, function, offset);
+    outl(0xcfc, value);
 }
 
 /// The controller's registers: a memory range in its `_CRS` (AMD), else

@@ -39,7 +39,7 @@ use uefi_raw::protocol::console::KeyShiftState;
 use display::{Cursor, Display, DisplayMode};
 use input::{Keyboard, Pointers};
 pub use input::PointerReport;
-pub use timer::{timer_freq, timer_tick};
+pub use timer::uptime;
 
 /// What a notch of the mouse wheel scrolls, in logical pixels: about three
 /// lines, like desktops (positive: toward the top).
@@ -104,8 +104,8 @@ pub trait Hooks {
 pub struct UefiPlatform<H> {
     window: Rc<MinimalSoftwareWindow>,
     hooks: H,
-    timer_freq: f64,
-    timer_start: u64,
+    /// `uptime` when the platform was made: Slint's time starts there.
+    start: Duration,
 }
 
 impl<H: Hooks> UefiPlatform<H> {
@@ -113,8 +113,7 @@ impl<H: Hooks> UefiPlatform<H> {
         Self {
             window: MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer),
             hooks,
-            timer_freq: timer_freq() as f64,
-            timer_start: timer_tick(),
+            start: uptime(),
         }
     }
 
@@ -211,7 +210,7 @@ impl<H: Hooks> slint::platform::Platform for UefiPlatform<H> {
     }
 
     fn duration_since_start(&self) -> Duration {
-        Duration::from_secs_f64((timer_tick() - self.timer_start) as f64 / self.timer_freq)
+        uptime() - self.start
     }
 
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {

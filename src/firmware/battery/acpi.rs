@@ -30,7 +30,8 @@ use uefi::runtime;
 use uefi::table::cfg::ConfigTableEntry;
 
 use super::super::nvram::VENDOR;
-use crate::uefi_platform::{timer_freq, timer_tick};
+use super::super::port::{self, inb, inl, inw, outb, outl, outw};
+use crate::uefi_platform::uptime;
 use super::{NO_PROBE, PROBING};
 use crate::parse::battery::Power;
 use crate::parse::battery::acpi::{self as battery, AmlValue};
@@ -38,38 +39,6 @@ use crate::parse::battery::acpi::{self as battery, AmlValue};
 /// Where EC regions are moved to: above any physical address.
 const EC_BASE: usize = 0xec00_0000_0000_0000;
 const EC_SIZE: usize = 0x100;
-
-// x86 port I/O.
-fn inb(port: u16) -> u8 {
-    let v: u8;
-    // SAFETY: Port reads the AML asks for; the firmware owns the hardware.
-    unsafe { core::arch::asm!("in al, dx", out("al") v, in("dx") port, options(nomem, nostack)) };
-    v
-}
-fn inw(port: u16) -> u16 {
-    let v: u16;
-    // SAFETY: As above.
-    unsafe { core::arch::asm!("in ax, dx", out("ax") v, in("dx") port, options(nomem, nostack)) };
-    v
-}
-fn inl(port: u16) -> u32 {
-    let v: u32;
-    // SAFETY: As above.
-    unsafe { core::arch::asm!("in eax, dx", out("eax") v, in("dx") port, options(nomem, nostack)) };
-    v
-}
-fn outb(port: u16, v: u8) {
-    // SAFETY: Port writes the AML asks for.
-    unsafe { core::arch::asm!("out dx, al", in("dx") port, in("al") v, options(nomem, nostack)) };
-}
-fn outw(port: u16, v: u16) {
-    // SAFETY: As above.
-    unsafe { core::arch::asm!("out dx, ax", in("dx") port, in("ax") v, options(nomem, nostack)) };
-}
-fn outl(port: u16, v: u32) {
-    // SAFETY: As above.
-    unsafe { core::arch::asm!("out dx, eax", in("dx") port, in("eax") v, options(nomem, nostack)) };
-}
 
 /// The embedded controller's ports (ACPI spec, section 12).
 #[derive(Clone, Copy)]
@@ -279,7 +248,7 @@ impl Handler for Host {
     }
 
     fn nanos_since_boot(&self) -> u64 {
-        (timer_tick() as u128 * 1_000_000_000 / timer_freq() as u128) as u64
+        uptime().as_nanos() as u64
     }
     fn stall(&self, microseconds: u64) {
         uefi::boot::stall(Duration::from_micros(microseconds));
@@ -307,12 +276,7 @@ fn pci_select(address: PciAddress, offset: u16) -> bool {
     if address.segment() != 0 || offset >= 256 {
         return false;
     }
-    let config_address = 0x8000_0000
-        | (address.bus() as u32) << 16
-        | (address.device() as u32) << 11
-        | (address.function() as u32) << 8
-        | (offset as u32 & 0xfc);
-    outl(0xcf8, config_address);
+    port::pci_select(address.bus(), address.device(), address.function(), offset as u8);
     true
 }
 
