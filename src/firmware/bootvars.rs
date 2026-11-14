@@ -134,6 +134,9 @@ pub fn visible_boot_options(entries: &[OrderEntry], current: Option<u16>, own_fi
         .map(|(d, path)| {
             use crate::parse::load_option::{is_on_device, is_usb_device};
             let absent = is_usb_device(path) && !devices.iter().any(|dev| is_on_device(path, dev));
+            if absent {
+                log::info!("Boot{:04X}: its USB disk isn't there", d.option.number);
+            }
             BootOption { absent, ..d.option.clone() }
         })
         .collect()

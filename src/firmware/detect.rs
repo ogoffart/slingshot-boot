@@ -77,7 +77,7 @@ impl Texts {
 fn removable(handle: uefi::Handle, fs: &[u8], devices: &[Vec<u8>]) -> Option<(FoundEntry, Texts)> {
     use uefi::proto::media::block::BlockIO;
     let block = crate::uefi_platform::open_shared::<BlockIO>(handle)?;
-    if !block.media().is_removable_media() && !crate::parse::load_option::is_usb_device(&usb_part(fs)) {
+    if !block.media().is_removable_media() && !crate::parse::load_option::is_usb_device(fs) {
         return None;
     }
     if devices.iter().any(|d| crate::parse::load_option::is_on_device(d, fs)) || !super::dir::exists(handle, REMOVABLE_PROGRAM) {
@@ -89,27 +89,6 @@ fn removable(handle: uefi::Handle, fs: &[u8], devices: &[Vec<u8>]) -> Option<(Fo
     texts.apply(&mut entry);
     log::info!("found a removable disk: {}", entry.subtitle);
     Some((entry, texts))
-}
-
-/// The nodes of `fs` up to its USB node, for [`is_usb_device`].
-///
-/// [`is_usb_device`]: crate::parse::load_option::is_usb_device
-fn usb_part(fs: &[u8]) -> Vec<u8> {
-    let mut dp = fs;
-    let mut out = Vec::new();
-    while dp.len() >= 4 {
-        let len = usize::from(u16::from_le_bytes([dp[2], dp[3]]));
-        if len < 4 || len > dp.len() || (dp[0], dp[1]) == (0x7f, 0xff) {
-            break;
-        }
-        out.extend_from_slice(&dp[..len]);
-        if (dp[0], dp[1]) == (0x03, 0x05) {
-            break;
-        }
-        dp = &dp[len..];
-    }
-    out.extend_from_slice(&[0x7f, 0xff, 4, 0]);
-    out
 }
 
 /// What the file systems can start, except what the firmware's and

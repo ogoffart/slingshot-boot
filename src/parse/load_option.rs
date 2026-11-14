@@ -143,13 +143,15 @@ pub fn parse_load_option(number: u16, data: &[u8]) -> Option<Described> {
     }
     let attributes = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
     let (description, desc_len) = ucs2_until_nul(&data[6..]);
-    log::info!("Boot{number:04X}: attributes={attributes:#x} {description:?}");
-    if attributes & LOAD_OPTION_ACTIVE == 0 || attributes & LOAD_OPTION_HIDDEN != 0 {
-        return None;
-    }
     let path_len = u16::from_le_bytes([data[4], data[5]]) as usize;
     let path_start = 6 + desc_len;
     let path = data.get(path_start..(path_start + path_len).min(data.len())).unwrap_or(&[]);
+    // The nodes' type/subtype: what shapes of paths the firmware writes.
+    let kinds: Vec<String> = nodes(path).iter().map(|n| format!("{:x}/{:x}", n.0, n.1)).collect();
+    log::info!("Boot{number:04X}: attributes={attributes:#x} {description:?} path {}", kinds.join(" "));
+    if attributes & LOAD_OPTION_ACTIVE == 0 || attributes & LOAD_OPTION_HIDDEN != 0 {
+        return None;
+    }
     let info = parse_device_path(path);
     Some(describe(number, &description, &info))
 }
@@ -181,6 +183,11 @@ pub(crate) fn nodes(mut dp: &[u8]) -> Vec<(u8, u8, &[u8])> {
         dp = &dp[len..];
     }
     result
+}
+
+/// The nodes of a device path before its file, if it names one: the device.
+fn device_nodes(dp: &[u8]) -> Vec<(u8, u8, &[u8])> {
+    nodes(dp).into_iter().take_while(|n| (n.0, n.1) != (0x04, 0x04)).collect()
 }
 
 // Chainloading (firmware only); built on the desktop for the tests.
@@ -337,32 +344,30 @@ const END_NODE: [u8; 4] = [0x7f, 0xff, 4, 0];
 /// A path with only a file can't tell: true.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
 pub fn is_on_file_system(entry: &[u8], fs: &[u8]) -> bool {
-    let entry = nodes(entry);
-    let device: Vec<&(u8, u8, &[u8])> = entry.iter().take_while(|n| (n.0, n.1) != (0x04, 0x04)).collect();
+    let device = device_nodes(entry);
     let fs = nodes(fs);
     match device.first() {
         None => true,
-        Some(&&(0x04, 0x01, hd)) => fs.iter().any(|n| (n.0, n.1) == (0x04, 0x01) && n.2 == hd),
+        Some(&(0x04, 0x01, hd)) => fs.iter().any(|n| (n.0, n.1) == (0x04, 0x01) && n.2 == hd),
         Some(_) => device.len() == fs.len() && device.iter().zip(&fs).all(|(a, b)| a.2 == b.2),
     }
 }
 
-/// Whether a whole-device load option (no file, as firmware creates for
-/// removable disks) is the device `path` (a file system's or a disk's) is
-/// on: its nodes start `path`'s.
+/// Whether a load option's device (its nodes before the file, if it names
+/// one) is the device `path` (a file system's or a disk's) is on: its nodes
+/// start `path`'s.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
 pub fn is_on_device(option: &[u8], path: &[u8]) -> bool {
-    let device = nodes(option);
+    let device = device_nodes(option);
     let path = nodes(path);
     !device.is_empty() && device.len() <= path.len() && device.iter().zip(&path).all(|(a, b)| a.2 == b.2)
 }
 
-/// A whole USB device (no file): a removable disk the firmware listed at
-/// startup, which can go away.
+/// On a USB device, whole or a file on it: a removable disk the firmware
+/// listed at startup, which can go away.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]
 pub fn is_usb_device(option: &[u8]) -> bool {
-    let n = nodes(option);
-    n.iter().any(|n| (n.0, n.1) == (0x03, 0x05)) && !n.iter().any(|n| (n.0, n.1) == (0x04, 0x04))
+    nodes(option).iter().any(|n| (n.0, n.1) == (0x03, 0x05))
 }
 
 /// The data of a new, active `Boot####` variable that starts `device_path`.
@@ -434,6 +439,10 @@ mod tests {
         assert!(is_on_device(&disk, &fs));
         assert!(!is_on_device(&fs, &disk));
         assert!(!is_on_device(&END_NODE, &fs));
+        // A file's option is on its partition, as Dell writes them for USB
+        // sticks.
+        assert!(is_on_device(&path, &fs));
+        assert!(!is_on_device(&path, &disk));
         assert!(is_on_file_system(&file_device_path(&fs[16..], "\\x.efi"), &fs));
         assert!(is_on_file_system(&file_device_path(&END_NODE, "\\x.efi"), &fs));
         let mut other = fs.clone();
