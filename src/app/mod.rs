@@ -833,7 +833,7 @@ fn update_system_info(ui: &AppWindow, backend: &dyn Backend, hub: &Hub) {
             (u.usable, Color::from_rgb_u8(0x5b, 0x8c, 0xff)),
             (u.runtime, Color::from_rgb_u8(0x2f, 0xb6, 0xa3)),
             (u.acpi, Color::from_rgb_u8(0xe5, 0x8a, 0x3a)),
-            (u.reserved, Color::from_rgb_u8(0x6b, 0x73, 0x90)),
+            (u.reserved, Color::from_rgb_u8(0x75, 0x75, 0x75)),
         ];
         let model: Vec<MemorySegment> = segments
             .iter()

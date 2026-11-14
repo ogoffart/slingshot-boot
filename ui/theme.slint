@@ -33,18 +33,18 @@ export global Theme {
     in-out property <length> window-height;
 
     // Per theme, in the order of `theme-names`.
-    out property <[color]> backgrounds:    [#0e1220, #f3f5fa];
-    out property <[color]> surfaces:       [#151a2b, #ffffff];
-    property <[color]> raised:         [#1b2136, #eef1f8];
-    property <[color]> strongs:        [#26304d, #dfe5f2];
-    property <[color]> wells:          [#1e2540, #e8edf7];
-    property <[color]> borders:        [#252c44, #d9dfeb];
-    property <[color]> borders-strong: [#2e3756, #c5cede];
-    property <[color]> dividers:       [#222943, #dde2ee];
-    property <[color]> texts:          [#e8ecf5, #141a2c];
-    property <[color]> texts-strong:   [#ffffff, #0b1020];
-    out property <[color]> texts-muted:    [#a7b0c4, #566079];
-    property <[color]> texts-soft:     [#c9d0e0, #3b4560];
+    out property <[color]> backgrounds:    [#111111, #f4f4f4];
+    out property <[color]> surfaces:       [#181818, #ffffff];
+    property <[color]> raised:         [#1f1f1f, #f0f0f0];
+    property <[color]> strongs:        [#2c2c2c, #e2e2e2];
+    property <[color]> wells:          [#232323, #ebebeb];
+    property <[color]> borders:        [#2a2a2a, #dcdcdc];
+    property <[color]> borders-strong: [#363636, #c8c8c8];
+    property <[color]> dividers:       [#262626, #e0e0e0];
+    property <[color]> texts:          [#ececec, #161616];
+    property <[color]> texts-strong:   [#ffffff, #0c0c0c];
+    out property <[color]> texts-muted:    [#a9a9a9, #5e5e5e];
+    property <[color]> texts-soft:     [#cfcfcf, #404040];
     property <int> t: theme-index >= 0 && theme-index < theme-names.length ? theme-index : 0;
 
     out property <color> background: backgrounds[t];
@@ -68,13 +68,13 @@ export global Theme {
     out property <color> focus-well: accent.mix(base, dark ? 28% : 30%);
     out property <color> focus-track: accent.mix(base, dark ? 30% : 37%);
     out property <color> badge-fill: accent.mix(base, dark ? 32% : 27%);
-    out property <color> badge-text: dark ? accent.mix(#ffffff, 30%) : accent.mix(#0b1020, 45%);
-    out property <color> on-accent: #0b1020;
+    out property <color> badge-text: accent.mix(text-strong, dark ? 30% : 45%);
+    out property <color> on-accent: #0c0c0c;
 
     out property <color> good: dark ? #4cc38a : #1e8a55;
     out property <color> danger: dark ? #f29b8b : #b8402a;
     out property <color> orange: #e58a3a;
-    out property <color> grey: #6b7390;
+    out property <color> grey: #757575;
 
     // How the boot entries are drawn (`STYLES` in settings.rs): cards,
     // cards with colorful icons, flat (no cards), or a classic list.
@@ -83,15 +83,15 @@ export global Theme {
     // Colorful: each kind of entry has its color, from light to deep.
     public pure function kind-light(kind: string) -> color {
         kind == "linux" ? #ffbf4d : kind == "windows" ? #56a8ff : kind == "usb" ? #b99bff
-            : kind == "network" ? #4fe0a6 : kind == "shell" ? #8b9ab3 : kind == "disc" ? #ff8cc6
-            : kind == "app" ? #45ddf0 : kind == "power" ? #ff8a80 : kind == "sliders" ? #a9b6cc
-            : kind == "folder" ? #ffd25e : #9aa3b8
+            : kind == "network" ? #4fe0a6 : kind == "shell" ? #9a9a9a : kind == "disc" ? #ff8cc6
+            : kind == "app" ? #45ddf0 : kind == "power" ? #ff8a80 : kind == "sliders" ? #b4b4b4
+            : kind == "folder" ? #ffd25e : #a3a3a3
     }
     public pure function kind-deep(kind: string) -> color {
         kind == "linux" ? #e8711c : kind == "windows" ? #1c5fe0 : kind == "usb" ? #7039e0
-            : kind == "network" ? #0a9466 : kind == "shell" ? #3a465c : kind == "disc" ? #d6286f
-            : kind == "app" ? #0a89a8 : kind == "power" ? #d42f2f : kind == "sliders" ? #56637a
-            : kind == "folder" ? #e08a0b : #5d667d
+            : kind == "network" ? #0a9466 : kind == "shell" ? #444444 : kind == "disc" ? #d6286f
+            : kind == "app" ? #0a89a8 : kind == "power" ? #d42f2f : kind == "sliders" ? #606060
+            : kind == "folder" ? #e08a0b : #666666
     }
 
     out property <length> radius-card: 18px;
