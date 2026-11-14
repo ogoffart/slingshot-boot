@@ -94,7 +94,8 @@ pub trait Hooks {
     /// kind does.
     fn pointer_working(&self, _relative: bool, _absolute: bool) {}
     /// A frame was drawn: the part of the screen it covered (0 to 1), how
-    /// long it took, and when it was done (Slint's time).
+    /// long it took to draw and copy to the screen, and when it was done
+    /// (Slint's time).
     fn frame_drawn(&self, _covered: f32, _took: Duration, _at: Duration) {}
     /// The first frame is on the screen: slower work can start (in Slint
     /// timers, between frames and input).
@@ -127,6 +128,7 @@ impl<H: Hooks> UefiPlatform<H> {
         self.hooks.mode_changed(&self.window, display.width, display.height);
         *scale = self.window.scale_factor();
         self.window.set_size(PhysicalSize::new(display.width as u32, display.height as u32));
+        log::info!("display: {}×{}, scale factor {scale}", display.width, display.height);
     }
 
     /// Switches to the mode of the size the application gave the window
@@ -238,6 +240,7 @@ impl<H: Hooks> slint::platform::Platform for UefiPlatform<H> {
             moving: false,
         };
         let mut first_frame = false;
+        let mut slowest_frame = Duration::ZERO;
         // SAFETY: No callback. Never closed: the event loop doesn't end.
         let mut timer = unsafe { boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None) }.ok();
 
@@ -302,12 +305,25 @@ impl<H: Hooks> slint::platform::Platform for UefiPlatform<H> {
             window.draw_if_needed(|renderer| {
                 let render_start = self.now();
                 let region = renderer.render(&mut display.fb, display.width);
-                let done = self.now();
-                let covered: usize = region.iter().map(|(_, s)| s.width as usize * s.height as usize).sum();
-                self.hooks.frame_drawn(covered as f32 / (display.width * display.height) as f32, done - render_start, done);
+                let rendered = self.now();
                 for (origin, size) in region.iter() {
                     display.blit_from_fb(origin.x as usize, origin.y as usize, size.width as usize, size.height as usize);
                 }
+                let done = self.now();
+                let took = done - render_start;
+                let covered: usize = region.iter().map(|(_, s)| s.width as usize * s.height as usize).sum();
+                let covered = covered as f32 / (display.width * display.height) as f32;
+                // The slowest full frame yet, for the bug reports: drawing
+                // and copying to the screen (the firmware's, can be slow).
+                if covered >= 0.9 && took > slowest_frame {
+                    slowest_frame = took;
+                    log::info!(
+                        "display: full frame: drawn in {} ms, copied to the screen in {} ms",
+                        (rendered - render_start).as_millis(),
+                        (done - rendered).as_millis()
+                    );
+                }
+                self.hooks.frame_drawn(covered, took, done);
                 redrawn = true;
             });
             if redrawn || cursor_moved {
