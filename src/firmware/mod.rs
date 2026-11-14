@@ -103,34 +103,76 @@ fn load_drivers() -> usize {
 /// systems readable, and boot entries appear).
 ///
 /// A slice at a time ([`Connecting::step`]): the event loop draws and reads
-/// the keys in between, so the menu and its countdown don't freeze.
+/// the keys in between, so the menu and its countdown don't freeze. Each
+/// handle is connected without its children (a recursive connect of the
+/// PCI root bridge would do the whole machine in one call), and the handles
+/// that appeared are connected next, until no new ones appear.
 pub(super) struct Connecting {
+    /// The handles to connect, up to `next` done.
     handles: Vec<uefi::Handle>,
     next: usize,
+    /// Every handle seen, sorted: to find the new ones.
+    seen: Vec<uefi::Handle>,
     /// Drivers were started.
     pub drivers: bool,
+}
+
+/// All the handles there are now, sorted.
+fn all_handles() -> Vec<uefi::Handle> {
+    let mut handles: Vec<uefi::Handle> = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::AllHandles)
+        .map(|h| h.iter().copied().collect())
+        .unwrap_or_default();
+    handles.sort_unstable_by_key(|h| h.as_ptr());
+    handles
 }
 
 impl Connecting {
     /// Starts the drivers, then lists the handles to connect.
     pub(super) fn start() -> Self {
         let drivers = load_drivers() > 0;
-        let handles = uefi::boot::locate_handle_buffer(uefi::boot::SearchType::AllHandles)
-            .map(|h| h.iter().copied().collect())
-            .unwrap_or_default();
-        Connecting { handles, next: 0, drivers }
+        let handles = all_handles();
+        Connecting { seen: handles.clone(), handles, next: 0, drivers }
     }
 
     /// Connects handles until `enough` says so; whether all are done.
     pub(super) fn step(&mut self, enough: impl Fn() -> bool) -> bool {
-        while let Some(handle) = self.handles.get(self.next) {
-            let _ = uefi::boot::connect_controller(*handle, &[], None, true);
+        loop {
+            let Some(&handle) = self.handles.get(self.next) else {
+                // The children the drivers made.
+                let all = all_handles();
+                let new: Vec<uefi::Handle> =
+                    all.iter().copied().filter(|h| self.seen.binary_search_by_key(&h.as_ptr(), |s| s.as_ptr()).is_err()).collect();
+                if new.is_empty() {
+                    return true;
+                }
+                self.seen = all;
+                self.handles = new;
+                self.next = 0;
+                continue;
+            };
             self.next += 1;
+            let dp = crate::uefi_platform::open_shared::<uefi::proto::device_path::DevicePath>(handle);
+            // A network card's stack waits seconds for the link (Dell's):
+            // its entries start through the firmware, after a reset, which
+            // connects it.
+            if let Some(dp) = &dp
+                && crate::parse::load_option::parse_device_path(dp.as_bytes()).mac
+            {
+                log::info!("not connected at startup: {}", &**dp);
+                continue;
+            }
+            let start = crate::uefi_platform::uptime();
+            let _ = uefi::boot::connect_controller(handle, &[], None, false);
+            let took = crate::uefi_platform::uptime() - start;
+            // What makes the start slow, for the bug reports.
+            if took >= Duration::from_millis(50) {
+                let path = dp.map_or_else(|| String::from("no device path"), |dp| format!("{}", &*dp));
+                log::info!("connecting {path} took {} ms", took.as_millis());
+            }
             if enough() {
-                break;
+                return false;
             }
         }
-        self.next >= self.handles.len()
     }
 }
 
