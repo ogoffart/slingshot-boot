@@ -77,7 +77,19 @@ impl Display {
         let gop = open_shared::<GraphicsOutput>(handle)
             .ok_or_else(|| slint::PlatformError::Other("Cannot open GOP".into()))?;
         let (width, height) = gop.current_mode_info().resolution();
-        Ok(Display { gop, width, height, fb: vec![Pixel(BltPixel::new(0, 0, 0)); width * height] })
+        let mut display = Display { gop, width, height, fb: vec![Pixel(BltPixel::new(0, 0, 0)); width * height] };
+        display.write_combining();
+        Ok(display)
+    }
+
+    /// Makes the current mode's framebuffer write-combining (x86), when
+    /// the firmware gives its address.
+    fn write_combining(&mut self) {
+        #[cfg(target_arch = "x86_64")]
+        if self.gop.current_mode_info().pixel_format() != uefi::proto::console::gop::PixelFormat::BltOnly {
+            let mut fb = self.gop.frame_buffer();
+            super::write_combining::enable(fb.as_mut_ptr() as u64, fb.size() as u64);
+        }
     }
 
     /// The modes, without duplicates, smallest first.
@@ -116,6 +128,7 @@ impl Display {
         self.width = w;
         self.height = h;
         self.fb = vec![Pixel(BltPixel::new(0, 0, 0)); w * h];
+        self.write_combining();
         true
     }
 
@@ -130,8 +143,9 @@ impl Display {
     pub fn restore(&mut self, modes: &[DisplayMode]) {
         if self.mode_lost()
             && let Some(mode) = modes.iter().find(|m| m.width == self.width && m.height == self.height)
+            && self.gop.set_mode(&mode.mode).is_ok()
         {
-            let _ = self.gop.set_mode(&mode.mode);
+            self.write_combining();
         }
         self.blit_from_fb(0, 0, self.width, self.height);
     }

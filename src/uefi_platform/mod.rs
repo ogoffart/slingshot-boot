@@ -22,6 +22,8 @@ mod cursor;
 mod display;
 mod input;
 mod timer;
+#[cfg(target_arch = "x86_64")]
+mod write_combining;
 
 use alloc::rc::Rc;
 use alloc::vec;
