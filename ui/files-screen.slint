@@ -28,6 +28,12 @@ export struct HexRow {
     ascii: string,
 }
 
+// A line of an EFI program's details: what it is, its kernel…
+export struct ProgramFact {
+    label: string,
+    value: string,
+}
+
 export global Explorer {
     // There's a Files screen (not in `slingshot config`: the desktop has its own).
     in property <bool> available: Platform.uses-mock-data;
@@ -58,8 +64,19 @@ export global Explorer {
     in property <int> opened;
     in property <image> picture;
     in property <[HexRow]> hex;
+    in property <[ProgramFact]> program-facts: Platform.uses-mock-data ? [
+        { label: "Processor", value: "x86_64" },
+        { label: "Kind", value: "EFI application" },
+    ] : [];
     // Under what's open: the part shown of a large file, why it can't be shown.
     in property <string> note;
+
+    // Ctrl+F in the text: the next match from byte `from`, then selected
+    // (`found-start`, `found-end`); "2 of 5", or "Not found".
+    callback find-in-text(/* query */ string, /* from */ int) -> bool;
+    in property <int> found-start;
+    in property <int> found-end;
+    in property <string> find-status;
 
     in-out property <bool> confirm-save-visible;
     // Opening another file with changes not saved: the row it's for.
@@ -101,6 +118,13 @@ export component FilesScreen inherits Rectangle {
     }
     // What was typed to find a row, forgotten after a second.
     property <string> typed;
+    // Ctrl+F: the find bar over the text is shown; a request focuses it.
+    property <bool> finding;
+    property <int> find-request;
+    function open-find() {
+        root.finding = true;
+        root.find-request += 1;
+    }
 
     public function enter() {
         scope.focus();
@@ -169,6 +193,8 @@ export component FilesScreen inherits Rectangle {
             root.select(Explorer.collapse(Explorer.current));
         } else if event.text == "/" || event.text == "\\" {
             root.edit-path(event.text);
+        } else if event.modifiers.control && (event.text == "f" || event.text == "F") && Explorer.kind == "text" {
+            root.open-find();
         } else if event.modifiers.control || event.modifiers.alt || event.modifiers.meta {
             return reject;
         } else {
@@ -453,83 +479,158 @@ export component FilesScreen inherits Rectangle {
                     }
                 }
 
-                if Explorer.kind == "text": Rectangle {
+                if Explorer.kind == "text": text-view := VerticalLayout {
                     vertical-stretch: 1;
-                    border-radius: Theme.radius;
-                    background: Theme.surface-raised;
-                    border-width: input.has-focus ? 2px : 1px;
-                    border-color: input.has-focus ? Theme.accent : Theme.border;
-                    clip: true;
+                    spacing: 10px;
+                    // Where the next search starts: after the last match.
+                    property <int> find-from;
+                    property <int> find-request: root.find-request;
+                    changed find-request => {
+                        find-field.focus();
+                        find-field.select-all();
+                    }
                     property <int> opened: Explorer.opened;
-                    changed opened => { flick.content-y = 0; }
-                    FocusScope {
-                        focus-on-click: false;
-                        focus-on-tab-navigation: false;
-                        // Before the text takes them: Ctrl+S saves, Escape goes back to the list.
-                        capture-key-pressed(event) => {
-                            if event.modifiers.control && (event.text == "s" || event.text == "S") {
-                                if Explorer.dirty && Explorer.writable {
-                                    Explorer.confirm-save-visible = true;
-                                }
-                                return accept;
-                            }
-                            if event.text == Key.Escape {
-                                scope.focus();
-                                return accept;
-                            }
-                            reject
+                    changed opened => {
+                        flick.content-y = 0;
+                        self.find-from = 0;
+                    }
+                    function find-next(query: string) {
+                        if Explorer.find-in-text(query, self.find-from) {
+                            input.set-selection-offsets(Explorer.found-start, Explorer.found-end);
+                            self.find-from = Explorer.found-end;
                         }
-                        TouchArea {
-                            scroll-event(e) => {
-                                flick.content-y = clamp(flick.content-y + e.delta-y, min(0px, flick.height - flick.content-height), 0px);
-                                accept
+                    }
+                    // The match stays selected (not cleared like after Tab).
+                    property <bool> keep-selection;
+                    function close-find() {
+                        root.finding = false;
+                        self.keep-selection = true;
+                        input.focus();
+                    }
+
+                    // Not an `if`: the field is focused by id.
+                    Rectangle {
+                        visible: root.finding;
+                        height: root.finding ? 40px : 0px;
+                        border-radius: Theme.radius;
+                        background: Theme.surface-raised;
+                        border-width: find-field.has-focus ? 2px : 1px;
+                        border-color: find-field.has-focus ? Theme.accent : Theme.border;
+                        FocusScope {
+                            focus-on-click: false;
+                            focus-on-tab-navigation: false;
+                            key-pressed(event) => {
+                                if event.text == Key.Escape {
+                                    text-view.close-find();
+                                    return accept;
+                                }
+                                reject
                             }
-                            flick := Flickable {
-                                interactive: false;
-                                content-height: max(self.height, input.preferred-height + 24px);
-                                input := TextInput {
-                                    x: 12px;
-                                    y: 12px;
-                                    width: flick.width - 24px;
-                                    height: max(self.preferred-height, flick.height - 24px);
-                                    text <=> Explorer.text;
-                                    single-line: false;
-                                    wrap: word-wrap;
-                                    // PgUp and PgDn move by what's in view.
-                                    page-height: flick.height;
-                                    read-only: !Explorer.writable;
-                                    font-family: "JetBrains Mono";
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 10px;
+                                find-field := TextField {
                                     font-size: 14px;
-                                    color: Theme.text;
-                                    selection-background-color: Theme.accent.with-alpha(0.35);
-                                    selection-foreground-color: Theme.text;
-                                    edited => { Explorer.dirty = true; }
-                                    // Tab selects all the text of a TextInput: the next key
-                                    // would replace the whole file.
-                                    changed has-focus => {
-                                        if self.has-focus {
-                                            self.clear-selection();
-                                        }
+                                    placeholder: @tr("Find in the text");
+                                    // From the match shown: typing more keeps it if it still matches.
+                                    edited(query) => {
+                                        text-view.find-from = Explorer.found-start;
+                                        text-view.find-next(query);
                                     }
-                                    // Keeps the cursor in view.
-                                    cursor-position-changed(pos) => {
-                                        let line = self.font-size * 1.5;
-                                        if pos.y + 12px < -flick.content-y {
-                                            flick.content-y = -(pos.y + 12px) + 12px;
-                                        } else if pos.y + 12px + line > -flick.content-y + flick.height {
-                                            flick.content-y = flick.height - pos.y - 12px - line;
+                                    accepted(query) => { text-view.find-next(query); }
+                                }
+                                Text {
+                                    text: Explorer.find-status;
+                                    font-size: 13px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: Theme.radius;
+                        background: Theme.surface-raised;
+                        border-width: input.has-focus ? 2px : 1px;
+                        border-color: input.has-focus ? Theme.accent : Theme.border;
+                        clip: true;
+                        FocusScope {
+                            focus-on-click: false;
+                            focus-on-tab-navigation: false;
+                            // Before the text takes them: Ctrl+S saves, Escape goes back to the list.
+                            capture-key-pressed(event) => {
+                                if event.modifiers.control && (event.text == "f" || event.text == "F") {
+                                    root.open-find();
+                                    return accept;
+                                }
+                                if event.modifiers.control && (event.text == "s" || event.text == "S") {
+                                    if Explorer.dirty && Explorer.writable {
+                                        Explorer.confirm-save-visible = true;
+                                    }
+                                    return accept;
+                                }
+                                if event.text == Key.Escape {
+                                    scope.focus();
+                                    return accept;
+                                }
+                                reject
+                            }
+                            TouchArea {
+                                scroll-event(e) => {
+                                    flick.content-y = clamp(flick.content-y + e.delta-y, min(0px, flick.height - flick.content-height), 0px);
+                                    accept
+                                }
+                                flick := Flickable {
+                                    interactive: false;
+                                    content-height: max(self.height, input.preferred-height + 24px);
+                                    input := TextInput {
+                                        x: 12px;
+                                        y: 12px;
+                                        width: flick.width - 24px;
+                                        height: max(self.preferred-height, flick.height - 24px);
+                                        text <=> Explorer.text;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        // PgUp and PgDn move by what's in view.
+                                        page-height: flick.height;
+                                        read-only: !Explorer.writable;
+                                        font-family: "JetBrains Mono";
+                                        font-size: 14px;
+                                        color: Theme.text;
+                                        selection-background-color: Theme.accent.with-alpha(0.35);
+                                        selection-foreground-color: Theme.text;
+                                        edited => { Explorer.dirty = true; }
+                                        // Tab selects all the text of a TextInput: the next key
+                                        // would replace the whole file.
+                                        changed has-focus => {
+                                            if self.has-focus && !text-view.keep-selection {
+                                                self.clear-selection();
+                                            }
+                                            text-view.keep-selection = false;
+                                        }
+                                        // Keeps the cursor in view.
+                                        cursor-position-changed(pos) => {
+                                            let line = self.font-size * 1.5;
+                                            if pos.y + 12px < -flick.content-y {
+                                                flick.content-y = -(pos.y + 12px) + 12px;
+                                            } else if pos.y + 12px + line > -flick.content-y + flick.height {
+                                                flick.content-y = flick.height - pos.y - 12px - line;
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        ScrollBar {
-                            x: parent.width - self.width - 3px;
-                            y: 4px;
-                            height: parent.height - 8px;
-                            content-y <=> flick.content-y;
-                            content-height: flick.content-height;
-                            view-height: flick.height;
+                            ScrollBar {
+                                x: parent.width - self.width - 3px;
+                                y: 4px;
+                                height: parent.height - 8px;
+                                content-y <=> flick.content-y;
+                                content-height: flick.content-height;
+                                view-height: flick.height;
+                            }
                         }
                     }
                 }
@@ -541,6 +642,28 @@ export component FilesScreen inherits Rectangle {
                         height: parent.height;
                         source: Explorer.picture;
                         image-fit: contain;
+                    }
+                }
+
+                // An EFI program's details: label, value.
+                if Explorer.kind == "program" && Explorer.program-facts.length > 0: VerticalLayout {
+                    vertical-stretch: 0;
+                    spacing: 6px;
+                    for fact in Explorer.program-facts: HorizontalLayout {
+                        spacing: 16px;
+                        Text {
+                            width: 130px;
+                            text: fact.label;
+                            font-size: 13px;
+                            color: Theme.text-muted;
+                        }
+                        Text {
+                            horizontal-stretch: 1;
+                            text: fact.value;
+                            font-size: 13px;
+                            color: Theme.text;
+                            overflow: elide;
+                        }
                     }
                 }
 

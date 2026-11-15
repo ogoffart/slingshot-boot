@@ -20,6 +20,7 @@ pub mod hibernate;
 pub mod hid;
 pub mod keymap;
 pub mod load_option;
+pub mod pe;
 // The variables of systemd's Boot Loader Interface: only the firmware sets
 // them; the desktop build has it for the tests.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]

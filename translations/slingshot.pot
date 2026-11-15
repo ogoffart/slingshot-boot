@@ -57,7 +57,7 @@ msgid "Add Slingshot to systemd-boot's menu"
 msgstr ""
 
 #: ui/dialogs.slint:1206
-#: ui/files-screen.slint:446
+#: ui/files-screen.slint:472
 msgid "Add to boot menu"
 msgstr ""
 
@@ -69,7 +69,7 @@ msgstr ""
 msgid "Add…"
 msgstr ""
 
-#: src/app/files.rs:294
+#: src/app/files.rs:343
 #: src/app/mod.rs:530
 #: src/app/mod.rs:550
 msgid "All disks"
@@ -79,7 +79,7 @@ msgstr ""
 msgid "Also in systemd-boot's menu"
 msgstr ""
 
-#: ui/footer.slint:64
+#: ui/footer.slint:65
 msgid "Alt ↑ ↓"
 msgstr ""
 
@@ -132,7 +132,7 @@ msgstr ""
 msgid "Back"
 msgstr ""
 
-#: ui/footer.slint:68
+#: ui/footer.slint:69
 msgid "Back to boot"
 msgstr ""
 
@@ -193,12 +193,12 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: src/app/files.rs:333
+#: src/app/files.rs:382
 msgid "Cannot read this file: {}"
 msgstr ""
 
-#: src/app/files.rs:451
-#: src/app/files.rs:489
+#: src/app/files.rs:506
+#: src/app/files.rs:544
 #: src/app/mod.rs:575
 msgid "Cannot read this folder: {}"
 msgstr ""
@@ -207,7 +207,7 @@ msgstr ""
 msgid "Capacity"
 msgstr ""
 
-#: ui/footer.slint:63
+#: ui/footer.slint:64
 msgid "Change"
 msgstr ""
 
@@ -264,7 +264,7 @@ msgstr ""
 msgid "Could not add a boot entry: {}"
 msgstr ""
 
-#: src/app/files.rs:679
+#: src/app/files.rs:757
 #: src/app/mod.rs:2021
 #: src/app/mod.rs:2137
 msgid "Could not add the picture: {}"
@@ -290,7 +290,7 @@ msgstr ""
 msgid "Could not save the settings: {}"
 msgstr ""
 
-#: src/app/files.rs:625
+#: src/app/files.rs:683
 msgid "Could not save {}: {}"
 msgstr ""
 
@@ -308,6 +308,10 @@ msgstr ""
 
 #: src/app/mod.rs:1401
 msgid "Couldn't start {}"
+msgstr ""
+
+#: ui/footer.slint:62
+msgid "Ctrl F"
 msgstr ""
 
 #: ui/footer.slint:61
@@ -381,8 +385,20 @@ msgstr ""
 msgid "EFI System Partition"
 msgstr ""
 
+#: src/app/files.rs:162
+msgid "EFI application"
+msgstr ""
+
+#: src/app/files.rs:163
+msgid "EFI driver"
+msgstr ""
+
 #: src/app/cards.rs:232
 msgid "EFI program"
+msgstr ""
+
+#: src/app/files.rs:164
+msgid "EFI runtime driver"
 msgstr ""
 
 #: ui/footer.slint:43
@@ -410,7 +426,7 @@ msgstr ""
 msgid "Enter"
 msgstr ""
 
-#: ui/files-screen.slint:384
+#: ui/files-screen.slint:410
 msgid "Enter or a double click opens a file here: a text to edit, a picture, a program to start."
 msgstr ""
 
@@ -418,7 +434,7 @@ msgstr ""
 msgid "Enter the password to change the settings."
 msgstr ""
 
-#: ui/footer.slint:68
+#: ui/footer.slint:69
 msgid "Esc"
 msgstr ""
 
@@ -446,7 +462,15 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
-#: src/desktop/simulator.rs:443
+#: ui/footer.slint:62
+msgid "Find"
+msgstr ""
+
+#: ui/files-screen.slint:535
+msgid "Find in the text"
+msgstr ""
+
+#: src/desktop/simulator.rs:442
 #: src/firmware/mod.rs:454
 msgid "Firmware"
 msgstr ""
@@ -463,7 +487,7 @@ msgstr ""
 msgid "First in the boot order"
 msgstr ""
 
-#: ui/footer.slint:66
+#: ui/footer.slint:67
 msgid "Focus"
 msgstr ""
 
@@ -581,11 +605,15 @@ msgstr ""
 msgid "Keep this resolution?"
 msgstr ""
 
+#: src/app/files.rs:173
+msgid "Kernel"
+msgstr ""
+
 #: ui/dialogs.slint:504
 msgid "Kernel options"
 msgstr ""
 
-#: src/desktop/simulator.rs:241
+#: src/desktop/simulator.rs:239
 #: src/firmware/detect.rs:67
 msgid "Kernel {}"
 msgstr ""
@@ -600,6 +628,10 @@ msgstr ""
 
 #: src/firmware/mod.rs:437
 msgid "Keys enrolled, not enforced"
+msgstr ""
+
+#: src/app/files.rs:159
+msgid "Kind"
 msgstr ""
 
 #: ui/settings-screen.slint:1156
@@ -644,7 +676,7 @@ msgstr ""
 msgid "May"
 msgstr ""
 
-#: src/desktop/simulator.rs:441
+#: src/desktop/simulator.rs:440
 #: src/firmware/mod.rs:446
 msgid "Memory"
 msgstr ""
@@ -661,7 +693,7 @@ msgstr ""
 msgid "More…"
 msgstr ""
 
-#: ui/footer.slint:62
+#: ui/footer.slint:63
 msgid "Move"
 msgstr ""
 
@@ -712,11 +744,19 @@ msgstr ""
 msgid "Normal"
 msgstr ""
 
+#: src/app/files.rs:165
+msgid "Not an EFI program"
+msgstr ""
+
 #: src/firmware/luks.rs:461
 msgid "Not enough memory to check the passphrase."
 msgstr ""
 
-#: src/app/files.rs:594
+#: src/app/files.rs:702
+msgid "Not found"
+msgstr ""
+
+#: src/app/files.rs:649
 #: src/app/mod.rs:2207
 msgid "Not found: {}"
 msgstr ""
@@ -727,6 +767,10 @@ msgstr ""
 
 #: ui/install-screen.slint:243
 msgid "Not on every boot"
+msgstr ""
+
+#: src/app/files.rs:168
+msgid "Not signed"
 msgstr ""
 
 #: src/firmware/mod.rs:439
@@ -799,6 +843,7 @@ msgid "Open"
 msgstr ""
 
 #: ui/footer.slint:57
+#: src/app/files.rs:173
 msgid "Options"
 msgstr ""
 
@@ -814,7 +859,7 @@ msgstr ""
 msgid "Password"
 msgstr ""
 
-#: ui/footer.slint:65
+#: ui/footer.slint:66
 msgid "PgUp PgDn"
 msgstr ""
 
@@ -843,7 +888,8 @@ msgstr ""
 msgid "Press any key for the boot menu"
 msgstr ""
 
-#: src/desktop/simulator.rs:440
+#: src/app/files.rs:157
+#: src/desktop/simulator.rs:439
 #: src/firmware/mod.rs:445
 msgid "Processor"
 msgstr ""
@@ -856,7 +902,7 @@ msgstr ""
 msgid "Remove"
 msgstr ""
 
-#: ui/footer.slint:64
+#: ui/footer.slint:65
 msgid "Reorder"
 msgstr ""
 
@@ -893,7 +939,7 @@ msgstr ""
 msgid "Resuming {} in {} s. Press any key to stay here."
 msgstr ""
 
-#: ui/files-screen.slint:427
+#: ui/files-screen.slint:453
 #: ui/main.slint:694
 msgid "Revert"
 msgstr ""
@@ -919,12 +965,12 @@ msgid "Saturday"
 msgstr ""
 
 #: ui/dialogs.slint:536
-#: ui/files-screen.slint:432
+#: ui/files-screen.slint:458
 #: ui/footer.slint:61
 msgid "Save"
 msgstr ""
 
-#: ui/footer.slint:67
+#: ui/footer.slint:68
 msgid "Save log"
 msgstr ""
 
@@ -954,7 +1000,7 @@ msgstr ""
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr ""
 
-#: src/app/files.rs:608
+#: src/app/files.rs:663
 msgid "Saved {}"
 msgstr ""
 
@@ -962,12 +1008,12 @@ msgstr ""
 msgid "Screen resolution"
 msgstr ""
 
-#: ui/footer.slint:65
+#: ui/footer.slint:66
 msgid "Section"
 msgstr ""
 
 #: ui/install-screen.slint:175
-#: src/desktop/simulator.rs:444
+#: src/desktop/simulator.rs:443
 #: src/firmware/mod.rs:455
 msgid "Secure Boot"
 msgstr ""
@@ -1055,6 +1101,14 @@ msgstr ""
 msgid "Shutting down…"
 msgstr ""
 
+#: src/app/files.rs:168
+msgid "Signature"
+msgstr ""
+
+#: src/app/files.rs:168
+msgid "Signed (not checked here)"
+msgstr ""
+
 #: ui/dialogs.slint:873
 msgid "Skip"
 msgstr ""
@@ -1073,7 +1127,7 @@ msgstr ""
 msgid "Slingshot can't read this disk's data."
 msgstr ""
 
-#: src/app/files.rs:533
+#: src/app/files.rs:588
 #: src/app/mod.rs:2118
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr ""
@@ -1108,7 +1162,7 @@ msgstr ""
 
 #: ui/dialogs.slint:347
 #: ui/dialogs.slint:1211
-#: ui/files-screen.slint:450
+#: ui/files-screen.slint:476
 msgid "Start"
 msgstr ""
 
@@ -1178,7 +1232,7 @@ msgstr ""
 msgid "System"
 msgstr ""
 
-#: ui/footer.slint:66
+#: ui/footer.slint:67
 msgid "Tab"
 msgstr ""
 
@@ -1203,7 +1257,7 @@ msgstr ""
 msgid "The disk couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:271
+#: src/app/files.rs:320
 #: src/app/mod.rs:541
 msgid "The firmware can't read any disk."
 msgstr ""
@@ -1220,7 +1274,7 @@ msgstr ""
 msgid "The firmware's own settings"
 msgstr ""
 
-#: src/app/files.rs:376
+#: src/app/files.rs:431
 msgid "The first {} of {}."
 msgstr ""
 
@@ -1244,11 +1298,11 @@ msgstr ""
 msgid "The one set as default"
 msgstr ""
 
-#: src/app/files.rs:676
+#: src/app/files.rs:754
 msgid "The splash picture is changed."
 msgstr ""
 
-#: src/app/files.rs:675
+#: src/app/files.rs:753
 msgid "The wallpaper is changed."
 msgstr ""
 
@@ -1281,7 +1335,7 @@ msgstr ""
 msgid "This disk is locked."
 msgstr ""
 
-#: src/app/files.rs:354
+#: src/app/files.rs:402
 msgid "This disk or file is read-only: changes can't be saved."
 msgstr ""
 
@@ -1290,19 +1344,23 @@ msgstr ""
 msgid "This disk's encryption couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:323
+#: src/app/files.rs:372
 msgid "This file is too large to open here."
+msgstr ""
+
+#: src/app/files.rs:421
+msgid "This isn't a valid EFI program."
 msgstr ""
 
 #: ui/system-screen.slint:345
 msgid "This machine"
 msgstr ""
 
-#: src/app/files.rs:365
+#: src/app/files.rs:413
 msgid "This picture can't be shown."
 msgstr ""
 
-#: src/app/files.rs:374
+#: src/app/files.rs:429
 msgid "This text is too long to edit here: its first {} are shown."
 msgstr ""
 
@@ -1339,7 +1397,7 @@ msgid "Type a name to find it · / types a path · Enter chooses"
 msgstr ""
 
 #: ui/dialogs.slint:1099
-#: ui/files-screen.slint:262
+#: ui/files-screen.slint:288
 msgid "Type a path, like \\EFI\\BOOT"
 msgstr ""
 
@@ -1361,6 +1419,10 @@ msgstr ""
 
 #: ui/dialogs.slint:462
 msgid "Under More…"
+msgstr ""
+
+#: src/app/files.rs:161
+msgid "Unified kernel image"
 msgstr ""
 
 #: src/app/mod.rs:878
@@ -1397,11 +1459,11 @@ msgstr ""
 msgid "Update"
 msgstr ""
 
-#: ui/files-screen.slint:442
+#: ui/files-screen.slint:468
 msgid "Use as splash"
 msgstr ""
 
-#: ui/files-screen.slint:438
+#: ui/files-screen.slint:464
 msgid "Use as wallpaper"
 msgstr ""
 
@@ -1442,7 +1504,7 @@ msgstr ""
 msgid "Wrong password."
 msgstr ""
 
-#: src/app/files.rs:149
+#: src/app/files.rs:198
 msgid "hidden"
 msgstr ""
 
@@ -1450,9 +1512,9 @@ msgstr ""
 msgid "macOS"
 msgstr ""
 
-#: src/app/files.rs:146
-#: src/app/files.rs:289
-#: src/app/files.rs:289
+#: src/app/files.rs:195
+#: src/app/files.rs:338
+#: src/app/files.rs:338
 msgid "read-only"
 msgstr ""
 
@@ -1489,7 +1551,7 @@ msgstr ""
 msgid "{} firmware {} · {} · {}"
 msgstr ""
 
-#: src/app/files.rs:286
+#: src/app/files.rs:335
 msgid "{} free of {}"
 msgstr ""
 
@@ -1501,7 +1563,7 @@ msgstr ""
 msgid "{} h {} min"
 msgstr ""
 
-#: src/app/files.rs:531
+#: src/app/files.rs:586
 #: src/app/mod.rs:2116
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr ""
@@ -1526,6 +1588,7 @@ msgstr ""
 msgid "{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it."
 msgstr ""
 
+#: src/app/files.rs:698
 #: src/app/power.rs:119
 msgid "{} of {}"
 msgstr ""

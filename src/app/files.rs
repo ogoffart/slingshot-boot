@@ -15,7 +15,8 @@ use core::cell::RefCell;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use super::{
-    AppWindow, Backend, DateTime, DirEntry, Explorer, HexRow, LockedVolume, PictureFor, ScreenPicture, Target, TreeRow, Volume,
+    AppWindow, Backend, DateTime, DirEntry, Explorer, HexRow, LockedVolume, PictureFor, ProgramFact, ScreenPicture, Target, TreeRow,
+    Volume,
 };
 use crate::tr::{tr, trf};
 
@@ -93,6 +94,29 @@ fn fits_editor(text: &str, scale: f32) -> bool {
     lines.try_fold(0, |n, l| Some(n + l).filter(|n| *n <= max_lines)).is_some()
 }
 
+/// The next match of `query` in `text` from byte `from`, ignoring ASCII
+/// case, wrapping around: its byte range, its number (from 1) and how many
+/// there are.
+fn find_text(text: &str, query: &str, from: usize) -> Option<(usize, usize, usize, usize)> {
+    if query.is_empty() {
+        return None;
+    }
+    let (text, query) = (text.as_bytes(), query.as_bytes());
+    // One pass: how many, the first one, and the first one from `from`.
+    let (mut count, mut first, mut next) = (0, None, None);
+    for i in 0..=text.len().checked_sub(query.len())? {
+        if text[i..i + query.len()].eq_ignore_ascii_case(query) {
+            count += 1;
+            first = first.or(Some((i, count)));
+            if i >= from && next.is_none() {
+                next = Some((i, count));
+            }
+        }
+    }
+    let (start, n) = next.or(first)?;
+    Some((start, start + query.len(), n, count))
+}
+
 /// A text as the editor shows it: without its byte order mark, and with
 /// `\n` line endings. Also whether it had them.
 fn text_for_editing(data: &[u8]) -> (String, bool, bool) {
@@ -130,6 +154,37 @@ fn hex_rows(data: &[u8]) -> Vec<HexRow> {
             HexRow { offset: format!("{:08X}", i * 16).into(), hex: hex.into(), ascii: ascii.into() }
         })
         .collect()
+}
+
+/// An EFI program's details, as lines of label and value; `None` when it
+/// isn't one.
+fn program_facts(data: &[u8]) -> Option<Vec<ProgramFact>> {
+    use crate::parse::pe::Subsystem;
+    let p = crate::parse::pe::program(data)?;
+    let fact = |label: String, value: String| ProgramFact { label: label.into(), value: value.into() };
+    let mut facts = alloc::vec![
+        fact(tr("Processor"), p.machine),
+        fact(
+            tr("Kind"),
+            match p.subsystem {
+                Subsystem::Application if p.uki => tr("Unified kernel image"),
+                Subsystem::Application => tr("EFI application"),
+                Subsystem::BootServiceDriver => tr("EFI driver"),
+                Subsystem::RuntimeDriver => tr("EFI runtime driver"),
+                Subsystem::Other => tr("Not an EFI program"),
+            },
+        ),
+        fact(tr("Signature"), if p.signed { tr("Signed (not checked here)") } else { tr("Not signed") }),
+    ];
+    if !p.sbat.is_empty() {
+        facts.push(fact(String::from("SBAT"), p.sbat.join(", ")));
+    }
+    for (label, value) in [(tr("System"), p.os), (tr("Kernel"), p.kernel), (tr("Options"), p.cmdline)] {
+        if let Some(value) = value {
+            facts.push(fact(label, value));
+        }
+    }
+    Some(facts)
 }
 
 fn format_date(t: &DateTime) -> String {
@@ -369,12 +424,19 @@ impl Files {
             },
             _ => {}
         }
+        if kind == Kind::Program {
+            let facts = program_facts(&data);
+            if facts.is_none() {
+                explorer.set_note(tr("This isn't a valid EFI program.").into());
+            }
+            explorer.set_program_facts(ModelRc::new(VecModel::from(facts.unwrap_or_default())));
+        }
         if matches!(kind, Kind::Program | Kind::Bytes) {
             explorer.set_hex(ModelRc::new(VecModel::from(hex_rows(&data))));
             let shown = super::format_file_size(BYTES_SHOWN as u64);
             if too_long {
                 explorer.set_note(trf("This text is too long to edit here: its first {} are shown.", &[&shown]).into());
-            } else if data.len() > BYTES_SHOWN {
+            } else if data.len() > BYTES_SHOWN && explorer.get_note().is_empty() {
                 explorer.set_note(trf("The first {} of {}.", &[&shown, &super::format_file_size(data.len() as u64)]).into());
             }
         }
@@ -611,13 +673,16 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                     let (volume, path, size) = (o.volume, o.path.clone(), data.len() as u64);
                     o.data = data;
                     ui.global::<Explorer>().set_dirty(false);
-                    // Its new size, in the tree.
+                    // Its new size and date, in the tree: as the disk has them.
+                    let now = backend.date_time();
                     for n in &mut f.nodes {
                         if let What::Entry { volume: v, folders, entry } = &mut n.what
                             && *v == volume
                             && super::folder_path(folders, Some(&entry.name)) == path
                         {
-                            entry.size = size;
+                            let folder = super::folder_path(folders, None);
+                            let listed = backend.list_dir(volume, &folder).ok().and_then(|l| l.into_iter().find(|e| e.name == entry.name));
+                            *entry = listed.unwrap_or_else(|| DirEntry { size, modified: now.or(entry.modified), ..entry.clone() });
                         }
                     }
                     f.show(&ui, &*backend, ui.global::<Explorer>().get_current().max(0) as usize);
@@ -625,6 +690,26 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 Err(e) => {
                     log::warn!("files: saving {} on disk {}: {e}", o.path, o.volume);
                     (actions.show_status)(&trf("Could not save {}: {}", &[&o.name, &e]));
+                }
+            }
+        });
+    }
+    {
+        // Ctrl+F: the next match in the text, selected by the editor.
+        let ui_weak = ui.as_weak();
+        explorer.on_find_in_text(move |query, from| {
+            let Some(ui) = ui_weak.upgrade() else { return false };
+            let explorer = ui.global::<Explorer>();
+            match find_text(&explorer.get_text(), &query, from.max(0) as usize) {
+                Some((start, end, n, count)) => {
+                    explorer.set_found_start(start as i32);
+                    explorer.set_found_end(end as i32);
+                    explorer.set_find_status(trf("{} of {}", &[&n, &count]).into());
+                    true
+                }
+                None => {
+                    explorer.set_find_status(if query.is_empty() { String::new() } else { tr("Not found") }.into());
+                    false
                 }
             }
         });
@@ -715,6 +800,17 @@ mod tests {
         assert!(fits_editor(&"line\n".repeat(1000), 1.));
         assert!(!fits_editor(&"line\n".repeat(1000), 2.), "taller than 32767 px");
         assert!(!fits_editor(&"x".repeat(50 * 1500), 1.), "one line, wrapped");
+    }
+
+    #[test]
+    fn find_wraps_and_ignores_case() {
+        let text = "timeout 3\nTimeout 5\neditor no\n";
+        assert_eq!(find_text(text, "timeout", 0), Some((0, 7, 1, 2)));
+        assert_eq!(find_text(text, "TIMEOUT", 7), Some((10, 17, 2, 2)));
+        assert_eq!(find_text(text, "timeout", 17), Some((0, 7, 1, 2)), "back to the first");
+        assert_eq!(find_text(text, "nothing", 0), None);
+        assert_eq!(find_text(text, "", 0), None);
+        assert_eq!(find_text("é é", "é", 1), Some((3, 5, 2, 2)), "byte offsets");
     }
 
     #[test]

@@ -98,7 +98,7 @@ fn is_uuid(name: &str) -> bool {
 }
 
 /// `KEY="value"` in os-release.
-fn os_release(text: &str, key: &str) -> Option<String> {
+pub(crate) fn os_release(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| {
         let value = l.strip_prefix(key)?.strip_prefix('=')?;
         Some(value.trim().trim_matches('"').trim_matches('\'').to_string()).filter(|v| !v.is_empty())

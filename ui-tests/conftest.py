@@ -65,9 +65,9 @@ def window(simulator, display_env):
         yield aut.first_window
 
 
-def press(window, key: str, alt: bool = False, shift: bool = False):
-    """Presses and releases `key`, with Alt or Shift held down."""
-    held = [k for k, down in ((keys.Alt, alt), (keys.Shift, shift)) if down]
+def press(window, key: str, alt: bool = False, shift: bool = False, ctrl: bool = False):
+    """Presses and releases `key`, with Alt, Shift or Ctrl held down."""
+    held = [k for k, down in ((keys.Alt, alt), (keys.Shift, shift), (keys.Control, ctrl)) if down]
     for k in held:
         window.dispatch_event(KeyPressedEvent(k))
     window.dispatch_event(KeyPressedEvent(key))

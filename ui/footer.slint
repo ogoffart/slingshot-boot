@@ -59,6 +59,7 @@ export component Footer inherits Rectangle {
         if root.screen == 4: KeyChip { key: @tr("Enter"); label: @tr("Open"); }
         if root.screen == 4: KeyChip { key: "← →"; label: @tr("Collapse, expand"); }
         if root.screen == 4: KeyChip { key: @tr("Ctrl S"); label: @tr("Save"); }
+        if root.screen == 4: KeyChip { key: @tr("Ctrl F"); label: @tr("Find"); }
         if root.screen == 2: KeyChip { key: "↑ ↓"; label: @tr("Move"); }
         if root.screen == 2 && root.settings-section != 3: KeyChip { key: "← →"; label: @tr("Change"); }
         if root.screen == 2 && root.settings-section == 3: KeyChip { key: @tr("Alt ↑ ↓"); label: @tr("Reorder"); }

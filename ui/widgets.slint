@@ -786,6 +786,9 @@ export component TextField inherits Rectangle {
     public function set-selection-offsets(anchor: int, focus: int) {
         input.set-selection-offsets(anchor, focus);
     }
+    public function select-all() {
+        input.select-all();
+    }
 
     if root.text == "" && input.preedit-text == "": Text {
         // At the left, where the text starts (a child is centered otherwise).

@@ -89,6 +89,31 @@ def test_tab_into_the_editor_keeps_the_text(window):
     assert "timeout 3" in editor(window).accessible_value
 
 
+def labels(window, text):
+    return window.query_descendants().match_accessible_label(text).find_all()
+
+
+def test_ctrl_f_finds_in_the_text(window):
+    open_files_tab(window)
+    open_text(window, "/loader/loader.conf", "timeout 3")
+    press(window, "f", ctrl=True)
+    type_text(window, "o")
+    assert wait_until(lambda: labels(window, "1 of 7"))
+    press(window, keys.Return)
+    assert wait_until(lambda: labels(window, "2 of 7"))
+    # The query grows: the match shown stays if it still matches.
+    type_text(window, "ns")
+    assert wait_until(lambda: labels(window, "1 of 1"))
+    type_text(window, "z")
+    assert wait_until(lambda: labels(window, "Not found"))
+    press(window, keys.Backspace)
+    assert wait_until(lambda: labels(window, "1 of 1"))
+    # Escape goes back to the text, with the match selected: typing replaces it.
+    press(window, keys.Escape)
+    type_text(window, "#")
+    assert wait_until(lambda: "c#ole-mode" in editor(window).accessible_value)
+
+
 def test_opening_another_file_asks_about_the_changes(window):
     open_files_tab(window)
     open_text(window, "/loader/loader.conf", "timeout 3")
