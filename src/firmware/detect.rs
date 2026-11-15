@@ -6,6 +6,7 @@
 //! including those of file system drivers.
 
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -100,7 +101,8 @@ pub fn scan(started: &[(Vec<u8>, String)], devices: &[Vec<u8>], entries_fs: &[u8
     let Ok(handles) = uefi::boot::find_handles::<SimpleFileSystem>() else { return Vec::new() };
     let mut all = Vec::new();
     for handle in handles {
-        let fs: Vec<u8> = crate::uefi_platform::open_shared::<DevicePath>(handle).map(|dp| dp.as_bytes().to_vec()).unwrap_or_default();
+        let dp = crate::uefi_platform::open_shared::<DevicePath>(handle);
+        let fs: Vec<u8> = dp.as_ref().map(|dp| dp.as_bytes().to_vec()).unwrap_or_default();
         if let Some(f) = removable(handle, &fs, devices)
             && !detect::already_started(started, &fs, &f.0.program)
         {
@@ -108,7 +110,13 @@ pub fn scan(started: &[(Vec<u8>, String)], devices: &[Vec<u8>], entries_fs: &[u8
             continue;
         }
         let partuuid = detect::partition_uuid(&fs);
-        for f in detect::scan(&FileSystem { handle, lists: RefCell::default() }, partuuid.as_deref()) {
+        let disk = FileSystem { handle, lists: RefCell::default() };
+        let found = detect::scan(&disk, partuuid.as_deref());
+        // Whether the driver reads it, and what's there, for the bug reports.
+        let root = disk.list("\\").map_or_else(|| String::from("unreadable"), |r| format!("{} entries at the root", r.len()));
+        let path = dp.map_or_else(String::new, |dp| format!("{}", &*dp));
+        log::info!("file system {path}: {root}, {} found", found.len());
+        for f in found {
             if detect::already_started(started, &fs, &f.program)
                 || (f.kind == "linux" && !entries_fs.is_empty() && fs == entries_fs)
             {

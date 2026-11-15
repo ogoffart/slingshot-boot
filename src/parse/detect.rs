@@ -196,7 +196,13 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
     let root = disk.list("\\").unwrap_or_default();
     let boot_dir = find(&root, "boot", true);
     let (dir, entries) = match &boot_dir {
-        Some(b) => (format!("\\{b}"), disk.list(&format!("\\{b}")).unwrap_or_default()),
+        Some(b) => (
+            format!("\\{b}"),
+            disk.list(&format!("\\{b}")).unwrap_or_else(|| {
+                log::info!("linux: \\{b} unreadable");
+                Vec::new()
+            }),
+        ),
         None => (String::new(), root.clone()),
     };
     let is_root_fs = boot_dir.is_some() && find(&root, "etc", true).is_some();
@@ -246,7 +252,10 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
         .into_iter()
         .filter_map(|(kernel, version)| {
             let config = configured.iter().find(|(k, _)| *k == kernel).map(|(_, c)| c);
-            let args = cmdline.clone().or_else(|| config.map(|c| c.args.clone())).or_else(|| fallback.clone())?;
+            let Some(args) = cmdline.clone().or_else(|| config.map(|c| c.args.clone())).or_else(|| fallback.clone()) else {
+                log::info!("linux: skipping {kernel}: no command line");
+                return None;
+            };
             // The configuration's initrds when they're all there, else the
             // kernel's initramfs by its usual names.
             let exists = |path: &str| {
@@ -264,7 +273,11 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
                         format!("initramfs-{version}"),
                     ]
                     .iter()
-                    .find_map(|n| file(n))?;
+                    .find_map(|n| file(n));
+                    let Some(initrd) = initrd else {
+                        log::info!("linux: skipping {kernel}: no initrd");
+                        return None;
+                    };
                     microcode.iter().chain(core::iter::once(&initrd)).map(|i| format!("{dir}\\{i}")).collect()
                 }
             };
