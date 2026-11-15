@@ -7,7 +7,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
+use uefi::proto::media::file::{Directory, File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::{CString16, Handle};
 
@@ -88,16 +88,36 @@ pub struct Entry {
 /// buffer; rEFInd's drivers don't say (they return BUFFER_TOO_SMALL with no
 /// size), so `uefi::fs` reads nothing from them. This reads into a buffer
 /// that fits any entry, as rEFInd does.
+///
+/// For EfiFs: each listing starts from the first entry (it gives the same
+/// root folder at each open_volume, read to its end by the previous
+/// listing), and a folder is one when its information says so (the uefi
+/// crate's test is GetPosition failing, which EfiFs answers for folders).
 pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
+    // Each step's error logged, but a folder that isn't there: drivers fail
+    // in their own ways.
+    let failed = |what: &str, status: uefi::Status| {
+        if status != uefi::Status::NOT_FOUND {
+            log::info!("{path}: {what}: {status:?}");
+        }
+        format!("{status:?}")
+    };
     let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
-    let mut root = sfs.open_volume().map_err(|e| format!("{:?}", e.status()))?;
+    let mut root = sfs.open_volume().map_err(|e| failed("opening the volume", e.status()))?;
     let mut dir = if path.is_empty() || path == "\\" {
         root
     } else {
         let name = CString16::try_from(path).map_err(|_| String::from("bad path"))?;
-        let file = root.open(&name, FileMode::Read, FileAttribute::empty()).map_err(|e| format!("{:?}", e.status()))?;
-        file.into_directory().ok_or("not a folder")?
+        let mut file = root.open(&name, FileMode::Read, FileAttribute::empty()).map_err(|e| failed("opening it", e.status()))?;
+        let info = file.get_boxed_info::<FileInfo>().map_err(|e| failed("its information", e.status()))?;
+        if !info.attribute().contains(FileAttribute::DIRECTORY) {
+            return Err(String::from("not a folder"));
+        }
+        // SAFETY: The driver says it's a folder.
+        unsafe { Directory::new(file) }
     };
+    // Not every driver supports it on a folder; those start there anyway.
+    let _ = dir.reset_entry_readout();
     let mut entries = Vec::new();
     let mut buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
     loop {
@@ -125,7 +145,14 @@ pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
                 }
             }
             Ok(None) => break,
-            Err(e) => return Err(format!("{:?}", e.status())),
+            Err(e) if entries.is_empty() => return Err(failed("reading it", e.status())),
+            // A driver failing on one entry (EfiFs on Ubuntu's /boot): the
+            // ones before it are still worth showing.
+            Err(e) => {
+                let after = entries.last().map_or("", |e: &Entry| e.name.as_str());
+                log::info!("{path}: {:?} after {} entries (the last: {after})", e.status(), entries.len());
+                break;
+            }
         }
     }
     Ok(entries)
