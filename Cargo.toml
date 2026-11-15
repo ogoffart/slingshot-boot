@@ -87,6 +87,9 @@ argon2 = { git = "https://github.com/RustCrypto/password-hashes", rev = "refs/pu
 
 [build-dependencies]
 slint-build = { version = "1.19", features = ["sdf-fonts"] }
+# The .po files, for the texts made in Rust: the parser Slint's compiler
+# uses for @tr() (already built for it).
+rspolib = "0.1.2"
 
 [profile.release]
 opt-level = 3

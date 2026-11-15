@@ -9,6 +9,8 @@
 // every weight: the .efi's size.
 const SDF_SIZE: &str = "36";
 
+use rspolib::TranslatedEntry;
+
 fn main() {
     // SAFETY: build scripts are single-threaded.
     unsafe { std::env::set_var("SLINT_FONT_SIZES", SDF_SIZE) };
@@ -61,10 +63,14 @@ fn translations() {
     dirs.sort();
     for dir in dirs {
         let po = dir.join("LC_MESSAGES/slingshot.po");
-        let Ok(text) = std::fs::read_to_string(&po) else { continue };
+        if !po.exists() {
+            continue;
+        }
         println!("cargo:rerun-if-changed={}", po.display());
-        let mut pairs = parse_po(&text);
-        pairs.retain(|(id, s)| !id.is_empty() && !s.is_empty());
+        let catalog = rspolib::pofile(po.as_path()).unwrap_or_else(|e| panic!("{}: {e}", po.display()));
+        // Translated: not fuzzy, nor obsolete, nor empty (as Slint takes them).
+        let mut pairs: Vec<(String, String)> =
+            catalog.entries.into_iter().filter(|e| e.translated()).filter_map(|e| Some((e.msgid, e.msgstr?))).collect();
         pairs.sort();
         pairs.dedup_by(|a, b| a.0 == b.0);
         let items: Vec<String> = pairs.iter().map(|(id, s)| format!("({id:?}, {s:?})")).collect();
@@ -73,63 +79,4 @@ fn translations() {
     }
     let code = format!("static LANGUAGES: &[(&str, &[(&str, &str)])] = &[{}];\n", languages.join(",\n"));
     std::fs::write(std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("translations.rs"), code).unwrap();
-}
-
-/// The (msgid, msgstr) pairs of a .po file; fuzzy entries are left out.
-fn parse_po(text: &str) -> Vec<(String, String)> {
-    fn unquote(s: &str) -> String {
-        let s = s.trim();
-        let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or("");
-        let mut out = String::new();
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c != '\\' {
-                out.push(c);
-                continue;
-            }
-            match chars.next() {
-                Some('n') => out.push('\n'),
-                Some('t') => out.push('\t'),
-                Some(c) => out.push(c),
-                None => {}
-            }
-        }
-        out
-    }
-    let mut pairs = Vec::new();
-    let (mut id, mut str_, mut fuzzy) = (String::new(), String::new(), false);
-    let mut field = 0; // 1: msgid, 2: msgstr
-    let mut flush = |id: &mut String, str_: &mut String, fuzzy: &mut bool| {
-        if !*fuzzy {
-            pairs.push((std::mem::take(id), std::mem::take(str_)));
-        }
-        id.clear();
-        str_.clear();
-        *fuzzy = false;
-    };
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with("#,") && line.contains("fuzzy") {
-            fuzzy = true;
-        } else if let Some(rest) = line.strip_prefix("msgid ") {
-            if field == 2 {
-                flush(&mut id, &mut str_, &mut fuzzy);
-            }
-            id = unquote(rest);
-            field = 1;
-        } else if let Some(rest) = line.strip_prefix("msgstr ") {
-            str_ = unquote(rest);
-            field = 2;
-        } else if line.starts_with('"') {
-            match field {
-                1 => id.push_str(&unquote(line)),
-                2 => str_.push_str(&unquote(line)),
-                _ => {}
-            }
-        }
-    }
-    if field == 2 {
-        flush(&mut id, &mut str_, &mut fuzzy);
-    }
-    pairs
 }
