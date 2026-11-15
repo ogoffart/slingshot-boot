@@ -69,7 +69,7 @@ msgstr ""
 msgid "Add…"
 msgstr ""
 
-#: src/app/files.rs:282
+#: src/app/files.rs:294
 #: src/app/mod.rs:530
 #: src/app/mod.rs:550
 msgid "All disks"
@@ -193,12 +193,12 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: src/app/files.rs:321
+#: src/app/files.rs:333
 msgid "Cannot read this file: {}"
 msgstr ""
 
-#: src/app/files.rs:432
-#: src/app/files.rs:470
+#: src/app/files.rs:451
+#: src/app/files.rs:489
 #: src/app/mod.rs:575
 msgid "Cannot read this folder: {}"
 msgstr ""
@@ -264,7 +264,7 @@ msgstr ""
 msgid "Could not add a boot entry: {}"
 msgstr ""
 
-#: src/app/files.rs:660
+#: src/app/files.rs:679
 #: src/app/mod.rs:2021
 #: src/app/mod.rs:2137
 msgid "Could not add the picture: {}"
@@ -290,7 +290,7 @@ msgstr ""
 msgid "Could not save the settings: {}"
 msgstr ""
 
-#: src/app/files.rs:606
+#: src/app/files.rs:625
 msgid "Could not save {}: {}"
 msgstr ""
 
@@ -446,7 +446,7 @@ msgstr ""
 msgid "Files"
 msgstr ""
 
-#: src/desktop/simulator.rs:402
+#: src/desktop/simulator.rs:443
 #: src/firmware/mod.rs:454
 msgid "Firmware"
 msgstr ""
@@ -585,7 +585,7 @@ msgstr ""
 msgid "Kernel options"
 msgstr ""
 
-#: src/desktop/simulator.rs:235
+#: src/desktop/simulator.rs:241
 #: src/firmware/detect.rs:67
 msgid "Kernel {}"
 msgstr ""
@@ -644,7 +644,7 @@ msgstr ""
 msgid "May"
 msgstr ""
 
-#: src/desktop/simulator.rs:400
+#: src/desktop/simulator.rs:441
 #: src/firmware/mod.rs:446
 msgid "Memory"
 msgstr ""
@@ -716,7 +716,7 @@ msgstr ""
 msgid "Not enough memory to check the passphrase."
 msgstr ""
 
-#: src/app/files.rs:575
+#: src/app/files.rs:594
 #: src/app/mod.rs:2207
 msgid "Not found: {}"
 msgstr ""
@@ -843,7 +843,7 @@ msgstr ""
 msgid "Press any key for the boot menu"
 msgstr ""
 
-#: src/desktop/simulator.rs:399
+#: src/desktop/simulator.rs:440
 #: src/firmware/mod.rs:445
 msgid "Processor"
 msgstr ""
@@ -954,7 +954,7 @@ msgstr ""
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr ""
 
-#: src/app/files.rs:589
+#: src/app/files.rs:608
 msgid "Saved {}"
 msgstr ""
 
@@ -967,7 +967,7 @@ msgid "Section"
 msgstr ""
 
 #: ui/install-screen.slint:175
-#: src/desktop/simulator.rs:403
+#: src/desktop/simulator.rs:444
 #: src/firmware/mod.rs:455
 msgid "Secure Boot"
 msgstr ""
@@ -1073,7 +1073,7 @@ msgstr ""
 msgid "Slingshot can't read this disk's data."
 msgstr ""
 
-#: src/app/files.rs:514
+#: src/app/files.rs:533
 #: src/app/mod.rs:2118
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr ""
@@ -1203,7 +1203,7 @@ msgstr ""
 msgid "The disk couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:259
+#: src/app/files.rs:271
 #: src/app/mod.rs:541
 msgid "The firmware can't read any disk."
 msgstr ""
@@ -1220,7 +1220,7 @@ msgstr ""
 msgid "The firmware's own settings"
 msgstr ""
 
-#: src/app/files.rs:357
+#: src/app/files.rs:376
 msgid "The first {} of {}."
 msgstr ""
 
@@ -1244,11 +1244,11 @@ msgstr ""
 msgid "The one set as default"
 msgstr ""
 
-#: src/app/files.rs:657
+#: src/app/files.rs:676
 msgid "The splash picture is changed."
 msgstr ""
 
-#: src/app/files.rs:656
+#: src/app/files.rs:675
 msgid "The wallpaper is changed."
 msgstr ""
 
@@ -1281,7 +1281,7 @@ msgstr ""
 msgid "This disk is locked."
 msgstr ""
 
-#: src/app/files.rs:337
+#: src/app/files.rs:354
 msgid "This disk or file is read-only: changes can't be saved."
 msgstr ""
 
@@ -1290,7 +1290,7 @@ msgstr ""
 msgid "This disk's encryption couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:311
+#: src/app/files.rs:323
 msgid "This file is too large to open here."
 msgstr ""
 
@@ -1298,8 +1298,12 @@ msgstr ""
 msgid "This machine"
 msgstr ""
 
-#: src/app/files.rs:348
+#: src/app/files.rs:365
 msgid "This picture can't be shown."
+msgstr ""
+
+#: src/app/files.rs:374
+msgid "This text is too long to edit here: its first {} are shown."
 msgstr ""
 
 #: ui/main.slint:571
@@ -1438,7 +1442,7 @@ msgstr ""
 msgid "Wrong password."
 msgstr ""
 
-#: src/app/files.rs:137
+#: src/app/files.rs:149
 msgid "hidden"
 msgstr ""
 
@@ -1446,9 +1450,9 @@ msgstr ""
 msgid "macOS"
 msgstr ""
 
-#: src/app/files.rs:134
-#: src/app/files.rs:277
-#: src/app/files.rs:277
+#: src/app/files.rs:146
+#: src/app/files.rs:289
+#: src/app/files.rs:289
 msgid "read-only"
 msgstr ""
 
@@ -1485,7 +1489,7 @@ msgstr ""
 msgid "{} firmware {} · {} · {}"
 msgstr ""
 
-#: src/app/files.rs:274
+#: src/app/files.rs:286
 msgid "{} free of {}"
 msgstr ""
 
@@ -1497,7 +1501,7 @@ msgstr ""
 msgid "{} h {} min"
 msgstr ""
 
-#: src/app/files.rs:512
+#: src/app/files.rs:531
 #: src/app/mod.rs:2116
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr ""

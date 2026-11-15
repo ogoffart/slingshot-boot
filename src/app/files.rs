@@ -22,6 +22,11 @@ use crate::tr::{tr, trf};
 /// The largest text the editor opens, and the most bytes shown of a file.
 const TEXT_MAX: usize = 256 << 10;
 const BYTES_SHOWN: usize = 4096;
+/// The editor's line height (its 14 px monospace font: 18.5 px, rounded up
+/// by the renderer), with some margin, and about the fewest characters a
+/// line holds before it wraps.
+const EDITOR_LINE_HEIGHT: f32 = 21.;
+const EDITOR_COLUMNS: usize = 50;
 /// The largest file opened at all (a picture can be a few MB).
 const OPEN_MAX: u64 = 32 << 20;
 
@@ -76,6 +81,16 @@ fn kind_of(name: &str, data: &[u8]) -> Kind {
     } else {
         Kind::Bytes
     }
+}
+
+/// Whether the editor can show `text` at `scale`: Slint's software renderer
+/// lays out text in 16-bit physical pixels, so a TextInput taller than
+/// 32767 px overflows (a panic in debug builds, garbled lines otherwise).
+fn fits_editor(text: &str, scale: f32) -> bool {
+    let max_lines = (30_000. / (EDITOR_LINE_HEIGHT * scale)) as usize;
+    let mut lines = text.split('\n').map(|l| l.chars().count().div_ceil(EDITOR_COLUMNS).max(1));
+    // Stops counting once past the limit.
+    lines.try_fold(0, |n, l| Some(n + l).filter(|n| *n <= max_lines)).is_some()
 }
 
 /// A text as the editor shows it: without its byte order mark, and with
@@ -326,9 +341,13 @@ impl Files {
         let mut kind = kind_of(&entry.name, &data);
         let writable = self.volumes.get(volume).is_some_and(|v| v.writable) && !entry.read_only;
         let (mut crlf, mut bom) = (false, false);
-        match kind {
-            Kind::Text => {
-                let (text, has_crlf, has_bom) = text_for_editing(&data);
+        let text = (kind == Kind::Text).then(|| text_for_editing(&data)).filter(|(t, ..)| fits_editor(t, ui.window().scale_factor()));
+        let too_long = kind == Kind::Text && text.is_none();
+        if too_long {
+            kind = Kind::Bytes;
+        }
+        match (kind, text) {
+            (Kind::Text, Some((text, has_crlf, has_bom))) => {
                 (crlf, bom) = (has_crlf, has_bom);
                 explorer.set_text(text.into());
                 explorer.set_writable(writable);
@@ -337,7 +356,7 @@ impl Files {
                     explorer.set_note(tr("This disk or file is read-only: changes can't be saved.").into());
                 }
             }
-            Kind::Picture => match super::decode_picture(&data) {
+            (Kind::Picture, _) => match super::decode_picture(&data) {
                 Some(image) => {
                     let size = image.size();
                     explorer.set_picture(image);
@@ -348,12 +367,14 @@ impl Files {
                     explorer.set_note(tr("This picture can't be shown.").into());
                 }
             },
-            Kind::Program | Kind::Bytes => {}
+            _ => {}
         }
         if matches!(kind, Kind::Program | Kind::Bytes) {
             explorer.set_hex(ModelRc::new(VecModel::from(hex_rows(&data))));
-            if data.len() > BYTES_SHOWN {
-                let shown = super::format_file_size(BYTES_SHOWN as u64);
+            let shown = super::format_file_size(BYTES_SHOWN as u64);
+            if too_long {
+                explorer.set_note(trf("This text is too long to edit here: its first {} are shown.", &[&shown]).into());
+            } else if data.len() > BYTES_SHOWN {
                 explorer.set_note(trf("The first {} of {}.", &[&shown, &super::format_file_size(data.len() as u64)]).into());
             }
         }
@@ -687,6 +708,13 @@ mod tests {
         assert_eq!(text_to_save("a\nb\nc\n", crlf, bom), b"\xef\xbb\xbfa\r\nb\r\nc\r\n");
         let (text, crlf, bom) = text_for_editing(b"a\nb");
         assert_eq!(text_to_save(&text, crlf, bom), b"a\nb");
+    }
+
+    #[test]
+    fn long_texts_dont_go_to_the_editor() {
+        assert!(fits_editor(&"line\n".repeat(1000), 1.));
+        assert!(!fits_editor(&"line\n".repeat(1000), 2.), "taller than 32767 px");
+        assert!(!fits_editor(&"x".repeat(50 * 1500), 1.), "one line, wrapped");
     }
 
     #[test]
