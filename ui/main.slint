@@ -5,19 +5,20 @@ import "fonts/InterVariable.ttf";
 
 import { Theme } from "theme.slint";
 import { Logos } from "logos.slint";
-import { BootEntry, InfoItem, MemorySegment, Panel, Spinner, BatteryInfo, BatteryFact, Focus } from "widgets.slint";
+import { BootEntry, CountdownRing, InfoItem, MemorySegment, Panel, Spinner, BatteryInfo, BatteryFact, Focus } from "widgets.slint";
+import { Icon } from "icons.slint";
 import { Palette } from "std-widgets.slint";
 import { TabInfo, TopBar } from "top-bar.slint";
 import { Footer } from "footer.slint";
 import { BootMenu, BootScreen } from "boot-screen.slint";
-import { System, SystemScreen } from "system-screen.slint";
+import { FanLine, SensorLine, System, SystemScreen } from "system-screen.slint";
 import { SettingsPage, SettingsScreen } from "settings-screen.slint";
 import { SplashScreen } from "splash-screen.slint";
 import { Install, InstallScreen, InstallInfo } from "install-screen.slint";
 import { Explorer, FilesScreen, HexRow, ProgramFact } from "files-screen.slint";
-import { Customize, Dialog, FileBrowser, FileDialog, FileRow, CustomizeDialog, NameDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
+import { Customize, Dialog, DialogFrame, FileBrowser, FileDialog, FileRow, CustomizeDialog, NameDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
 
-export { Theme, Logos, BootMenu, Customize, Explorer, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, HexRow, ProgramFact, InstallInfo, BatteryInfo, BatteryFact, Focus }
+export { Theme, Logos, BootMenu, Customize, Explorer, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, HexRow, ProgramFact, SensorLine, FanLine, InstallInfo, BatteryInfo, BatteryFact, Focus }
 
 // A dialog over the whole window, in a popup: modal (Tab stays in it), and
 // the keyboard focus goes back where it was when it closes. Shown while
@@ -57,6 +58,85 @@ component ModalPopup inherits Rectangle {
             height: root.height;
             close-policy: no-auto-close;
             @children
+        }
+    }
+}
+
+// Turning off when idle: a ring sweeping down around a breathing power
+// icon, the seconds left. Any key, click or move of the pointer stays on.
+component IdleOffCard inherits DialogFrame {
+    in property <int> left;
+    in property <int> total;
+    in property <string> after;
+    callback stay();
+    // A step a second, gliding when the screen animates.
+    property <float> progress: root.left / root.total;
+    animate progress { duration: Theme.motion ? 1s : 0ms; }
+
+    card-width: 440px;
+    card-height: card.preferred-height;
+    arrows: false;
+    escape => { root.stay(); }
+    init => { keys.focus(); }
+
+    TouchArea {
+        pointer-event(e) => { root.stay(); }
+        changed mouse-x => { root.stay(); }
+        changed mouse-y => { root.stay(); }
+    }
+    keys := FocusScope {
+        key-pressed(event) => {
+            root.stay();
+            accept
+        }
+    }
+    card := VerticalLayout {
+        padding: 32px;
+        spacing: 14px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 132px;
+                height: 132px;
+                Rectangle {
+                    width: 120px;
+                    height: 120px;
+                    border-radius: self.width / 2;
+                    border-width: 6px;
+                    border-color: Theme.focus-track;
+                }
+                CountdownRing {
+                    width: 132px;
+                    height: 132px;
+                    thickness: 6px;
+                    progress: root.progress;
+                    ring-color: Theme.orange;
+                }
+                // Breathing: dimmer every other second.
+                Icon {
+                    kind: "power";
+                    size: 44px;
+                    thickness: 2.5px;
+                    color: Theme.orange;
+                    opacity: Theme.motion && mod(root.left, 2) == 1 ? 0.5 : 1;
+                    animate opacity { duration: 1s; easing: ease-in-out; }
+                }
+            }
+        }
+        Text {
+            text: @tr("Turning off in {} s", root.left);
+            font-size: 22px;
+            font-weight: 600;
+            color: Theme.text;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: @tr("Nothing happened for {}. Press a key or move the pointer to stay on.", root.after);
+            font-size: 15px;
+            color: Theme.text-soft;
+            horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }
@@ -117,6 +197,12 @@ export component AppWindow inherits Window {
     in-out property <bool> splash-visible;
     // "Starting Arch Linux…", "Restarting…": over everything while it happens.
     in property <string> starting-title;
+    // Turning off when idle: the seconds left (-1: not now), and after how
+    // long without input ("10 min").
+    in property <int> idle-off-left: -1;
+    // The warning's seconds, before turning off.
+    out property <int> idle-off-warning: 15;
+    in property <string> idle-off-after;
     // F10: the firmware's setup.
     in property <bool> firmware-setup-supported: Platform.uses-mock-data;
     callback firmware-setup();
@@ -430,6 +516,7 @@ export component AppWindow inherits Window {
                 x: root.screen-shift;
                 opacity: root.screen-opacity;
                 active: root.screen == 1;
+                covered: root.modal;
                 can-change-time: root.can-change-time;
                 change-time => { root.ask-change-time(); }
             }
@@ -473,7 +560,8 @@ export component AppWindow inherits Window {
     property <bool> modal: Passphrase.visible || root.error-visible || Install.confirm-visible || Install.result-visible
         || SettingsPage.confirm-save-visible || Customize.visible || BootMenu.options-visible || FileBrowser.visible || root.password-visible
         || System.time-dialog-visible || SettingsPage.confirm-reset-visible || SettingsPage.revert-countdown >= 0
-        || Explorer.confirm-save-visible || Explorer.discard-row >= 0 || Explorer.name-dialog != 0 || Explorer.confirm-delete-visible;
+        || Explorer.confirm-save-visible || Explorer.discard-row >= 0 || Explorer.name-dialog != 0 || Explorer.confirm-delete-visible
+        || root.idle-off-left >= 0;
     ModalPopup {
         shown: Passphrase.visible;
         UnlockDialog { }
@@ -750,6 +838,19 @@ export component AppWindow inherits Window {
         dismissed => {
             root.user-activity();
             root.splash-visible = false;
+        }
+    }
+
+    // The last seconds before turning off when idle: a popup, over any
+    // dialog, that takes the key that stays on (it doesn't reach what's
+    // behind). Moving the pointer stays on too.
+    ModalPopup {
+        shown: root.idle-off-left >= 0;
+        IdleOffCard {
+            left: root.idle-off-left;
+            total: root.idle-off-warning;
+            after: root.idle-off-after;
+            stay => { root.user-activity(); }
         }
     }
 

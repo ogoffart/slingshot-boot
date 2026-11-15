@@ -28,6 +28,7 @@ accent = "blue"             # "blue", "teal", "violet", "pink", "orange", "wallp
 timeout = 10                # seconds before the default entry starts; 0: never
 startup = "menu"            # "menu" or "splash" (the splash screen)
 default = "entry"           # "entry" (the default entry) or "last" (the one started last)
+power-off = 0               # minutes without a key or the pointer, then off: 0 (never), 5, 10, 30, 60
 # resolution = "1920x1080"  # by default the firmware's
 pointer-speed = "normal"    # "slower", "slow", "normal", "fast", "faster": mice and touchpads
 pointer-acceleration = true # fast movements go further

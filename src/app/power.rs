@@ -31,7 +31,7 @@ pub struct PowerView {
     pub identity: String,
 }
 
-fn duration(minutes: u32) -> String {
+pub(super) fn duration(minutes: u32) -> String {
     match (minutes / 60, minutes % 60) {
         (0, m) => trf("{} min", &[&m]),
         (h, 0) => trf("{} h", &[&h]),

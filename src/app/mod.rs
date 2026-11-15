@@ -12,6 +12,7 @@ mod files;
 mod hub;
 mod logos;
 mod power;
+mod sensors;
 mod settings;
 mod store;
 mod unlock;
@@ -375,6 +376,10 @@ struct State {
     revert_to: Option<(usize, usize)>,
     revert_left: i32,
     countdown_left: i32,
+    /// Seconds without input, for turning off when idle.
+    idle_seconds: u32,
+    /// The System screen's temperatures and fans.
+    sensors: sensors::Sensors,
     /// The default entry's passphrase was asked for at startup (once: not
     /// again when its start is cancelled or fails).
     passphrase_asked: bool,
@@ -639,6 +644,7 @@ fn show_settings(ui: &AppWindow, settings: &Settings) {
     let page = ui.global::<SettingsPage>();
     page.set_startup_index(if settings.splash { 1 } else { 0 });
     page.set_default_index(settings.remember_last.into());
+    page.set_idle_off_index(settings.idle_off.into());
     page.set_timeout_seconds(settings.timeout.into());
     page.set_pointer_speed(settings.pointer_speed.into());
     page.set_pointer_acceleration(settings.pointer_acceleration);
@@ -1100,6 +1106,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         revert_to: None,
         revert_left: -1,
         countdown_left: -1,
+        idle_seconds: 0,
+        sensors: Default::default(),
         passphrase_asked: false,
         devices_connected: !cfg!(target_os = "uefi"),
         waiting_for_disks: false,
@@ -1123,6 +1131,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
 
     // Ticks every second: the clock, the countdown, the resolution revert,
     // and the battery every 5 seconds on the System screen.
+    state.borrow().sensors.show(&ui);
     let tick = Rc::new(Timer::default());
     {
         let ui_weak = ui.as_weak();
@@ -1135,6 +1144,13 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             seconds.set(seconds.get().wrapping_add(1));
             if ui.get_screen() == 1 && seconds.get().is_multiple_of(5) {
                 update_battery(&ui, &*backend);
+            }
+            // Not on the battery's tick: one reading at a time.
+            if ui.get_screen() == 1 && seconds.get() % sensors::EVERY_SECONDS == 2 {
+                let sensors = &mut state.borrow_mut().sensors;
+                if !core::mem::take(&mut sensors.fresh) {
+                    sensors::update(&ui, &*backend, sensors);
+                }
             }
             // A USB stick plugged in or out: its card comes or goes (not
             // under a dialog that works on a card).
@@ -1174,7 +1190,31 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 if st.revert_left == 0 {
                     drop(st);
                     ui.global::<SettingsPage>().invoke_revert_mode();
+                    return;
                 }
+            }
+            // Turning off when idle: counted while nothing else will happen
+            // (no countdown, no unsaved text), the last 15 s shown.
+            let minutes = settings::IDLE_OFF_MINUTES.get(usize::from(st.settings.idle_off)).copied().unwrap_or(0);
+            let after = if caps.configure { 0 } else { backend.idle_off_override().unwrap_or(u32::from(minutes) * 60) };
+            if after == 0 || st.countdown_left >= 0 || ui.global::<Explorer>().get_dirty() {
+                st.idle_seconds = 0;
+                return;
+            }
+            st.idle_seconds += 1;
+            let left = after as i32 - st.idle_seconds as i32;
+            if left <= ui.get_idle_off_warning() {
+                if ui.get_idle_off_left() < 0 {
+                    ui.set_idle_off_after(power::duration(after.div_ceil(60)).into());
+                }
+                ui.set_idle_off_left(left.max(0));
+            }
+            if left <= 0 {
+                st.idle_seconds = 0;
+                drop(st);
+                log::info!("idle for {after} s: turning off");
+                ui.set_idle_off_left(-1);
+                ui.global::<BootMenu>().invoke_power_off(true);
             }
         });
     }
@@ -1192,12 +1232,18 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // Any key or pointer movement stops the countdown. The UI reports key
     // presses and hovering; the UEFI platform also reports raw pointer
     // movement through the hub.
-    let stop_countdown = {
+    // Someone is there: no countdown to the default entry, and the idle
+    // time starts again.
+    let user_active = {
         let ui_weak = ui.as_weak();
         let state = state.clone();
         move || {
             let mut st = state.borrow_mut();
             st.waiting_for_disks = false;
+            st.idle_seconds = 0;
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_idle_off_left(-1);
+            }
             if st.countdown_left >= 0 {
                 st.countdown_left = -1;
                 if let Some(ui) = ui_weak.upgrade() {
@@ -1211,14 +1257,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         // the splash screen, only a key press or a click (reported by the UI)
         // counts, so a jittery pointer can't dismiss it.
         let ui_weak = ui.as_weak();
-        let stop_countdown = stop_countdown.clone();
+        let user_active = user_active.clone();
         *hub.on_input.borrow_mut() = Some(Box::new(move || {
             if ui_weak.upgrade().is_some_and(|ui| !ui.get_splash_visible()) {
-                stop_countdown();
+                user_active();
             }
         }));
     }
-    ui.on_user_activity(stop_countdown.clone());
+    ui.on_user_activity(user_active.clone());
 
     // Transient messages in the footer.
     let status_timer = Rc::new(Timer::default());
@@ -1357,7 +1403,26 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     let boot_timer = Rc::new(Timer::default());
     // Shows the transition, then runs `action` (which normally resets the
     // machine). On return, shows the message.
+    // The settings changed: saved (Settings does it when it's left, and
+    // anything that starts, restarts or turns off does it first).
+    let save_pending = {
+        let state = state.clone();
+        let backend = backend.clone();
+        let show_status = show_status.clone();
+        move || {
+            let mut st = state.borrow_mut();
+            if st.settings_dirty {
+                st.settings_dirty = false;
+                let saved = save_settings(caps.configure, &mut st, &*backend);
+                drop(st);
+                if let Some(message) = saved.unwrap_or_else(Some) {
+                    show_status(&message);
+                }
+            }
+        }
+    };
     let run_with_transition = {
+        let save_pending = save_pending.clone();
         let ui_weak = ui.as_weak();
         let state = state.clone();
         let boot_timer = boot_timer.clone();
@@ -1366,6 +1431,7 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
         // `overlay` is what shows meanwhile ("Starting Arch Linux…").
         move |title: String, overlay: String, action: Box<dyn Fn() -> StartResult>| {
             let Some(ui) = ui_weak.upgrade() else { return };
+            save_pending();
             state.borrow_mut().countdown_left = -1;
             ui.global::<BootMenu>().set_countdown(-1);
             ui.set_starting_title(overlay.as_str().into());
@@ -1440,9 +1506,9 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             let backend = direct_backend.clone();
             start(title, Box::new(move || backend.start(&target)));
         });
-        let stop_countdown = Rc::new(stop_countdown.clone());
+        let user_active = Rc::new(user_active.clone());
         use_keymap(&*backend, &hub, &config, settings.keyboard);
-        unlock::wire(&ui, backend.clone(), direct, stop_countdown)
+        unlock::wire(&ui, backend.clone(), direct, user_active)
     };
     // Shared by the firmware setup card and F10.
     let firmware_setup = {
@@ -1626,33 +1692,20 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     ui.on_firmware_setup(move || firmware_setup());
 
     // --- Settings -----------------------------------------------------------------
-    let save_settings = {
-        let state = state.clone();
-        let backend = backend.clone();
-        let show_status = show_status.clone();
-        move || {
-            let mut st = state.borrow_mut();
-            if st.settings_dirty {
-                st.settings_dirty = false;
-                let saved = save_settings(caps.configure, &mut st, &*backend);
-                drop(st);
-                if let Some(message) = saved.unwrap_or_else(Some) {
-                    show_status(&message);
-                }
-            }
-        }
-    };
     {
-        let save_settings = save_settings.clone();
-        let (ui_weak, backend) = (ui.as_weak(), backend.clone());
+        let save_pending = save_pending.clone();
+        let (ui_weak, backend, state) = (ui.as_weak(), backend.clone(), state.clone());
         ui.on_screen_changed(move |screen| {
             if screen != 2 {
-                save_settings();
+                save_pending();
             }
             if screen == 1
                 && let Some(ui) = ui_weak.upgrade()
             {
                 update_battery(&ui, &*backend);
+                let sensors = &mut state.borrow_mut().sensors;
+                sensors::update(&ui, &*backend, sensors);
+                sensors.fresh = true;
             }
             if screen == 4
                 && let Some(ui) = ui_weak.upgrade()
@@ -1695,6 +1748,16 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             st.settings.remember_last = i == 1;
             st.settings_dirty = true;
             show_cards(&ui, &mut st);
+        });
+    }
+    {
+        // Turning off when idle: counted again from now.
+        let state = state.clone();
+        ui.global::<SettingsPage>().on_idle_off_selected(move |i| {
+            let mut st = state.borrow_mut();
+            st.settings.idle_off = i.clamp(0, settings::IDLE_OFF_MINUTES.len() as i32 - 1) as u8;
+            st.idle_seconds = 0;
+            st.settings_dirty = true;
         });
     }
     // The splash screen's text and hint are in slingshot.toml too.

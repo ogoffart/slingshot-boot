@@ -21,6 +21,10 @@ pub mod hid;
 pub mod keymap;
 pub mod load_option;
 pub mod pe;
+// ACPI's readings are only read by the x86 firmware (the battery feature);
+// the other builds have them for the tests.
+#[cfg_attr(not(all(target_os = "uefi", target_arch = "x86_64", feature = "battery")), allow(dead_code))]
+pub mod sensors;
 // The variables of systemd's Boot Loader Interface: only the firmware sets
 // them; the desktop build has it for the tests.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]

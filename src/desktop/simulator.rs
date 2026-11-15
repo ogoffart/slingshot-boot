@@ -47,6 +47,9 @@ pub struct SimBackend {
     pub firmware_picker: bool,
     /// A system hibernated (`--hibernated`), until something is started.
     pub hibernated: std::cell::Cell<bool>,
+    /// `--power-off-after`: turn off after so many seconds without input,
+    /// whatever the setting.
+    pub power_off_after: Option<u32>,
     /// `--hotplug`: since when a USB stick comes and goes, every 4 seconds.
     pub hotplug: Option<std::time::Instant>,
     /// The stick is in, as the menu last saw it.
@@ -171,6 +174,7 @@ impl SimBackend {
             firmware_picker: false,
             hibernated: Default::default(),
             hotplug: None,
+            power_off_after: None,
             stick_in: Default::default(),
             last_started: Default::default(),
             memory: RefCell::default(),
@@ -523,6 +527,27 @@ impl Backend for SimBackend {
             ),
             Battery::ThisMachine => super::machine::power(),
             Battery::None => Power::default(),
+        }
+    }
+
+    fn idle_off_override(&self) -> Option<u32> {
+        self.power_off_after
+    }
+
+    fn sensors(&self) -> crate::parse::sensors::Sensors {
+        use crate::parse::sensors::{Fan, Sensors, Temperature};
+        if matches!(self.battery, Battery::ThisMachine) {
+            return super::machine::sensors();
+        }
+        // A processor that warms up and cools down, and its fan.
+        let wave = utc_seconds(std::time::SystemTime::now()).map_or(0, |s| s.rem_euclid(20)) as f32;
+        let cpu = 46. + (wave - 10.).abs() / 2.;
+        Sensors {
+            temperatures: vec![
+                Temperature { name: "CPU".into(), celsius: cpu, critical: Some(105.) },
+                Temperature { name: "TZ01".into(), celsius: 38.5, critical: None },
+            ],
+            fans: vec![Fan { name: "FAN0".into(), rpm: 1800 + (cpu as u32 - 46) * 100 }],
         }
     }
 

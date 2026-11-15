@@ -17,7 +17,7 @@ import { BootEntry, Button, EntryGlyph, Focus, IconPicker, Panel, PicturePicker,
 // stop there), and a card `card-width` by `card-height` with the dialog's
 // elements. Escape calls `escape`; ← → move the focus like Tab where the
 // element doesn't use them, unless `arrows` is off.
-component DialogFrame inherits Rectangle {
+export component DialogFrame inherits Rectangle {
     in property <length> card-width;
     in property <length> card-height;
     in property <bool> arrows: true;

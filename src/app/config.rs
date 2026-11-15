@@ -10,6 +10,7 @@
 //! style = "cards"
 //! accent = "teal"
 //! timeout = 5
+//! power-off = 10               # minutes without input, then off
 //! startup = "splash"
 //! resolution = "1920x1080"
 //! pointer-speed = "fast"
@@ -46,7 +47,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use super::settings::{POINTER_SPEEDS, STYLES, Settings, THEMES};
+use super::settings::{IDLE_OFF_MINUTES, POINTER_SPEEDS, STYLES, Settings, THEMES};
 use crate::parse::bls::glob_match;
 
 /// The icons a card can have: drawn ones, then the systems' logos
@@ -80,6 +81,8 @@ pub struct SettingsDefaults {
     pub splash: Option<bool>,
     /// `default = "last"`: the entry started last is the default.
     pub remember_last: Option<bool>,
+    /// `power-off = 10`: index in `IDLE_OFF_MINUTES`.
+    pub idle_off: Option<u8>,
     pub timeout: Option<u16>,
     pub mode: Option<(u16, u16)>,
     pub pointer_speed: Option<u8>,
@@ -98,6 +101,7 @@ impl SettingsDefaults {
             accent: differs(builtin.accent, chosen.accent),
             splash: differs(builtin.splash, chosen.splash),
             remember_last: differs(builtin.remember_last, chosen.remember_last),
+            idle_off: differs(builtin.idle_off, chosen.idle_off),
             timeout: differs(builtin.timeout, chosen.timeout),
             mode: differs(builtin.mode, chosen.mode).filter(|m| *m != (0, 0)),
             pointer_speed: differs(builtin.pointer_speed, chosen.pointer_speed),
@@ -111,6 +115,7 @@ impl SettingsDefaults {
         settings.accent = self.accent.unwrap_or(settings.accent);
         settings.splash = self.splash.unwrap_or(settings.splash);
         settings.remember_last = self.remember_last.unwrap_or(settings.remember_last);
+        settings.idle_off = self.idle_off.unwrap_or(settings.idle_off);
         settings.timeout = self.timeout.unwrap_or(settings.timeout);
         settings.mode = self.mode.unwrap_or(settings.mode);
         settings.pointer_speed = self.pointer_speed.unwrap_or(settings.pointer_speed);
@@ -353,6 +358,13 @@ pub fn parse(text: &str) -> Config {
     config.defaults.accent = top.choice("accent", &ACCENTS, w).map(|i| i as u8);
     config.defaults.splash = top.choice("startup", &["menu", "splash"], w).map(|i| i == 1);
     config.defaults.remember_last = top.choice("default", &["entry", "last"], w).map(|i| i == 1);
+    if let Some(v) = top.value("power-off") {
+        let minutes = v.as_integer().and_then(|m| u16::try_from(m).ok());
+        match minutes.and_then(|m| IDLE_OFF_MINUTES.iter().position(|o| *o == m)) {
+            Some(i) => config.defaults.idle_off = Some(i as u8),
+            None => w.push(String::from("power-off: expected minutes: 0 (never), 5, 10, 30 or 60")),
+        }
+    }
     config.defaults.pointer_speed = top.choice("pointer-speed", &POINTER_SPEEDS, w).map(|i| i as u8);
     config.defaults.pointer_acceleration = top.bool("pointer-acceleration", w);
     if let Some(v) = top.value("timeout") {
@@ -600,6 +612,9 @@ pub fn to_text(config: &Config) -> String {
     }
     if let Some(splash) = d.splash {
         line(format!("startup = {}", quoted(if splash { "splash" } else { "menu" })));
+    }
+    if let Some(i) = d.idle_off {
+        line(format!("power-off = {}", IDLE_OFF_MINUTES.get(usize::from(i)).copied().unwrap_or(0)));
     }
     if let Some(last) = d.remember_last {
         line(format!("default = {}", quoted(if last { "last" } else { "entry" })));
@@ -1020,6 +1035,7 @@ mod tests {
             accent = "Teal"
             startup = "splash"
             timeout = 3
+            power-off = 10
             resolution = "1920x1080"
             pointer-speed = "fast"
             pointer-acceleration = false
@@ -1039,6 +1055,7 @@ mod tests {
                 accent: Some(1),
                 splash: Some(true),
                 remember_last: None,
+                idle_off: Some(2),
                 timeout: Some(3),
                 mode: Some((1920, 1080)),
                 pointer_speed: Some(3),

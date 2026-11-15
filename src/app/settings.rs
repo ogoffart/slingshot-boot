@@ -13,6 +13,10 @@ pub const THEMES: [&str; 2] = ["dark", "light"];
 /// How the boot entries are drawn (`Theme.style`), in its order.
 pub const STYLES: [&str; 4] = ["cards", "colorful", "flat", "classic"];
 
+/// After how many idle minutes the computer turns off (0: never), in
+/// `SettingsPage.idle-off-index`'s order.
+pub const IDLE_OFF_MINUTES: [u16; 5] = [0, 5, 10, 30, 60];
+
 /// The pointer's speeds (`SettingsPage.pointer-speed`), in its order, and
 /// what they multiply the moves by.
 pub const POINTER_SPEEDS: [&str; 5] = ["slower", "slow", "normal", "fast", "faster"];
@@ -34,6 +38,8 @@ pub struct Settings {
     pub splash: bool,
     /// The default entry is the one started last.
     pub remember_last: bool,
+    /// Index in `IDLE_OFF_MINUTES`: turn off after so long without input.
+    pub idle_off: u8,
     pub timeout: u16,
     /// Preferred resolution, (0, 0) if none.
     pub mode: (u16, u16),
@@ -60,6 +66,7 @@ impl Default for Settings {
             accent: 0,
             splash: false,
             remember_last: false,
+            idle_off: 0,
             timeout: 10,
             mode: (0, 0),
             language: 0,
@@ -103,8 +110,9 @@ impl Settings {
         let t = self.timeout.min(255) as u8;
         let [w0, w1] = self.mode.0.to_le_bytes();
         let [h0, h1] = self.mode.1.to_le_bytes();
-        // The splash and "remember the last one" share a byte (bits 0 and 1).
-        let startup = self.splash as u8 | (self.remember_last as u8) << 1;
+        // The splash, "remember the last one" and the idle time share a byte
+        // (bits 0, 1, then 2 to 4).
+        let startup = self.splash as u8 | (self.remember_last as u8) << 1 | (self.idle_off & 7) << 2;
         // The pointer's speed, and bit 4 for no acceleration.
         let pointer = self.pointer_speed | (!self.pointer_acceleration as u8) << 4;
         [self.theme, t, startup, w0, w1, h0, h1, self.accent, self.style, pointer, self.language, self.keyboard]
@@ -147,6 +155,7 @@ impl Saved {
             timeout: data[2] as u16,
             splash: data[3] & 1 != 0,
             remember_last: data[3] & 2 != 0,
+            idle_off: Some((data[3] >> 2) & 7).filter(|i| usize::from(*i) < IDLE_OFF_MINUTES.len()).unwrap_or(0),
             mode: (u16::from_le_bytes([data[4], data[5]]), u16::from_le_bytes([data[6], data[7]])),
             // Out of range (a language since removed): automatic.
             language: if usize::from(language) <= languages().count() { language } else { 0 },
@@ -171,6 +180,7 @@ mod tests {
                 accent: 3,
                 splash: true,
                 remember_last: true,
+                idle_off: 2,
                 timeout: 30,
                 mode: (1920, 1200),
                 language: 2,
@@ -178,7 +188,7 @@ mod tests {
             },
             base: Some(0x0403_0201),
         };
-        assert_eq!(s.encode(), [7, 1, 30, 3, 0x80, 0x07, 0xb0, 0x04, 3, 2, 0x14, 2, 3, 1, 2, 3, 4]);
+        assert_eq!(s.encode(), [7, 1, 30, 0x0b, 0x80, 0x07, 0xb0, 0x04, 3, 2, 0x14, 2, 3, 1, 2, 3, 4]);
         assert_eq!(Saved::decode(&s.encode()), Some(s));
     }
 

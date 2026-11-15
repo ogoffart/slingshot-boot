@@ -39,6 +39,10 @@ mod acpi {
         pub fn power(&self) -> Power {
             Power::default()
         }
+
+        pub fn sensors(&self) -> crate::parse::sensors::Sensors {
+            Default::default()
+        }
     }
 }
 
@@ -77,6 +81,11 @@ impl Batteries {
             smbios,
             told: Default::default(),
         }
+    }
+
+    /// The temperatures and fans, through ACPI.
+    pub fn sensors(&self) -> crate::parse::sensors::Sensors {
+        self.acpi.get_or_init(acpi::Acpi::load).as_ref().map(acpi::Acpi::sensors).unwrap_or_default()
     }
 
     pub fn power(&self) -> Power {

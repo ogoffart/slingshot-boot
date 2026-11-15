@@ -177,8 +177,9 @@ impl Connecting {
 }
 
 /// The firmware's own boot timings (ACPI's FPDT), if it records them: how
-/// long it took before starting Slingshot, as a log line.
-fn log_firmware_times() {
+/// long it took before starting Slingshot, as a log line. Returns when
+/// Slingshot started, since the firmware's clock started.
+fn firmware_times() -> Option<core::time::Duration> {
     // SAFETY: The firmware's ACPI tables, in memory it keeps (identity
     // mapped); each read stays within the length the table gives.
     let table = |address: usize| unsafe {
@@ -189,11 +190,11 @@ fn log_firmware_times() {
         let find = |guid| t.iter().find(|e| e.guid == guid).map(|e| e.address as usize);
         find(uefi::table::cfg::ConfigTableEntry::ACPI2_GUID)
     });
-    let Some(rsdp) = rsdp else { return };
+    let rsdp = rsdp?;
     // SAFETY: The RSDP's XSDT address (ACPI 2.0 and later: offset 24).
     let xsdt = unsafe { core::ptr::read_unaligned((rsdp + 24) as *const u64) } as usize;
     if xsdt == 0 {
-        return;
+        return None;
     }
     let xsdt = table(xsdt);
     let fpdt = xsdt.get(36..).unwrap_or_default().as_chunks::<8>().0.iter().map(|e| u64::from_le_bytes(*e) as usize).find(|a| {
@@ -202,17 +203,23 @@ fn log_firmware_times() {
     });
     let Some(fpdt) = fpdt else {
         log::info!("firmware: no boot timings (no FPDT)");
-        return;
+        return None;
     };
     let times = crate::parse::fpdt::fbpt_address(table(fpdt)).and_then(|a| crate::parse::fpdt::boot_times(table(a as usize)));
     match times {
-        Some(t) => log::info!(
-            "firmware: reset done at {} ms, Slingshot loaded at {} ms and started at {} ms (since the firmware's clock started)",
-            t.reset_end / 1_000_000,
-            t.loader_load / 1_000_000,
-            t.loader_start / 1_000_000
-        ),
-        None => log::info!("firmware: no boot timings in its FPDT"),
+        Some(t) => {
+            log::info!(
+                "firmware: reset done at {} ms, Slingshot loaded at {} ms and started at {} ms (since the firmware's clock started)",
+                t.reset_end / 1_000_000,
+                t.loader_load / 1_000_000,
+                t.loader_start / 1_000_000
+            );
+            (t.loader_start > 0).then(|| core::time::Duration::from_nanos(t.loader_start))
+        }
+        None => {
+            log::info!("firmware: no boot timings in its FPDT");
+            None
+        }
     }
 }
 
@@ -277,6 +284,8 @@ struct UefiBackend {
     /// What `boot_data` read, for `rescan`.
     last: core::cell::RefCell<LastRead>,
     boot_once: sdboot::OncePerBoot,
+    /// How long the firmware took to start Slingshot.
+    boot_time: core::time::Duration,
     #[cfg(feature = "luks")]
     luks: Rc<luks::Luks>,
 }
@@ -295,6 +304,11 @@ struct LastRead {
 }
 
 impl UefiBackend {
+    /// The batteries' (and temperatures') reader, made the first time.
+    fn batteries(&self) -> &battery::Batteries {
+        self.batteries.get_or_init(|| battery::Batteries::new(sysinfo::smbios().batteries))
+    }
+
     /// The file system of `volumes()[volume]`.
     fn disk(&self, volume: usize) -> Result<uefi::Handle, String> {
         self.volumes.borrow().get(volume).map(|v| v.0).ok_or_else(|| String::from("no such disk"))
@@ -433,7 +447,10 @@ impl Backend for UefiBackend {
 
         let fw_title = format!("{} {}", vendor, firmware_version());
         let smbios_text = smbios.version.map(|(a, b)| format!("SMBIOS {a}.{b}")).unwrap_or_default();
-        let fw_detail = join_non_empty(&[&uefi_text, &smbios_text, &smbios.bios_date], " · ");
+        // "Starts in 4.2 s": tenths of a second.
+        let tenths = self.boot_time.as_millis().div_ceil(100);
+        let starts = trf("Starts in {} s", &[&format!("{}.{}", tenths / 10, tenths % 10)]);
+        let fw_detail = join_non_empty(&[&starts, &uefi_text, &smbios_text, &smbios.bios_date], " · ");
 
 
         let secure_boot = sysinfo::secure_boot();
@@ -472,7 +489,11 @@ impl Backend for UefiBackend {
     }
 
     fn power(&self) -> crate::parse::battery::Power {
-        self.batteries.get_or_init(|| battery::Batteries::new(sysinfo::smbios().batteries)).power()
+        self.batteries().power()
+    }
+
+    fn sensors(&self) -> crate::parse::sensors::Sensors {
+        self.batteries().sensors()
     }
 
     fn date_time(&self) -> Option<crate::app::DateTime> {
@@ -837,7 +858,9 @@ pub fn main() -> Status {
         "x86, software floating point (slower)"
     };
     log::info!("Slingshot {} starting ({build})", env!("CARGO_PKG_VERSION"));
-    log_firmware_times();
+    // The firmware's own timing, else the processor's counter (from about
+    // the reset).
+    let boot_time = firmware_times().unwrap_or(started);
     loader_interface::announce(started, &own_fs_device_path(), &bootvars::own_file_path());
 
     // The drivers and the other devices: after the first frame
@@ -858,6 +881,7 @@ pub fn main() -> Status {
         last: Default::default(),
         boot_once: Default::default(),
         order_attributes,
+        boot_time,
         #[cfg(feature = "luks")]
         luks: Default::default(),
     });

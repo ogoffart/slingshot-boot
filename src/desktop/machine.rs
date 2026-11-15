@@ -247,6 +247,42 @@ pub fn space(dir: &Path) -> Option<(u64, u64)> {
     Some((s.f_bavail * s.f_frsize, s.f_blocks * s.f_frsize))
 }
 
+/// The thermal zones (`/sys/class/thermal`) and the fans hwmon knows.
+pub fn sensors() -> crate::parse::sensors::Sensors {
+    use crate::parse::sensors::{Fan, Sensors, Temperature};
+    let read = |path: PathBuf| std::fs::read_to_string(path).ok().map(|s| s.trim().to_string());
+    let mut sensors = Sensors::default();
+    let sorted = |dir: &str, prefix: &str| {
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .map(|e| e.path())
+            .collect();
+        paths.sort();
+        paths
+    };
+    for zone in sorted("/sys/class/thermal", "thermal_zone") {
+        // Millidegrees Celsius.
+        let Some(millis) = read(zone.join("temp")).and_then(|t| t.parse::<i64>().ok()) else { continue };
+        let name = read(zone.join("type")).unwrap_or_default();
+        sensors.temperatures.push(Temperature { name, celsius: millis as f32 / 1000., critical: None });
+    }
+    for hwmon in sorted("/sys/class/hwmon", "hwmon") {
+        let name = read(hwmon.join("name")).unwrap_or_default();
+        for input in sorted(&hwmon.to_string_lossy(), "fan") {
+            if !input.to_string_lossy().ends_with("_input") {
+                continue;
+            }
+            if let Some(rpm) = read(input).and_then(|r| r.parse().ok()) {
+                sensors.fans.push(Fan { name: name.clone(), rpm });
+            }
+        }
+    }
+    sensors
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

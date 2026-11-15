@@ -557,6 +557,9 @@ export global SettingsPage {
     // one started last.
     in-out property <int> default-index;
     callback default-selected(int);
+    // Turn off after so long without input: Never, 5, 10, 30, 60 minutes.
+    in-out property <int> idle-off-index;
+    callback idle-off-selected(int);
     in-out property <int> timeout-seconds;
     callback timeout-changed(int);
 
@@ -976,7 +979,7 @@ export component SettingsScreen inherits Rectangle {
                 pending <=> root.pending-focus;
                 take-focus(at-end) => {
                     if at-end {
-                        timeout-picker.focus();
+                        idle-picker.focus();
                     } else {
                         startup-picker.focus();
                     }
@@ -985,18 +988,20 @@ export component SettingsScreen inherits Rectangle {
                 // what isn't the two others is the first setting. Its
                 // controls go one by one, like Tab.
                 step(d) => {
-                    if SettingsPage.startup-index == 1 && !timeout-picker.has-focus
+                    if SettingsPage.startup-index == 1 && !timeout-picker.has-focus && !idle-picker.has-focus
                         && !(default-picker.has-focus && d > 0) && !(startup-picker.has-focus && d < 0) {
                         Focus.move(d > 0);
                         return true;
                     }
-                    let n = (timeout-picker.has-focus ? 2 : default-picker.has-focus ? 1 : 0) + d;
+                    let n = (idle-picker.has-focus ? 3 : timeout-picker.has-focus ? 2 : default-picker.has-focus ? 1 : 0) + d;
                     if n == 0 {
                         startup-picker.focus();
                     } else if n == 1 {
                         default-picker.focus();
                     } else if n == 2 {
                         timeout-picker.focus();
+                    } else if n == 3 {
+                        idle-picker.focus();
                     } else {
                         return false;
                     }
@@ -1115,6 +1120,18 @@ export component SettingsScreen inherits Rectangle {
                             font-size: 13px;
                             color: Theme.text-muted;
                             vertical-alignment: center;
+                        }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    SettingLabel { text: @tr("Turn off when idle"); }
+                    idle-picker := SegmentedControl {
+                        max-width: root.control-width;
+                        options: [@tr("Never"), @tr("5 min"), @tr("10 min"), @tr("30 min"), @tr("1 h")];
+                        current <=> SettingsPage.idle-off-index;
+                        activated(i) => {
+                            SettingsPage.idle-off-selected(i);
                         }
                     }
                 }

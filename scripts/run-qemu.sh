@@ -10,7 +10,7 @@
 # Options:
 #   --headless   no window (control QEMU through the monitor socket qemu/mon.sock)
 #   --reset      start again from fresh firmware variables
-#   --battery    add a laptop battery and AC adapter (scripts/qemu-battery.asl;
+#   --battery    add a laptop battery, AC adapter, thermal zone and fan (scripts/qemu-battery.asl;
 #                needs iasl: Arch acpica, Debian/Ubuntu acpica-tools)
 #   --aarch64    a 64-bit ARM machine (QEMU's `virt`, with AAVMF), emulated
 #                unless the host is ARM: slow. Its own disk and variables

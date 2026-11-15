@@ -6,6 +6,23 @@ import { Icon } from "icons.slint";
 import { InfoItem, MemorySegment, Button, BatteryInfo, Panel } from "widgets.slint";
 import { AboutSlint } from "std-widgets.slint";
 
+// A temperature: its gauge (`level`, 0 to 1), whether it's near its
+// critical temperature, its graph (SVG paths in 100 × 30: the line, the area
+// under it).
+export struct SensorLine {
+    name: string,
+    value: string,
+    level: float,
+    hot: bool,
+    line: string,
+    area: string,
+}
+
+export struct FanLine {
+    name: string,
+    rpm: int,
+}
+
 // The System screen's data, and its clock.
 export global System {
     in property <[InfoItem]> items: Platform.uses-mock-data ? [
@@ -15,6 +32,13 @@ export global System {
         { label: "Firmware", icon: "firmware", title: "Sample firmware", detail: "Sample data" },
         { label: "Secure Boot", title: "Sample state", detail: "Sample data", icon: "shield-off" },
     ] : [];
+    // The temperatures and fans (none: no row), the hottest over them.
+    in property <string> sensors-summary: Platform.uses-mock-data ? "52 °C" : "";
+    in property <[SensorLine]> temperatures: Platform.uses-mock-data ? [
+        { name: "CPU", value: "52 °C", level: 0.5, line: "M0 20 L50 12 L100 8", area: "M0 20 L50 12 L100 8 L100 30 L0 30 Z" },
+        { name: "TZ01", value: "38 °C", level: 0.38, line: "M0 18 L100 18", area: "M0 18 L100 18 L100 30 L0 30 Z" },
+    ] : [];
+    in property <[FanLine]> fans: Platform.uses-mock-data ? [{ name: "FAN0", rpm: 2100 }] : [];
     in property <[MemorySegment]> memory: Platform.uses-mock-data ? [
         { weight: 30, color: #5b8cff },
         { weight: 0.5, color: #2fb6a3 },
@@ -58,6 +82,22 @@ export global System {
     }
 }
 
+// A row's icon, on its tile.
+component RowIcon inherits Rectangle {
+    in property <string> kind;
+    in property <color> tint;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: Theme.surface-strong;
+    Icon {
+        kind: root.kind;
+        size: 18px;
+        thickness: 2px;
+        color: root.tint;
+    }
+}
+
 // A row of the machine's list: an icon, what it is, the value.
 export component InfoRow inherits Rectangle {
     in property <string> icon;
@@ -81,17 +121,9 @@ export component InfoRow inherits Rectangle {
         spacing: 14px;
         VerticalLayout {
             alignment: center;
-            Rectangle {
-                width: 34px;
-                height: 34px;
-                border-radius: 9px;
-                background: Theme.surface-strong;
-                Icon {
-                    kind: root.icon;
-                    size: 18px;
-                    thickness: 2px;
-                    color: root.good ? Theme.good : root.warn ? Theme.orange : Theme.accent;
-                }
+            RowIcon {
+                kind: root.icon;
+                tint: root.good ? Theme.good : root.warn ? Theme.orange : Theme.accent;
             }
         }
         Text {
@@ -181,17 +213,9 @@ component BatteryRow inherits Rectangle {
             spacing: 14px;
             VerticalLayout {
                 alignment: center;
-                Rectangle {
-                    width: 34px;
-                    height: 34px;
-                    border-radius: 9px;
-                    background: Theme.surface-strong;
-                    Icon {
-                        kind: root.info.direction > 0 ? "bolt" : "battery";
-                        size: 18px;
-                        thickness: 2px;
-                        color: root.fill;
-                    }
+                RowIcon {
+                    kind: root.info.direction > 0 ? "bolt" : "battery";
+                    tint: root.fill;
                 }
             }
             VerticalLayout {
@@ -266,6 +290,203 @@ component BatteryRow inherits Rectangle {
     }
 }
 
+// Cool to hot, along the gauges: the theme's colors.
+global Heat {
+    out property <color> cool: Theme.accents[1];
+    out property <color> warm: Theme.orange;
+    out property <color> hot: Theme.danger;
+}
+
+// A temperature's gauge: a bar filled from cool to hot, `level` of the way.
+component Gauge inherits Rectangle {
+    in property <float> level;
+    height: 8px;
+    border-radius: self.height / 2;
+    background: Theme.surface-strong;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width * root.level;
+        animate width { duration: Theme.motion ? 600ms : 0ms; easing: ease-out; }
+        border-radius: parent.border-radius;
+        clip: true;
+        // The whole gradient, of which the bar shows its part.
+        Rectangle {
+            x: 0;
+            width: root.width;
+            background: @linear-gradient(90deg, Heat.cool 0%, Heat.warm 65%, Heat.hot 100%);
+        }
+    }
+}
+
+// The last minutes of a temperature: its line, the area under it fading.
+component Sparkline inherits Rectangle {
+    in property <string> line;
+    in property <string> area;
+    in property <color> tint;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 30;
+        commands: root.area;
+        fill: @linear-gradient(180deg, root.tint.with-alpha(0.35) 0%, root.tint.with-alpha(0) 100%);
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 30;
+        commands: root.line;
+        stroke: root.tint;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+}
+
+// A fan whose three blades turn, faster with its speed: a step every 80 ms
+// (the real speed would only flicker, and each step draws the path again).
+component FanGlyph inherits Rectangle {
+    in property <int> rpm;
+    in property <bool> animate;
+    in property <color> tint;
+    property <angle> spin;
+    Timer {
+        interval: 80ms;
+        running: root.animate;
+        // A turn a second at 1500 RPM.
+        triggered => { root.spin = mod(root.spin + root.rpm / 1500 * 360deg * 0.08, 360deg); }
+    }
+    function blade(a: angle) -> string {
+        "M12 12 Q" + (12 + 8 * cos(a - 35deg)) + " " + (12 + 8 * sin(a - 35deg))
+            + " " + (12 + 9.5 * cos(a)) + " " + (12 + 9.5 * sin(a))
+            + " Q" + (12 + 4 * cos(a + 30deg)) + " " + (12 + 4 * sin(a + 30deg)) + " 12 12 Z "
+    }
+    width: 24px;
+    height: 24px;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        fill: root.tint;
+        commands: root.blade(root.spin) + root.blade(root.spin + 120deg) + root.blade(root.spin + 240deg);
+    }
+    Rectangle {
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.surface;
+        border-width: 1.5px;
+        border-color: root.tint;
+    }
+}
+
+// A line under the sensors' header: the name, then what it shows.
+component SensorLineRow inherits HorizontalLayout {
+    in property <string> name;
+    padding-left: 48px;
+    spacing: 14px;
+    height: 30px;
+    Text {
+        width: 106px;
+        text: root.name;
+        font-size: 13px;
+        color: Theme.text-muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    @children
+}
+
+// The temperatures and fans: a gauge, the value and a graph per
+// temperature, a turning fan per fan.
+component SensorsRow inherits Rectangle {
+    in property <bool> animate;
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Theme.divider;
+    }
+    VerticalLayout {
+        padding-left: 18px;
+        padding-right: 20px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 14px;
+            VerticalLayout {
+                alignment: center;
+                RowIcon {
+                    kind: "thermometer";
+                    tint: Theme.accent;
+                }
+            }
+            Text {
+                min-width: 120px;
+                text: @tr("Temperatures");
+                font-size: 15px;
+                color: Theme.text-soft;
+                vertical-alignment: center;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: System.sensors-summary;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+        for t in System.temperatures: SensorLineRow {
+            name: t.name;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                Gauge { level: t.level; }
+            }
+            Text {
+                width: 56px;
+                text: t.value;
+                font-size: 14px;
+                font-weight: 600;
+                color: t.hot ? Heat.hot : Theme.text;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+            Sparkline {
+                width: 120px;
+                line: t.line;
+                area: t.area;
+                tint: t.hot ? Heat.hot : t.level > 0.65 ? Heat.warm : Heat.cool;
+            }
+        }
+        for f in System.fans: SensorLineRow {
+            name: f.name;
+            VerticalLayout {
+                alignment: center;
+                FanGlyph {
+                    rpm: f.rpm;
+                    animate: root.animate && f.rpm > 0;
+                    tint: Theme.accent;
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: @tr("{} RPM", f.rpm);
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 // The firmware clock, with its Change button.
 component ClockCard inherits Panel {
     in property <string> text;
@@ -318,6 +539,8 @@ export component SystemScreen inherits Rectangle {
     // The screen is shown: the battery's gradient moves.
     in property <bool> active;
     in property <bool> can-change-time;
+    // A dialog is over it: nothing to animate.
+    in property <bool> covered;
     callback change-time();
     // Entering the screen: the keyboard focus on the Change button.
     property <int> focus-request;
@@ -377,6 +600,9 @@ export component SystemScreen inherits Rectangle {
                     if System.battery.present: BatteryRow {
                         info: System.battery;
                         animate: root.active;
+                    }
+                    if System.temperatures.length > 0 || System.fans.length > 0: SensorsRow {
+                        animate: root.active && !root.covered && Theme.motion;
                     }
                 }
             }

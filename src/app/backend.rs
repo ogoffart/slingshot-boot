@@ -326,6 +326,15 @@ pub trait Backend {
     fn power(&self) -> crate::parse::battery::Power {
         Default::default()
     }
+    /// Turn off after so many seconds without input, whatever the setting
+    /// (the simulator's `--power-off-after`).
+    fn idle_off_override(&self) -> Option<u32> {
+        None
+    }
+    /// The temperatures and fans, read again each time.
+    fn sensors(&self) -> crate::parse::sensors::Sensors {
+        Default::default()
+    }
     /// Said after the top bar's clock: the simulator's is UTC.
     fn time_zone(&self) -> &str {
         ""

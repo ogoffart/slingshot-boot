@@ -34,6 +34,7 @@ use super::super::port::{self, inb, inl, inw, outb, outl, outw};
 use crate::uefi_platform::uptime;
 use super::{NO_PROBE, PROBING};
 use crate::parse::battery::Power;
+use crate::parse::sensors::{self, Fan, Sensors, Temperature};
 use crate::parse::battery::acpi::{self as battery, AmlValue};
 
 /// Where EC regions are moved to: above any physical address.
@@ -53,6 +54,8 @@ static EC_DATA: AtomicU16 = AtomicU16::new(0x62);
 static EC_COMMAND: AtomicU16 = AtomicU16::new(0x66);
 /// Whether the first reading was logged.
 static LOGGED: AtomicBool = AtomicBool::new(false);
+/// The same for the temperatures and fans.
+static SENSORS_LOGGED: AtomicBool = AtomicBool::new(false);
 static EC_DEAD: AtomicBool = AtomicBool::new(false);
 
 impl Ec {
@@ -286,6 +289,11 @@ pub struct Acpi {
     interpreter: Interpreter<Host>,
     batteries: Vec<AmlName>,
     adapters: Vec<AmlName>,
+    /// The thermal zones and the fans (`PNP0C0B`), with their names.
+    zones: Vec<(AmlName, String)>,
+    fans: Vec<(AmlName, String)>,
+    /// The zones' critical temperatures (`_CRT`): read once.
+    critical: core::cell::OnceCell<Vec<Option<f32>>>,
     /// Every device, with its ids (`_HID`, `_CID`).
     devices: Vec<(AmlName, Vec<String>)>,
     /// The methods that failed, logged once (they're read every second).
@@ -297,6 +305,13 @@ fn rsdp() -> Option<usize> {
         let find = |guid| t.iter().find(|e| e.guid == guid).map(|e| e.address as usize);
         find(ConfigTableEntry::ACPI2_GUID).or_else(|| find(ConfigTableEntry::ACPI_GUID))
     })
+}
+
+/// The last part of a name, as the system calls it (`TZ00` for
+/// `\_TZ_.TZ00`), without its padding.
+fn last_segment(name: &AmlName) -> String {
+    let text = alloc::format!("{name}");
+    String::from(text.rsplit('.').next().unwrap_or(&text).trim_end_matches('_'))
 }
 
 /// `device.method`, e.g. `\_SB.BAT0._BST`.
@@ -371,7 +386,16 @@ impl Acpi {
                     Err(e) => log::warn!("battery: loading ACPI table {i}: {e:?}"),
                 }
             }
-            let mut acpi = Acpi { interpreter, batteries: Vec::new(), adapters: Vec::new(), devices: Vec::new(), failed: Default::default() };
+            let mut acpi = Acpi {
+                interpreter,
+                batteries: Vec::new(),
+                adapters: Vec::new(),
+                zones: Vec::new(),
+                fans: Vec::new(),
+                critical: Default::default(),
+                devices: Vec::new(),
+                failed: Default::default(),
+            };
             acpi.find_devices();
             log::info!("battery: {} batteries, {} AC adapters", acpi.batteries.len(), acpi.adapters.len());
             Some(acpi)
@@ -383,7 +407,7 @@ impl Acpi {
     fn find_devices(&mut self) {
         let token = self.interpreter.object_token.lock();
         let mut namespace = self.interpreter.namespace.lock().clone();
-        let mut devices = Vec::new();
+        let (mut devices, mut zones) = (Vec::new(), Vec::new());
         let _ = namespace.traverse(|path, level| {
             for (_, object) in level.values.values() {
                 if let Object::OpRegion(region) = &**object
@@ -399,6 +423,8 @@ impl Acpi {
             }
             if level.kind == NamespaceLevelKind::Device {
                 devices.push(path.clone());
+            } else if level.kind == NamespaceLevelKind::ThermalZone {
+                zones.push(path.clone());
             }
             Ok(true)
         });
@@ -406,6 +432,8 @@ impl Acpi {
         drop(namespace);
 
         log::info!("battery: {} devices in the namespace", devices.len());
+        log::info!("sensors: thermal zones {}", zones.iter().map(|z| alloc::format!("{z}")).collect::<Vec<_>>().join(", "));
+        self.zones = zones.into_iter().map(|z| { let name = last_segment(&z); (z, name) }).collect();
         let mut ec = None;
         for device in devices {
             let ids = ids(&self.interpreter, &device);
@@ -420,8 +448,12 @@ impl Acpi {
             } else if has("PNP0C09") && ec.is_none() {
                 log::info!("battery: embedded controller {device} {ids:?}");
                 ec = Some(device);
-            } else if ids.iter().any(|i| i == "ACPI0002" || i == "PNP0C0B") {
-                // A Smart Battery System or a fan: not read, but worth knowing.
+            } else if has("PNP0C0B") {
+                log::info!("sensors: fan {device} {ids:?}");
+                let name = last_segment(&device);
+                self.fans.push((device, name));
+            } else if has("ACPI0002") {
+                // A Smart Battery System: not read, but worth knowing.
                 log::info!("battery: also {device} {ids:?}");
             }
         }
@@ -537,6 +569,40 @@ impl Acpi {
             },
             _ => AmlValue::Other,
         }
+    }
+
+    /// The thermal zones' temperatures and the fans' speeds (the fans whose
+    /// `_FST` says it).
+    pub fn sensors(&self) -> Sensors {
+        let first = !SENSORS_LOGGED.swap(true, Ordering::Relaxed);
+        probing(|| {
+            let mut sensors = Sensors::default();
+            let critical = self.critical.get_or_init(|| {
+                let critical: Vec<_> = self.zones.iter().map(|(zone, _)| self.integer(zone, "_CRT")).collect();
+                log::info!("sensors: _CRT = {critical:?}");
+                critical.into_iter().map(|c| c.and_then(sensors::celsius_from_tenths_kelvin)).collect()
+            });
+            for ((zone, name), critical) in self.zones.iter().zip(critical) {
+                let tmp = self.integer(zone, "_TMP");
+                if first {
+                    log::info!("sensors: {zone}._TMP = {tmp:?}");
+                }
+                if let Some(celsius) = tmp.and_then(sensors::celsius_from_tenths_kelvin) {
+                    sensors.temperatures.push(Temperature { name: name.clone(), celsius, critical: *critical });
+                }
+            }
+            for (fan, name) in &self.fans {
+                let fst = self.package(fan, "_FST");
+                if first {
+                    log::info!("sensors: {fan}._FST = {fst:?}");
+                }
+                let values: Vec<u64> = fst.unwrap_or_default().iter().map(|v| if let AmlValue::Integer(i) = v { *i } else { u64::MAX }).collect();
+                if let Some(rpm) = sensors::rpm_from_fst(&values) {
+                    sensors.fans.push(Fan { name: name.clone(), rpm });
+                }
+            }
+            sensors
+        })
     }
 
     pub fn power(&self) -> Power {

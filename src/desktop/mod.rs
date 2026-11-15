@@ -34,6 +34,8 @@ Options of `simulate`:
   --no-systemd-boot   example entries without systemd-boot
   --no-battery        a desktop computer: no battery on the System screen
   --hotplug           a USB stick plugged in and out every 4 seconds
+  --power-off-after S turn off after S seconds without input, whatever the
+                      setting (the last 15 are counted down)
   --hibernated        a Linux system hibernated (the one with kernel
                       6.17.1-simulated): it's resumed first
   --firmware-picker   pictures are chosen in the boot manager's own file
@@ -71,7 +73,7 @@ pub fn main() {
                 println!("{USAGE}");
                 return;
             }
-            "--this-machine" | "--mode" | "--light" | "--splash" | "--no-systemd-boot" | "--no-battery" | "--hibernated" | "--hotplug"
+            "--this-machine" | "--mode" | "--light" | "--splash" | "--no-systemd-boot" | "--no-battery" | "--hibernated" | "--hotplug" | "--power-off-after"
             | "--firmware-picker" => fail(&format!("{arg} is an option of the simulator: slingshot simulate {arg}")),
             other => fail(&format!("unknown option {other}")),
         }
@@ -92,6 +94,7 @@ fn simulate(mut args: impl Iterator<Item = String>) {
     let mut firmware_picker = false;
     let mut hibernated = false;
     let mut hotplug = false;
+    let mut power_off_after = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--mode" => {
@@ -108,6 +111,10 @@ fn simulate(mut args: impl Iterator<Item = String>) {
             "--firmware-picker" => firmware_picker = true,
             "--hibernated" => hibernated = true,
             "--hotplug" => hotplug = true,
+            "--power-off-after" => {
+                let seconds = args.next().and_then(|s| s.parse().ok());
+                power_off_after = Some(seconds.unwrap_or_else(|| fail("--power-off-after needs a number of seconds")));
+            }
             "--config-dir" => config_dir = Some(args.next().unwrap_or_else(|| fail("--config-dir needs a directory")).into()),
             "--this-machine" => this_machine = true,
             "--esp" => esp = Some(args.next().unwrap_or_else(|| fail("--esp needs a directory")).into()),
@@ -142,6 +149,7 @@ fn simulate(mut args: impl Iterator<Item = String>) {
     backend.firmware_picker = firmware_picker;
     backend.hibernated.set(hibernated);
     backend.hotplug = hotplug.then(std::time::Instant::now);
+    backend.power_off_after = power_off_after;
     simulator::run(backend, simulator::Options { mode, settings });
 }
 
