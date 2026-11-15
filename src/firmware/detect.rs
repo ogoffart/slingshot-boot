@@ -127,7 +127,15 @@ pub fn scan(started: &[(Vec<u8>, String)], devices: &[Vec<u8>], entries_fs: &[u8
             }
             log::info!("found: {} ({})", f.title, f.program);
             let texts = Texts::Found(f.kind, f.version);
-            let mut entry = FoundEntry { title: f.title, kind: f.kind, fs: fs.clone(), program: f.program, options: f.options, ..Default::default() };
+            let mut entry = FoundEntry {
+                title: f.title,
+                kind: f.kind,
+                fs: fs.clone(),
+                program: f.program,
+                options: f.options,
+                newest: f.newest,
+                ..Default::default()
+            };
             texts.apply(&mut entry);
             all.push((entry, texts));
         }

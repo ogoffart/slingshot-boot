@@ -25,7 +25,13 @@ def open_customize(window):
 def test_a_click_in_a_field_places_the_cursor(window):
     open_customize(window)
     field = window.query_descendants().match_id("CustomizeDialog::options-input").find_one()
+    # Filled with the options the entry starts with: emptied first.
+    prefilled = field.query_descendants().match_id("TextField::input").find_one().accessible_value
+    assert prefilled
     field.single_click(PointerEventButton.Left)
+    press(window, keys.End)
+    for _ in prefilled:
+        press(window, keys.Backspace)
     for ch in "abc":
         press(window, ch)
     # A click at the start of the text.

@@ -121,8 +121,11 @@ for that.
 ## Boot entries
 
 Each `[[entry]]` changes the entries `match` names: a title as the menu shows
-it, or a systemd-boot entry's file name (`arch.conf`). `*` and `?` are
-wildcards, case doesn't matter, and the first matching section applies.
+it, or a systemd-boot entry's file name (`arch.conf`). The newest kernel found
+on a disk is matched by its system's name without its version and ", newest
+kernel" (`Ubuntu, newest kernel`), so that its section still applies after an
+update. `*` and `?` are wildcards, case doesn't matter, and the first matching
+section applies.
 
 ```toml
 [[entry]]

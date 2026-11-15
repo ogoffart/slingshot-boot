@@ -1589,8 +1589,11 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             customize.set_title(rule.and_then(|r| r.title.clone()).filter(|_| card.custom.is_none()).unwrap_or_default().into());
             customize.set_more(card.more);
             customize.set_is_default(ui.global::<BootMenu>().get_default_entry() == index);
-            customize.set_options(rule.and_then(|r| r.options.clone()).unwrap_or_default().into());
-            customize.set_options_placeholder(card.kernel_options().unwrap_or_default().into());
+            // The options it starts with, to change rather than retype: saved
+            // only if they are (`on_save`). Emptied, the entry's own.
+            let options = card.kernel_options().unwrap_or_default();
+            customize.set_options(options.clone().into());
+            customize.set_options_placeholder(options.into());
             customize.set_visible(true);
         });
     }
@@ -1613,7 +1616,12 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                 title: customize.get_title().trim().into(),
                 more: (more != card.more_by_default() || card.custom.is_some()).then_some(more),
                 default: customize.get_is_default(),
-                options: card.options().filter(|_| ui.get_can_edit_options()).map(|_| customize.get_options().trim().into()),
+                // Unchanged, not written: they'd stop following the entry's.
+                options: card
+                    .options()
+                    .filter(|_| ui.get_can_edit_options())
+                    .map(|_| String::from(customize.get_options().trim()))
+                    .filter(|o| Some(o.as_str()) != card.kernel_options().as_deref().map(str::trim)),
                 icon: (customize.get_icon() as usize).checked_sub(1).and_then(|i| ICONS.get(i)).copied(),
                 image: (customize.get_picture() as usize).checked_sub(1).and_then(|i| st.pictures.get(i)).cloned(),
             };

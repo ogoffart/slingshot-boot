@@ -116,6 +116,7 @@ mod tests {
             match_title: title.to_string(),
             custom: None,
             icon_chosen: false,
+            newest: false,
         }
     }
 

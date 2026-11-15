@@ -13,6 +13,10 @@ use alloc::vec::Vec;
 use super::config::{self, Config};
 use super::{BootOption, FoundEntry, LoaderConfig, LoaderEntry, Target};
 
+/// How the newest kernel found on a partition is remembered, and matched
+/// by slingshot.toml's rules (after its system's name).
+const NEWEST: &str = "newest kernel";
+
 /// What a card of the boot picker does.
 #[derive(Clone, Debug, Default)]
 pub enum Action {
@@ -46,6 +50,10 @@ pub struct Card {
     pub custom: Option<usize>,
     /// slingshot.toml chose its icon (`kind`): no logo of its own then.
     pub icon_chosen: bool,
+    /// The newest kernel found on its partition: remembered as that, not
+    /// by its file, so that it stays the default when the system updates
+    /// its kernel.
+    pub newest: bool,
 }
 
 /// What the boot picker shows: the main row or "More…".
@@ -85,7 +93,8 @@ impl Card {
             Action::Start(Target::Found { fs, program, .. }) if !on_usb(fs) => {
                 let partition = crate::parse::detect::partition_uuid(fs)
                     .unwrap_or_else(|| fs.iter().map(|b| format!("{b:02x}")).collect());
-                Some(format!("found:{partition}:{program}"))
+                let what = if self.newest { NEWEST } else { program.as_str() };
+                Some(format!("found:{partition}:{what}"))
             }
             Action::Start(Target::Firmware(_)) if self.kind == "usb" => None,
             Action::Start(Target::Firmware(_)) => {
@@ -189,13 +198,19 @@ pub fn build_cards(
         }
     }
     // What was found on the disks, after the firmware's entries.
-    cards.extend(found.iter().map(|f| Card {
-        title: f.title.clone(),
-        subtitle: f.subtitle.clone(),
-        kind: f.kind,
-        action: Action::Start(Target::Found { fs: f.fs.clone(), program: f.program.clone(), options: f.options.clone() }),
-        ..Default::default()
-    }));
+    for f in found {
+        cards.push(Card {
+            title: f.title.clone(),
+            subtitle: f.subtitle.clone(),
+            kind: f.kind,
+            action: Action::Start(Target::Found { fs: f.fs.clone(), program: f.program.clone(), options: f.options.clone() }),
+            // Not its title, which has the version ("Ubuntu 26.04.1 LTS"),
+            // nor the system alone: the distribution's own entry has it.
+            match_title: f.newest.as_ref().map_or_else(String::new, |system| format!("{system}, {NEWEST}")),
+            newest: f.newest.is_some(),
+            ..Default::default()
+        });
+    }
     if firmware_setup {
         cards.push(Card {
             title: tr("Firmware setup"),
@@ -236,6 +251,7 @@ fn custom_card(rule: &config::EntryRule, index: usize) -> Option<Card> {
         more: rule.more.unwrap_or(false),
         whole_device: false,
         icon_chosen: rule.icon.is_some(),
+        newest: false,
     })
 }
 
@@ -292,12 +308,16 @@ pub fn apply_rules(cards: &mut Vec<Card>, default: usize, config: &Config, one_s
             if let Some(more) = rule.more {
                 card.more = more;
             }
-            if let (Some(new), Action::Start(Target::LoaderEntry { options, program, .. })) =
-                (&rule.options, &mut card.action)
-            {
+            // A systemd-boot entry's, or a kernel's found on a disk.
+            let started = match &mut card.action {
+                Action::Start(Target::LoaderEntry { options, program, .. }) => Some((options, !program.is_empty())),
+                Action::Start(Target::Found { options, .. }) => Some((options, true)),
+                _ => None,
+            };
+            if let (Some(new), Some((options, kernel))) = (&rule.options, started) {
                 // The initrds stay: only the kernel options change.
                 let initrds: Vec<&str> = options.split(' ').filter(|o| o.starts_with("initrd=")).collect();
-                *options = if program.is_empty() { new.clone() } else { [initrds.join(" "), new.clone()].join(" ").trim().into() };
+                *options = if kernel { [initrds.join(" "), new.clone()].join(" ").trim().into() } else { new.clone() };
             }
         }
         // The firmware setup is only the default when there's nothing else
@@ -705,20 +725,47 @@ mod tests {
             kind,
             program: "\\p.efi".into(),
             options: "root=x".into(),
+            newest: (kind == "linux").then(|| title.into()),
             ..Default::default()
         };
         let options = [option(1, "Ubuntu", false)];
-        let all = [found("macOS 14.5", "apple"), found("Windows", "windows"), found("Fedora", "linux")];
+        let older = FoundEntry { program: "\\old.efi".into(), newest: None, ..found("Fedora", "linux") };
+        let all = [found("macOS 14.5", "apple"), found("Windows", "windows"), found("Fedora", "linux"), older];
         let (mut cards, default) = build_cards(&options, None, &all, true);
         let default = apply_rules(&mut cards, default, &Config::default(), None, Last::default());
         let placed: Vec<(&str, bool)> = cards.iter().map(|c| (c.title.as_str(), c.more)).collect();
         assert_eq!(
             placed,
-            [("Ubuntu", false), ("macOS 14.5", false), ("Windows", false), ("Fedora", true), ("Firmware setup", true)]
+            [
+                ("Ubuntu", false),
+                ("macOS 14.5", false),
+                ("Windows", false),
+                ("Fedora", true),
+                ("Fedora", true),
+                ("Firmware setup", true)
+            ]
         );
         assert_eq!(default, 0);
         // A found kernel's options can be edited (E).
         assert_eq!(cards[3].options(), Some("root=x"));
+        // The newest kernel is remembered as that, the older ones by file.
+        assert_eq!(cards[3].key().as_deref(), Some("found::newest kernel"));
+        assert_eq!(cards[4].key().as_deref(), Some("found::\\old.efi"));
+        // slingshot.toml's rules match it whatever its version.
+        assert_eq!(cards[3].match_title, "Fedora, newest kernel");
+
+        // Its kernel options from slingshot.toml, its initrds kept.
+        let config = config::parse(
+            r#"
+            [[entry]]
+            match = "Fedora, newest kernel"
+            options = "root=y quiet"
+            "#,
+        );
+        let with_initrd = FoundEntry { options: "initrd=\\i.img root=x".into(), ..found("Fedora", "linux") };
+        let (mut cards, default) = build_cards(&[], None, &[with_initrd], false);
+        apply_rules(&mut cards, default, &config, None, Last::default());
+        assert_eq!(cards[0].options(), Some("initrd=\\i.img root=y quiet"));
     }
 
     #[test]

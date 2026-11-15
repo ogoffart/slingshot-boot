@@ -255,6 +255,7 @@ impl SimBackend {
             fs: Vec::new(),
             program: "\\boot\\vmlinuz-6.17.1-simulated".into(),
             options: "initrd=\\boot\\initramfs-6.17.1-simulated.img root=PARTUUID=simulated ro".into(),
+            newest: Some("Simulated Linux".into()),
         }];
         // `boot_data` says the rest (firmware setup, its timeout).
         let boot = BootData { options, order, loader_entries: systemd_boot, found, ..Default::default() };
@@ -459,6 +460,7 @@ fn simulated_stick() -> crate::app::FoundEntry {
         fs: Vec::new(),
         program: "\\EFI\\BOOT\\BOOTX64.EFI".into(),
         options: String::new(),
+        newest: None,
     }
 }
 

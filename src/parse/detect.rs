@@ -37,6 +37,10 @@ pub struct Found {
     pub options: String,
     /// A kernel's version, for its subtitle (translated by the caller).
     pub version: String,
+    /// For the newest kernel of its file system: its system, without the
+    /// version (os-release's NAME, else the title), which slingshot.toml's
+    /// rules match.
+    pub newest: Option<String>,
 }
 
 /// The entry of `dir` named `name`, ignoring case (FAT ignores it, ext4
@@ -104,6 +108,7 @@ fn macos(disk: &dyn Disk, prefix: &[&str]) -> Option<Found> {
         program,
         options: String::new(),
         version: String::new(),
+        newest: None,
     })
 }
 
@@ -226,9 +231,9 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
         .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|c| !c.is_empty());
     let fallback = partuuid.filter(|_| is_root_fs).map(|u| format!("root=PARTUUID={u} ro"));
-    let os_name = text(&["etc", "os-release"])
-        .or_else(|| text(&["usr", "lib", "os-release"]))
-        .and_then(|t| os_release(&t, "PRETTY_NAME").or_else(|| os_release(&t, "NAME")));
+    let release = text(&["etc", "os-release"]).or_else(|| text(&["usr", "lib", "os-release"]));
+    let os_system = release.as_ref().and_then(|t| os_release(t, "NAME"));
+    let os_name = release.as_ref().and_then(|t| os_release(t, "PRETTY_NAME")).or_else(|| os_system.clone());
 
     // What the distribution's boot loader configuration says, per kernel.
     let boot_parts: Vec<&str> = boot_dir.iter().map(String::as_str).collect();
@@ -266,7 +271,7 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
     kernels.sort_by(|a, b| version_cmp(&b.1, &a.1));
     // Microcode first (Arch), then the kernel's initramfs.
     let microcode: Vec<String> = ["intel-ucode.img", "amd-ucode.img"].iter().filter_map(|m| file(m)).collect();
-    kernels
+    let mut found: Vec<Found> = kernels
         .into_iter()
         .filter_map(|(kernel, version)| {
             let config = configured.iter().find(|(k, _)| *k == kernel).map(|(_, c)| c);
@@ -313,9 +318,15 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
                 program: format!("{dir}\\{kernel}"),
                 options: super::bls::command_line(&initrds, &args),
                 version,
+                newest: None,
             })
         })
-        .collect()
+        .collect();
+    // Newest first.
+    if let Some(f) = found.first_mut() {
+        f.newest = Some(os_system.unwrap_or_else(|| f.title.clone()));
+    }
+    found
 }
 
 /// What `disk` can start. `partuuid` is the partition's GUID, for a kernel's
@@ -342,6 +353,7 @@ pub fn scan(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
             program,
             options: String::new(),
             version: String::new(),
+            newest: None,
         });
     }
     found.extend(linux(disk, partuuid));
@@ -572,6 +584,9 @@ submenu 'Advanced options for Ubuntu' $menuentry_id_option 'gnulinux-advanced-ab
         assert_eq!(found[1].options, "initrd=\\boot\\initrd.img-6.8.0-40-generic root=UUID=abcd ro quiet splash");
         // No os-release here: GRUB's menu names the system.
         assert_eq!((found[0].title.as_str(), found[1].title.as_str()), ("Ubuntu", "Ubuntu"));
+        // No os-release: the title.
+        assert_eq!(found[0].newest.as_deref(), Some("Ubuntu"));
+        assert_eq!(found[1].newest, None);
 
         // A separate /boot partition: only GRUB knows the root.
         let boot = Fake::new(&[
@@ -597,7 +612,7 @@ submenu 'Advanced options for Ubuntu' $menuentry_id_option 'gnulinux-advanced-ab
     #[test]
     fn fedora_entries_on_the_root() {
         let root = Fake::new(&[
-            ("\\etc\\os-release", "PRETTY_NAME=\"Fedora Linux 43\"\n"),
+            ("\\etc\\os-release", "NAME=\"Fedora Linux\"\nPRETTY_NAME=\"Fedora Linux 43\"\n"),
             ("\\boot\\loader\\entries\\abc-6.17.2.conf", "title Fedora Linux (6.17.2)\nversion 6.17.2\nlinux /vmlinuz-6.17.2\ninitrd /initramfs-6.17.2.img\noptions root=UUID=f00d ro rhgb quiet\n"),
             ("\\boot\\vmlinuz-6.17.2", "k"),
             ("\\boot\\initramfs-6.17.2.img", "i"),
@@ -606,5 +621,7 @@ submenu 'Advanced options for Ubuntu' $menuentry_id_option 'gnulinux-advanced-ab
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].options, "initrd=\\boot\\initramfs-6.17.2.img root=UUID=f00d ro rhgb quiet");
         assert_eq!(found[0].title, "Fedora Linux 43");
+        // Without the version, for slingshot.toml's rules.
+        assert_eq!(found[0].newest.as_deref(), Some("Fedora Linux"));
     }
 }

@@ -110,6 +110,9 @@ pub struct FoundEntry {
     pub fs: Vec<u8>,
     pub program: String,
     pub options: String,
+    /// For the newest kernel of its file system: its system, without the
+    /// version ("Ubuntu"), which slingshot.toml's rules match.
+    pub newest: Option<String>,
 }
 
 /// What a card in the boot picker starts.
