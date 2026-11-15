@@ -360,18 +360,20 @@ component FanGlyph inherits Rectangle {
         // 15° a step at 1500 RPM, 36° at most.
         triggered => { root.spin = mod(root.spin + min(root.rpm / 1500 * 15deg, 36deg), 360deg); }
     }
+    // In tenths, as whole numbers: Slint writes the others with the
+    // language's decimal separator ("12,5" in German), which paths don't read.
     function blade(a: angle) -> string {
-        "M12 12 Q" + (12 + 8 * cos(a - 35deg)) + " " + (12 + 8 * sin(a - 35deg))
-            + " " + (12 + 9.5 * cos(a)) + " " + (12 + 9.5 * sin(a))
-            + " Q" + (12 + 4 * cos(a + 30deg)) + " " + (12 + 4 * sin(a + 30deg)) + " 12 12 Z "
+        "M120 120 Q" + round(120 + 80 * cos(a - 35deg)) + " " + round(120 + 80 * sin(a - 35deg))
+            + " " + round(120 + 95 * cos(a)) + " " + round(120 + 95 * sin(a))
+            + " Q" + round(120 + 40 * cos(a + 30deg)) + " " + round(120 + 40 * sin(a + 30deg)) + " 120 120 Z "
     }
     width: 24px;
     height: 24px;
     Path {
         width: 100%;
         height: 100%;
-        viewbox-width: 24;
-        viewbox-height: 24;
+        viewbox-width: 240;
+        viewbox-height: 240;
         fill: root.tint;
         commands: root.blade(root.spin) + root.blade(root.spin + 120deg) + root.blade(root.spin + 240deg);
     }
@@ -633,7 +635,7 @@ export component SystemScreen inherits Rectangle {
                             }
                             if System.temperatures.length > 0 || System.fans.length > 0: SensorsRow {
                                 // Not scrolled out of view.
-                                animate: root.active && !root.covered && Theme.motion && self.y + self.height + list.content-y > 0 && self.y + list.content-y < list.height;
+                                animate: root.active && !root.covered && self.y + self.height + list.content-y > 0 && self.y + list.content-y < list.height;
                             }
                         }
                     }
