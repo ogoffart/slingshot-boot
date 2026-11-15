@@ -3,7 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { InfoItem, MemorySegment, Button, BatteryInfo, Panel } from "widgets.slint";
+import { InfoItem, MemorySegment, Button, BatteryInfo, Panel, ScrollBar } from "widgets.slint";
 import { AboutSlint } from "std-widgets.slint";
 
 // A temperature: its gauge (`level`, 0 to 1), whether it's near its
@@ -347,6 +347,8 @@ component Sparkline inherits Rectangle {
 
 // A fan whose three blades turn, faster with its speed: a step every 80 ms
 // (the real speed would only flicker, and each step draws the path again).
+// Under 60° a step (the blades repeat every 120°), or a fast fan would seem
+// to slow down, then turn backwards.
 component FanGlyph inherits Rectangle {
     in property <int> rpm;
     in property <bool> animate;
@@ -355,8 +357,8 @@ component FanGlyph inherits Rectangle {
     Timer {
         interval: 80ms;
         running: root.animate;
-        // A turn a second at 1500 RPM.
-        triggered => { root.spin = mod(root.spin + root.rpm / 1500 * 360deg * 0.08, 360deg); }
+        // 15° a step at 1500 RPM, 36° at most.
+        triggered => { root.spin = mod(root.spin + min(root.rpm / 1500 * 15deg, 36deg), 360deg); }
     }
     function blade(a: angle) -> string {
         "M12 12 Q" + (12 + 8 * cos(a - 35deg)) + " " + (12 + 8 * sin(a - 35deg))
@@ -465,23 +467,37 @@ component SensorsRow inherits Rectangle {
                 tint: t.hot ? Heat.hot : t.level > 0.65 ? Heat.warm : Heat.cool;
             }
         }
-        for f in System.fans: SensorLineRow {
-            name: f.name;
-            VerticalLayout {
-                alignment: center;
-                FanGlyph {
-                    rpm: f.rpm;
-                    animate: root.animate && f.rpm > 0;
-                    tint: Theme.accent;
-                }
-            }
-            Text {
+        // The fans, side by side.
+        if System.fans.length > 0: SensorLineRow {
+            name: @tr("Fans");
+            HorizontalLayout {
                 horizontal-stretch: 1;
-                text: @tr("{} RPM", f.rpm);
-                font-size: 14px;
-                font-weight: 600;
-                color: Theme.text;
-                vertical-alignment: center;
+                spacing: 28px;
+                alignment: start;
+                for f in System.fans: HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        FanGlyph {
+                            rpm: f.rpm;
+                            animate: root.animate && f.rpm > 0;
+                            tint: Theme.accent;
+                        }
+                    }
+                    Text {
+                        text: f.name;
+                        font-size: 13px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: @tr("{} RPM", f.rpm);
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
     }
@@ -541,6 +557,14 @@ export component SystemScreen inherits Rectangle {
     in property <bool> can-change-time;
     // A dialog is over it: nothing to animate.
     in property <bool> covered;
+    // The list doesn't fit: PgUp and PgDn scroll it.
+    out property <bool> scrolls: list.content-height > list.height;
+    // The list moved by `dy`, within its ends: whether it moved.
+    function scroll-by(dy: length) -> bool {
+        let before = list.content-y;
+        list.content-y = clamp(list.content-y + dy, min(0px, list.height - list.content-height), 0px);
+        list.content-y != before
+    }
     callback change-time();
     // Entering the screen: the keyboard focus on the Change button.
     property <int> focus-request;
@@ -548,6 +572,18 @@ export component SystemScreen inherits Rectangle {
         root.focus-request += 1;
     }
 
+    // PgUp and PgDn scroll the list, before they switch screens (at an end,
+    // they're not taken).
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+        key-pressed(event) => {
+            if (event.text == Key.PageUp || event.text == Key.PageDown)
+                && root.scroll-by((event.text == Key.PageDown ? -0.8 : 0.8) * list.height) {
+                return accept;
+            }
+            reject
+        }
     HorizontalLayout {
         padding-top: 32px;
         padding-left: 64px;
@@ -573,36 +609,62 @@ export component SystemScreen inherits Rectangle {
                             vertical-alignment: center;
                         }
                     }
-                    for item[i] in System.items: InfoRow {
-                        icon: item.icon;
-                        good: item.good;
-                        label: item.label;
-                        title: item.title;
-                        detail: item.detail;
-                        // The memory: how it's used (the memory map).
-                        if item.icon == "memory" && System.memory.length > 0: Rectangle {
-                            x: 18px + 34px + 14px + 120px + 14px;
-                            width: parent.width * 0.26;
-                            height: 10px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 5px;
-                            clip: true;
-                            HorizontalLayout {
-                                spacing: 2px;
-                                for segment in System.memory: Rectangle {
-                                    horizontal-stretch: segment.weight;
-                                    min-width: 3px;
-                                    background: segment.color;
+                    // The rows scroll when they don't fit (a laptop's many
+                    // temperatures, a small screen): the wheel, the bar.
+                    TouchArea {
+                        min-height: 64px;
+                        preferred-height: rows.preferred-height;
+                        scroll-event(e) => {
+                            root.scroll-by(e.delta-y);
+                            accept
+                        }
+                        list := Flickable {
+                            interactive: false;
+                            content-height: rows.preferred-height;
+                            rows := VerticalLayout {
+                                width: list.width;
+                                for item[i] in System.items: InfoRow {
+                                    icon: item.icon;
+                                    good: item.good;
+                                    label: item.label;
+                                    title: item.title;
+                                    detail: item.detail;
+                                    // The memory: how it's used (the memory map).
+                                    if item.icon == "memory" && System.memory.length > 0: Rectangle {
+                                        x: 18px + 34px + 14px + 120px + 14px;
+                                        width: parent.width * 0.26;
+                                        height: 10px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 5px;
+                                        clip: true;
+                                        HorizontalLayout {
+                                            spacing: 2px;
+                                            for segment in System.memory: Rectangle {
+                                                horizontal-stretch: segment.weight;
+                                                min-width: 3px;
+                                                background: segment.color;
+                                            }
+                                        }
+                                    }
+                                }
+                                if System.battery.present: BatteryRow {
+                                    info: System.battery;
+                                    animate: root.active;
+                                }
+                                if System.temperatures.length > 0 || System.fans.length > 0: SensorsRow {
+                                    // Not scrolled out of view, below.
+                                    animate: root.active && !root.covered && Theme.motion && self.y + list.content-y < list.height;
                                 }
                             }
                         }
-                    }
-                    if System.battery.present: BatteryRow {
-                        info: System.battery;
-                        animate: root.active;
-                    }
-                    if System.temperatures.length > 0 || System.fans.length > 0: SensorsRow {
-                        animate: root.active && !root.covered && Theme.motion;
+                        ScrollBar {
+                            x: parent.width - self.width - 3px;
+                            y: 4px;
+                            height: parent.height - 8px;
+                            content-y <=> list.content-y;
+                            content-height: list.content-height;
+                            view-height: list.height;
+                        }
                     }
                 }
             }
@@ -657,5 +719,6 @@ export component SystemScreen inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

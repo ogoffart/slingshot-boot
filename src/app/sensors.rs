@@ -19,9 +19,6 @@ use crate::tr::trf;
 /// show two minutes.
 pub const EVERY_SECONDS: u32 = 5;
 const HISTORY: usize = 24;
-/// At most this many temperatures and fans on the screen (laptops have
-/// many thermal zones): the first ones, in the firmware's order.
-const SHOWN: (usize, usize) = (4, 2);
 /// Without a critical temperature, where the gauge is full and "hot" starts.
 const FULL_SCALE: f32 = 100.;
 const HOT: f32 = 85.;
@@ -74,11 +71,14 @@ fn sparkline(values: &[f32]) -> (String, String) {
     (line, area)
 }
 
-/// `model`'s rows as `rows`: changed in place when there are as many.
-fn set_rows<T: Clone + 'static>(model: &VecModel<T>, rows: Vec<T>) {
+/// `model`'s rows as `rows`: changed in place when there are as many, and
+/// only those that differ (each change draws its row again).
+fn set_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
     if model.row_count() == rows.len() {
         for (i, row) in rows.into_iter().enumerate() {
-            model.set_row_data(i, row);
+            if model.row_data(i).as_ref() != Some(&row) {
+                model.set_row_data(i, row);
+            }
         }
     } else {
         model.set_vec(rows);
@@ -89,10 +89,9 @@ fn set_rows<T: Clone + 'static>(model: &VecModel<T>, rows: Vec<T>) {
 pub fn update(ui: &AppWindow, backend: &dyn Backend, state: &mut Sensors) {
     let sensors = backend.sensors();
     let degrees = |c: f32| trf("{} °C", &[&libm::roundf(c)]);
-    let shown = &sensors.temperatures[..sensors.temperatures.len().min(SHOWN.0)];
-    state.history.resize_with(shown.len(), Default::default);
-    let mut temperatures = Vec::with_capacity(shown.len());
-    for (t, (name, values)) in shown.iter().zip(&mut state.history) {
+    state.history.resize_with(sensors.temperatures.len(), Default::default);
+    let mut temperatures = Vec::with_capacity(sensors.temperatures.len());
+    for (t, (name, values)) in sensors.temperatures.iter().zip(&mut state.history) {
         // Another sensor there now: its own graph.
         if *name != t.name {
             (*name, *values) = (t.name.clone(), VecDeque::new());
@@ -112,7 +111,7 @@ pub fn update(ui: &AppWindow, backend: &dyn Backend, state: &mut Sensors) {
             area: area.into(),
         });
     }
-    let fans = sensors.fans.iter().take(SHOWN.1).map(|f| FanLine { name: f.name.as_str().into(), rpm: f.rpm as i32 }).collect();
+    let fans = sensors.fans.iter().map(|f| FanLine { name: f.name.as_str().into(), rpm: f.rpm as i32 }).collect();
     set_rows(&state.temperatures, temperatures);
     set_rows(&state.fans, fans);
     // The hottest, over the gauges.

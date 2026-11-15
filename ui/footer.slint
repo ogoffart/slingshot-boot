@@ -21,6 +21,8 @@ export component Footer inherits Rectangle {
     in property <bool> can-save-log;
     // The Settings section shown (3: the boot order).
     in property <int> settings-section;
+    // The System screen's list doesn't fit: PgUp and PgDn scroll it.
+    in property <bool> system-scrolls;
 
     height: 60px;
     if Theme.frosted: Frost { tint: Theme.background; }
@@ -65,6 +67,7 @@ export component Footer inherits Rectangle {
         if root.screen == 2 && root.settings-section == 3: KeyChip { key: @tr("Alt ↑ ↓"); label: @tr("Reorder"); }
         if root.screen == 2: KeyChip { key: @tr("PgUp PgDn"); label: @tr("Section"); }
         if root.screen != 1: KeyChip { key: @tr("Tab"); label: @tr("Focus"); }
+        if root.screen == 1 && root.system-scrolls: KeyChip { key: @tr("PgUp PgDn"); label: @tr("Scroll"); }
         if root.screen == 1 && root.can-save-log: KeyChip { key: "F12"; label: @tr("Save log"); }
         if root.screen != 0: KeyChip { key: @tr("Esc"); label: @tr("Back to boot"); }
     }

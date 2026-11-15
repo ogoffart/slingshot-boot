@@ -72,7 +72,7 @@ msgstr "ATA 磁盘"
 msgid "Accent color"
 msgstr "强调色"
 
-#: src/app/mod.rs:883
+#: src/app/mod.rs:884
 msgid "Add Slingshot to systemd-boot's menu"
 msgstr "将 Slingshot 添加到 systemd-boot 菜单"
 
@@ -81,7 +81,7 @@ msgstr "将 Slingshot 添加到 systemd-boot 菜单"
 msgid "Add to boot menu"
 msgstr "添加到启动菜单"
 
-#: src/app/mod.rs:2302
+#: src/app/mod.rs:2303
 msgid "Added “{}” as Boot{}"
 msgstr "已将“{}”添加为 Boot{}"
 
@@ -90,8 +90,8 @@ msgid "Add…"
 msgstr "添加…"
 
 #: src/app/files.rs:417
-#: src/app/mod.rs:535
-#: src/app/mod.rs:555
+#: src/app/mod.rs:536
+#: src/app/mod.rs:556
 msgid "All disks"
 msgstr "所有磁盘"
 
@@ -152,15 +152,15 @@ msgstr "自动（{}）"
 msgid "Back"
 msgstr "返回"
 
-#: ui/footer.slint:69
+#: ui/footer.slint:70
 msgid "Back to boot"
 msgstr "返回启动"
 
-#: src/app/mod.rs:559
+#: src/app/mod.rs:560
 msgid "Back to the top folder"
 msgstr "返回顶层文件夹"
 
-#: src/app/mod.rs:559
+#: src/app/mod.rs:560
 msgid "Back to {}"
 msgstr "返回 {}"
 
@@ -199,7 +199,7 @@ msgstr "启动菜单"
 msgid "Boot order"
 msgstr "启动顺序"
 
-#: src/app/mod.rs:2399
+#: src/app/mod.rs:2400
 msgid "Boot order saved to the firmware"
 msgstr "启动顺序已保存到固件"
 
@@ -231,7 +231,7 @@ msgstr "容量"
 msgid "Change"
 msgstr "更改"
 
-#: ui/system-screen.slint:532
+#: ui/system-screen.slint:548
 msgid "Change…"
 msgstr "更改…"
 
@@ -263,12 +263,12 @@ msgstr "选择图片"
 msgid "Choose…"
 msgstr "选择…"
 
-#: src/app/mod.rs:1330
+#: src/app/mod.rs:1331
 msgid "Clock set to {}"
 msgstr "时钟已设为 {}"
 
 #: ui/dialogs.slint:1267
-#: ui/main.slint:603
+#: ui/main.slint:608
 msgid "Close"
 msgstr "关闭"
 
@@ -285,13 +285,13 @@ msgstr "将其复制到启动分区，并添加到电脑的启动菜单。启动
 msgid "Copy"
 msgstr "复制"
 
-#: src/app/mod.rs:2306
+#: src/app/mod.rs:2307
 msgid "Could not add a boot entry: {}"
 msgstr "无法添加启动项：{}"
 
 #: src/app/files.rs:997
-#: src/app/mod.rs:2084
-#: src/app/mod.rs:2200
+#: src/app/mod.rs:2085
+#: src/app/mod.rs:2201
 msgid "Could not add the picture: {}"
 msgstr "无法添加图片：{}"
 
@@ -315,7 +315,7 @@ msgstr "无法重命名 {}：{}"
 msgid "Could not reset the settings: {}"
 msgstr "无法重置设置：{}"
 
-#: src/app/mod.rs:982
+#: src/app/mod.rs:983
 msgid "Could not restart: {}"
 msgstr "无法重启：{}"
 
@@ -323,7 +323,7 @@ msgstr "无法重启：{}"
 msgid "Could not save slingshot.toml: {}"
 msgstr "无法保存 slingshot.toml：{}"
 
-#: src/app/mod.rs:2401
+#: src/app/mod.rs:2402
 msgid "Could not save the boot order: {}"
 msgstr "无法保存启动顺序：{}"
 
@@ -335,19 +335,19 @@ msgstr "无法保存设置：{}"
 msgid "Could not save {}: {}"
 msgstr "无法保存 {}：{}"
 
-#: src/app/mod.rs:1332
+#: src/app/mod.rs:1333
 msgid "Could not set the clock: {}"
 msgstr "无法设置时钟：{}"
 
-#: src/app/mod.rs:1655
+#: src/app/mod.rs:1656
 msgid "Couldn't save the changes"
 msgstr "无法保存更改"
 
-#: src/app/mod.rs:1487
+#: src/app/mod.rs:1488
 msgid "Couldn't save the log: {}"
 msgstr "无法保存日志：{}"
 
-#: src/app/mod.rs:1467
+#: src/app/mod.rs:1468
 msgid "Couldn't start {}"
 msgstr "无法启动 {}"
 
@@ -380,7 +380,7 @@ msgid "Dark"
 msgstr "深色"
 
 #: ui/dialogs.slint:193
-#: ui/system-screen.slint:516
+#: ui/system-screen.slint:532
 msgid "Date and time"
 msgstr "日期和时间"
 
@@ -394,11 +394,11 @@ msgstr "12月"
 
 #: ui/files-screen.slint:404
 #: ui/files-screen.slint:539
-#: ui/main.slint:654
+#: ui/main.slint:659
 msgid "Delete"
 msgstr "删除"
 
-#: ui/main.slint:651
+#: ui/main.slint:656
 msgid "Delete {}?"
 msgstr "删除 {}？"
 
@@ -406,8 +406,8 @@ msgstr "删除 {}？"
 msgid "Deleted {}"
 msgstr "已删除 {}"
 
-#: ui/main.slint:671
-#: ui/main.slint:672
+#: ui/main.slint:676
+#: ui/main.slint:677
 msgid "Discard"
 msgstr "放弃"
 
@@ -420,11 +420,11 @@ msgstr "磁盘"
 msgid "Disk {} of {}"
 msgstr "第 {} 个磁盘，共 {} 个"
 
-#: ui/main.slint:587
+#: ui/main.slint:592
 msgid "Do it"
 msgstr "执行"
 
-#: ui/main.slint:600
+#: ui/main.slint:605
 msgid "Done"
 msgstr "完成"
 
@@ -489,13 +489,17 @@ msgstr "按 Enter 或双击可在此打开文件：编辑文本、查看图片�
 msgid "Enter the password to change the settings."
 msgstr "输入密码以更改设置。"
 
-#: ui/footer.slint:69
+#: ui/footer.slint:70
 msgid "Esc"
 msgstr "Esc"
 
 #: src/app/cards.rs:133
 msgid "Failed to start (no tries left)"
 msgstr "启动失败（已无剩余尝试次数）"
+
+#: ui/system-screen.slint:472
+msgid "Fans"
+msgstr "风扇"
 
 #: ui/settings-screen.slint:1202
 msgid "Fast"
@@ -513,7 +517,7 @@ msgstr "2月"
 msgid "February"
 msgstr "2月"
 
-#: ui/main.slint:633
+#: ui/main.slint:638
 msgid "File"
 msgstr "文件"
 
@@ -550,8 +554,8 @@ msgstr "启动顺序中的第一项"
 msgid "Focus"
 msgstr "聚焦"
 
-#: ui/main.slint:633
-#: src/app/mod.rs:570
+#: ui/main.slint:638
+#: src/app/mod.rs:571
 msgid "Folder"
 msgstr "文件夹"
 
@@ -579,7 +583,7 @@ msgstr "已充满"
 msgid "German (QWERTZ)"
 msgstr "德语（QWERTZ）"
 
-#: ui/main.slint:818
+#: ui/main.slint:823
 msgid "Going back to the previous resolution in {} s."
 msgstr "{} 秒后恢复之前的分辨率。"
 
@@ -613,7 +617,7 @@ msgstr "密码短语错误，请重试。"
 msgid "Install"
 msgstr "安装"
 
-#: src/app/mod.rs:879
+#: src/app/mod.rs:880
 msgid "Install Slingshot"
 msgstr "安装 Slingshot"
 
@@ -621,11 +625,11 @@ msgstr "安装 Slingshot"
 msgid "Installed"
 msgstr "已安装"
 
-#: ui/main.slint:652
+#: ui/main.slint:657
 msgid "It can't be undone."
 msgstr "此操作无法撤销。"
 
-#: ui/main.slint:600
+#: ui/main.slint:605
 msgid "It didn't work"
 msgstr "没有成功"
 
@@ -661,11 +665,11 @@ msgstr "6月"
 msgid "June"
 msgstr "6月"
 
-#: ui/main.slint:820
+#: ui/main.slint:825
 msgid "Keep"
 msgstr "保留"
 
-#: ui/main.slint:817
+#: ui/main.slint:822
 msgid "Keep this resolution?"
 msgstr "保留此分辨率？"
 
@@ -678,7 +682,7 @@ msgid "Kernel options"
 msgstr "内核参数"
 
 #: src/desktop/simulator.rs:253
-#: src/firmware/detect.rs:67
+#: src/firmware/detect.rs:71
 msgid "Kernel {}"
 msgstr "内核 {}"
 
@@ -719,7 +723,7 @@ msgstr "浅色"
 msgid "Linux"
 msgstr "Linux"
 
-#: src/app/mod.rs:1486
+#: src/app/mod.rs:1487
 msgid "Log saved as {}"
 msgstr "日志已保存为 {}"
 
@@ -727,7 +731,7 @@ msgstr "日志已保存为 {}"
 msgid "Made {}"
 msgstr "生产于 {}"
 
-#: ui/main.slint:632
+#: ui/main.slint:637
 msgid "Make"
 msgstr "创建"
 
@@ -783,7 +787,7 @@ msgstr "网络 · {}"
 msgid "Never"
 msgstr "从不"
 
-#: ui/main.slint:630
+#: ui/main.slint:635
 msgid "New"
 msgstr "新建"
 
@@ -800,11 +804,11 @@ msgstr "没有安全启动变量"
 msgid "No boot entries found in the firmware."
 msgstr "固件中未找到启动项。"
 
-#: src/app/mod.rs:566
+#: src/app/mod.rs:567
 msgid "No folders or EFI programs here."
 msgstr "这里没有文件夹或 EFI 程序。"
 
-#: src/app/mod.rs:566
+#: src/app/mod.rs:567
 msgid "No folders or pictures here."
 msgstr "这里没有文件夹或图片。"
 
@@ -814,7 +818,7 @@ msgstr "无壁纸"
 
 #: ui/install-screen.slint:155
 #: ui/widgets.slint:674
-#: src/app/mod.rs:614
+#: src/app/mod.rs:615
 msgid "None"
 msgstr "无"
 
@@ -835,7 +839,7 @@ msgid "Not found"
 msgstr "未找到"
 
 #: src/app/files.rs:744
-#: src/app/mod.rs:2270
+#: src/app/mod.rs:2271
 msgid "Not found: {}"
 msgstr "未找到：{}"
 
@@ -867,7 +871,7 @@ msgstr "11月"
 msgid "November"
 msgstr "11月"
 
-#: ui/main.slint:575
+#: ui/main.slint:580
 msgid "OK"
 msgstr "确定"
 
@@ -952,6 +956,7 @@ msgid "Pasted {}"
 msgstr "已粘贴 {}"
 
 #: ui/footer.slint:66
+#: ui/footer.slint:68
 msgid "PgUp PgDn"
 msgstr "PgUp PgDn"
 
@@ -990,17 +995,17 @@ msgstr "处理器"
 msgid "Reading…"
 msgstr "正在读取…"
 
-#: ui/main.slint:587
+#: ui/main.slint:592
 msgid "Remove"
 msgstr "移除"
 
 #: ui/files-screen.slint:388
 #: ui/files-screen.slint:521
-#: ui/main.slint:632
+#: ui/main.slint:637
 msgid "Rename"
 msgstr "重命名"
 
-#: ui/main.slint:630
+#: ui/main.slint:635
 msgid "Rename {}"
 msgstr "重命名 {}"
 
@@ -1008,7 +1013,7 @@ msgstr "重命名 {}"
 msgid "Reorder"
 msgstr "排序"
 
-#: ui/main.slint:803
+#: ui/main.slint:808
 msgid "Reset"
 msgstr "重置"
 
@@ -1016,7 +1021,7 @@ msgstr "重置"
 msgid "Reset all settings"
 msgstr "重置所有设置"
 
-#: ui/main.slint:800
+#: ui/main.slint:805
 msgid "Reset all settings?"
 msgstr "重置所有设置？"
 
@@ -1025,11 +1030,11 @@ msgstr "重置所有设置？"
 msgid "Restart"
 msgstr "重启"
 
-#: ui/main.slint:602
+#: ui/main.slint:607
 msgid "Restart now"
 msgstr "立即重启"
 
-#: src/app/mod.rs:1496
+#: src/app/mod.rs:1497
 msgid "Restarting…"
 msgstr "正在重启…"
 
@@ -1042,11 +1047,11 @@ msgid "Resuming {} in {} s. Press any key to stay here."
 msgstr "{} 将在 {} 秒后恢复。按任意键留在此处。"
 
 #: ui/files-screen.slint:601
-#: ui/main.slint:819
+#: ui/main.slint:824
 msgid "Revert"
 msgstr "恢复"
 
-#: ui/main.slint:587
+#: ui/main.slint:592
 msgid "Running…"
 msgstr "正在运行…"
 
@@ -1072,19 +1077,19 @@ msgstr "星期六"
 msgid "Save"
 msgstr "保存"
 
-#: ui/footer.slint:68
+#: ui/footer.slint:69
 msgid "Save log"
 msgstr "保存日志"
 
-#: ui/main.slint:667
+#: ui/main.slint:672
 msgid "Save the changes?"
 msgstr "保存更改？"
 
-#: ui/main.slint:615
+#: ui/main.slint:620
 msgid "Save the file?"
 msgstr "保存文件？"
 
-#: ui/main.slint:695
+#: ui/main.slint:700
 msgid "Save the new boot order?"
 msgstr "保存新的启动顺序？"
 
@@ -1092,9 +1097,9 @@ msgstr "保存新的启动顺序？"
 msgid "Save to firmware…"
 msgstr "保存到固件…"
 
-#: src/app/mod.rs:1653
-#: src/app/mod.rs:1776
-#: src/app/mod.rs:1796
+#: src/app/mod.rs:1654
+#: src/app/mod.rs:1777
+#: src/app/mod.rs:1797
 msgid "Saved in slingshot.toml"
 msgstr "已保存到 slingshot.toml"
 
@@ -1109,6 +1114,10 @@ msgstr "已保存 {}"
 #: ui/settings-screen.slint:929
 msgid "Screen resolution"
 msgstr "屏幕分辨率"
+
+#: ui/footer.slint:68
+msgid "Scroll"
+msgstr "滚动"
 
 #: ui/footer.slint:66
 msgid "Section"
@@ -1170,7 +1179,7 @@ msgstr "设置已锁定"
 msgid "Settings are saved in slingshot.toml, next to Slingshot"
 msgstr "设置保存在 Slingshot 旁边的 slingshot.toml 中"
 
-#: src/app/mod.rs:1851
+#: src/app/mod.rs:1852
 msgid "Settings reset to their defaults"
 msgstr "设置已恢复为默认值"
 
@@ -1199,7 +1208,7 @@ msgstr "显示"
 msgid "Shut down"
 msgstr "关机"
 
-#: src/app/mod.rs:1496
+#: src/app/mod.rs:1497
 msgid "Shutting down…"
 msgstr "正在关机…"
 
@@ -1217,7 +1226,7 @@ msgstr "跳过"
 
 #: ui/install-screen.slint:147
 #: ui/main.slint:216
-#: ui/system-screen.slint:637
+#: ui/system-screen.slint:685
 msgid "Slingshot"
 msgstr "Slingshot"
 
@@ -1230,7 +1239,7 @@ msgid "Slingshot can't read this disk's data."
 msgstr "Slingshot 无法读取此磁盘的数据。"
 
 #: src/app/files.rs:689
-#: src/app/mod.rs:2181
+#: src/app/mod.rs:2182
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr "Slingshot 无法读取 {} 磁盘：这台电脑没有相应的驱动。"
 
@@ -1272,11 +1281,11 @@ msgstr "启动"
 msgid "Start Slingshot"
 msgstr "启动 Slingshot"
 
-#: src/app/mod.rs:881
+#: src/app/mod.rs:882
 msgid "Start Slingshot on every boot"
 msgstr "每次启动时运行 Slingshot"
 
-#: src/app/mod.rs:880
+#: src/app/mod.rs:881
 msgid "Start Slingshot once, on the next restart"
 msgstr "下次重启时运行一次 Slingshot"
 
@@ -1304,7 +1313,7 @@ msgstr "正在启动"
 msgid "Starting in {} s"
 msgstr "{} 秒后启动"
 
-#: src/app/mod.rs:1477
+#: src/app/mod.rs:1478
 msgid "Starting {}…"
 msgstr "正在启动 {}…"
 
@@ -1320,7 +1329,7 @@ msgstr "启动用时 {} 秒"
 msgid "Startup"
 msgstr "启动"
 
-#: src/app/mod.rs:882
+#: src/app/mod.rs:883
 msgid "Stop starting Slingshot on every boot"
 msgstr "不再每次启动时运行 Slingshot"
 
@@ -1346,15 +1355,15 @@ msgstr "Tab"
 msgid "Teal"
 msgstr "青色"
 
-#: ui/system-screen.slint:430
+#: ui/system-screen.slint:432
 msgid "Temperatures"
 msgstr "温度"
 
-#: ui/main.slint:669
+#: ui/main.slint:674
 msgid "The changes to this file aren't saved, and can't be: it's read-only."
 msgstr "此文件的更改尚未保存，也无法保存：它是只读的。"
 
-#: ui/main.slint:668
+#: ui/main.slint:673
 msgid "The changes to this file aren't saved."
 msgstr "此文件的更改尚未保存。"
 
@@ -1368,7 +1377,7 @@ msgid "The disk couldn't be read."
 msgstr "无法读取该磁盘。"
 
 #: src/app/files.rs:394
-#: src/app/mod.rs:546
+#: src/app/mod.rs:547
 msgid "The firmware can't read any disk."
 msgstr "固件无法读取任何磁盘。"
 
@@ -1420,11 +1429,11 @@ msgstr "壁纸已更改。"
 msgid "Theme"
 msgstr "主题"
 
-#: ui/main.slint:801
+#: ui/main.slint:806
 msgid "Theme, accent color, startup screen, timeout and resolution go back to their defaults. The boot order isn't changed."
 msgstr "主题、强调色、启动画面、等待时间和分辨率将恢复为默认值。启动顺序不变。"
 
-#: ui/main.slint:585
+#: ui/main.slint:590
 msgid "These commands will run as root (your password is asked for):\n\n"
 msgstr "以下命令将以 root 身份运行（会询问你的密码）：\n\n"
 
@@ -1462,7 +1471,7 @@ msgstr "此文件太大，无法在此打开。"
 msgid "This isn't a valid EFI program."
 msgstr "这不是有效的 EFI 程序。"
 
-#: ui/system-screen.slint:568
+#: ui/system-screen.slint:588
 msgid "This machine"
 msgstr "这台电脑"
 
@@ -1470,7 +1479,7 @@ msgstr "这台电脑"
 msgid "This picture can't be shown."
 msgstr "无法显示此图片。"
 
-#: ui/main.slint:696
+#: ui/main.slint:701
 msgid "This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen."
 msgstr "这会写入固件中的 BootOrder。原始顺序会被保留，可在此界面恢复。"
 
@@ -1523,7 +1532,7 @@ msgstr "输入数字，或使用 ← → 和 ↑ ↓。这会设置电脑的时�
 msgid "Type the seconds, or use ← →. 0: never."
 msgstr "输入秒数，或使用 ← →。0：从不。"
 
-#: src/firmware/detect.rs:60
+#: src/firmware/detect.rs:64
 msgid "USB stick"
 msgstr "U 盘"
 
@@ -1539,7 +1548,7 @@ msgstr "在“更多…”中"
 msgid "Unified kernel image"
 msgstr "统一内核映像"
 
-#: src/app/mod.rs:884
+#: src/app/mod.rs:885
 msgid "Uninstall Slingshot"
 msgstr "卸载 Slingshot"
 
@@ -1564,7 +1573,7 @@ msgstr "解锁"
 msgid "Unlock the encrypted disk"
 msgstr "解锁加密磁盘"
 
-#: src/app/mod.rs:2166
+#: src/app/mod.rs:2167
 msgid "Unlocked, but its files can't be shown: this computer has no driver for what's inside."
 msgstr "已解锁，但无法显示其中的文件：这台电脑没有读取其内容的驱动。"
 
@@ -1610,7 +1619,7 @@ msgstr "星期三"
 msgid "What shows first, and when the default entry starts by itself."
 msgstr "首先显示什么，以及默认启动项何时自动启动。"
 
-#: src/firmware/detect.rs:66
+#: src/firmware/detect.rs:70
 msgid "Windows Boot Manager"
 msgstr "Windows 启动管理器"
 
@@ -1622,7 +1631,7 @@ msgstr "密码错误。"
 msgid "hidden"
 msgstr "隐藏"
 
-#: src/firmware/detect.rs:65
+#: src/firmware/detect.rs:69
 msgid "macOS"
 msgstr "macOS"
 
@@ -1632,11 +1641,11 @@ msgstr "macOS"
 msgid "read-only"
 msgstr "只读"
 
-#: src/app/mod.rs:1496
+#: src/app/mod.rs:1497
 msgid "restart"
 msgstr "重启"
 
-#: src/app/mod.rs:1496
+#: src/app/mod.rs:1497
 msgid "shut down"
 msgstr "关机"
 
@@ -1653,7 +1662,7 @@ msgstr "最高 {} GHz"
 msgid "{} %"
 msgstr "{}%"
 
-#: ui/system-screen.slint:480
+#: ui/system-screen.slint:494
 msgid "{} RPM"
 msgstr "{} 转/分"
 
@@ -1692,7 +1701,7 @@ msgid "{} is already in this folder."
 msgstr "{} 已在此文件夹中。"
 
 #: src/app/files.rs:687
-#: src/app/mod.rs:2179
+#: src/app/mod.rs:2180
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr "{} 的加密方式 Slingshot 无法解锁。"
 
@@ -1749,7 +1758,7 @@ msgstr "{2}{1}日 {0}"
 msgid "{} {} {} {}"
 msgstr "{3}年{2}{1}日 {0}"
 
-#: src/app/sensors.rs:91
+#: src/app/sensors.rs:88
 msgid "{} °C"
 msgstr "{} °C"
 

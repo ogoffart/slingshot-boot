@@ -545,11 +545,17 @@ impl Backend for SimBackend {
         let wave = utc_seconds(std::time::SystemTime::now()).map_or(0, |s| s.rem_euclid(20)) as f32;
         let cpu = 46. + (wave - 10.).abs() / 2.;
         Sensors {
+            // As many as a laptop has: the list scrolls.
             temperatures: vec![
                 Temperature { name: "CPU".into(), celsius: cpu, critical: Some(105.) },
+                Temperature { name: "GPU".into(), celsius: cpu - 6., critical: Some(100.) },
+                Temperature { name: "NVME".into(), celsius: 41., critical: Some(85.) },
                 Temperature { name: "TZ01".into(), celsius: 38.5, critical: None },
             ],
-            fans: vec![Fan { name: "FAN0".into(), rpm: 1800 + (cpu as u32 - 46) * 100 }],
+            fans: vec![
+                Fan { name: "FAN0".into(), rpm: 1800 + (cpu as u32 - 46) * 100 },
+                Fan { name: "FAN1".into(), rpm: 1500 },
+            ],
         }
     }
 

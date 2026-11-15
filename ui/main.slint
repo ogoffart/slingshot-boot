@@ -434,7 +434,8 @@ export component AppWindow inherits Window {
         key-pressed(event) => {
             // Page Up / Page Down, Ctrl+Tab / Ctrl+Shift+Tab, or 1 2 3,
             // switch screens (in Settings, Page Up / Page Down go from
-            // section to section: the screen handles them first).
+            // section to section, on System they scroll its list: the screen
+            // handles them first).
             if event.text == Key.PageDown || event.text == Key.PageUp {
                 root.show-next-screen(event.text == Key.PageUp);
                 return accept;
@@ -550,6 +551,7 @@ export component AppWindow inherits Window {
             entry-editable: root.can-edit-options && BootMenu.entries.length > 0 && BootMenu.entries[BootMenu.focused-entry].editable;
             entry-customizable: BootMenu.entries.length > 0 && BootMenu.entries[BootMenu.focused-entry].customizable;
             settings-section: settings.section;
+            system-scrolls: system-screen.scrolls;
             can-save-log: root.can-save-log;
         }
     }
