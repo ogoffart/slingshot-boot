@@ -295,6 +295,11 @@ struct LastRead {
 }
 
 impl UefiBackend {
+    /// The file system of `volumes()[volume]`.
+    fn disk(&self, volume: usize) -> Result<uefi::Handle, String> {
+        self.volumes.borrow().get(volume).map(|v| v.0).ok_or_else(|| String::from("no such disk"))
+    }
+
     /// Starts a kernel (or an EFI program) with `options`, from the file
     /// system `fs`; with the unlocked disks when it needs them.
     fn start_kernel(&self, fs: &[u8], program: &str, options: &str) -> Option<chainload::Outcome> {
@@ -564,7 +569,7 @@ impl Backend for UefiBackend {
     }
 
     fn list_dir(&self, volume: usize, path: &str) -> Result<Vec<DirEntry>, String> {
-        let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
+        let handle = self.disk(volume)?;
         Ok(dir::read_dir(handle, path)?
             .into_iter()
             .map(|e| DirEntry { name: e.name, is_dir: e.is_dir, size: e.size, modified: e.modified, read_only: e.read_only, hidden: e.hidden })
@@ -577,21 +582,32 @@ impl Backend for UefiBackend {
     }
 
     fn read_volume_file(&self, volume: usize, path: &str) -> Result<Vec<u8>, String> {
-        let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
+        let handle = self.disk(volume)?;
         // Like `list_dir`: rEFInd's drivers too.
         dir::read_file(handle, path).ok_or_else(|| String::from("cannot read the file"))
     }
 
     fn write_volume_file(&self, volume: usize, path: &str, data: &[u8]) -> Result<(), String> {
-        let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
+        let handle = self.disk(volume)?;
         let path = uefi::CString16::try_from(path).map_err(|e| format!("{e:?}"))?;
         let fs = uefi::boot::open_protocol_exclusive::<uefi::proto::media::fs::SimpleFileSystem>(handle).map_err(status_text)?;
         uefi::fs::FileSystem::new(fs).write(path.as_ref(), data).map_err(|e| format!("{e}"))
     }
 
+    fn create_dir(&self, volume: usize, path: &str) -> Result<(), String> {
+        dir::create_dir(self.disk(volume)?, path)
+    }
+
+    fn delete(&self, volume: usize, path: &str) -> Result<(), String> {
+        dir::delete(self.disk(volume)?, path)
+    }
+
+    fn rename(&self, volume: usize, path: &str, new_name: &str) -> Result<(), String> {
+        dir::rename(self.disk(volume)?, path, new_name)
+    }
+
     fn volume_space(&self, volume: usize) -> Option<(u64, u64)> {
-        let handle = self.volumes.borrow().get(volume).map(|v| v.0)?;
-        let (_, size, free, _) = volume_info(handle)?;
+        let (_, size, free, _) = volume_info(self.disk(volume).ok()?)?;
         Some((free, size))
     }
 

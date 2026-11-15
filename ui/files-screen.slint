@@ -78,6 +78,25 @@ export global Explorer {
     in property <int> found-end;
     in property <string> find-status;
 
+    // What can be done to the current row (the disk is writable…), and
+    // its name, for the dialogs.
+    in property <bool> can-create;
+    in property <bool> can-change;
+    in property <bool> can-copy;
+    in property <bool> can-paste;
+    in property <string> selected-name;
+    // The name asked: 0 none, 1 a new file's or folder's (`new-kind`: 0 a
+    // file, 1 a folder), 2 the current row's new one.
+    in-out property <int> name-dialog;
+    in-out property <int> new-kind;
+    in-out property <bool> confirm-delete-visible;
+    // A new empty file (opened) or folder, where the current row is.
+    callback new-entry(/* name */ string, /* folder */ bool);
+    callback rename(string);
+    callback delete();
+    callback copy();
+    callback paste();
+
     in-out property <bool> confirm-save-visible;
     // Opening another file with changes not saved: the row it's for.
     in-out property <int> discard-row: -1;
@@ -124,6 +143,33 @@ export component FilesScreen inherits Rectangle {
     function open-find() {
         root.finding = true;
         root.find-request += 1;
+    }
+
+    // What the keys, the buttons and the row menu do to the current row.
+    function ask-new() {
+        if Explorer.can-create {
+            Explorer.name-dialog = 1;
+        }
+    }
+    function ask-rename() {
+        if Explorer.can-change {
+            Explorer.name-dialog = 2;
+        }
+    }
+    function copy() {
+        if Explorer.can-copy {
+            Explorer.copy();
+        }
+    }
+    function paste() {
+        if Explorer.can-paste {
+            Explorer.paste();
+        }
+    }
+    function ask-delete() {
+        if Explorer.can-change {
+            Explorer.confirm-delete-visible = true;
+        }
     }
 
     public function enter() {
@@ -195,6 +241,20 @@ export component FilesScreen inherits Rectangle {
             root.edit-path(event.text);
         } else if event.modifiers.control && (event.text == "f" || event.text == "F") && Explorer.kind == "text" {
             root.open-find();
+        } else if event.modifiers.control && (event.text == "n" || event.text == "N") {
+            root.ask-new();
+        } else if event.modifiers.control && (event.text == "r" || event.text == "R") {
+            root.ask-rename();
+        } else if event.modifiers.control && (event.text == "c" || event.text == "C") {
+            root.copy();
+        } else if event.modifiers.control && (event.text == "v" || event.text == "V") {
+            root.paste();
+        } else if event.text == Key.Delete {
+            root.ask-delete();
+        } else if event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift) {
+            // Under the current row's name.
+            let depth = Explorer.current < root.rows.length ? root.rows[Explorer.current].depth : 0;
+            row-menu.show({ x: 40px + depth * 18px, y: (Explorer.current + 1) * root.row-height + list.content-y });
         } else if event.modifiers.control || event.modifiers.alt || event.modifiers.meta {
             return reject;
         } else {
@@ -305,6 +365,48 @@ export component FilesScreen inherits Rectangle {
                         border-width: scope.has-focus ? 2px : 0px;
                         border-color: Theme.accent;
                         clip: true;
+                        // The current row's menu: a right click on a row (selected
+                        // first), the Menu key or Shift+F10. No size: it never takes
+                        // the clicks itself.
+                        row-menu := ContextMenuArea {
+                            x: 0;
+                            y: 0;
+                            width: 0;
+                            height: 0;
+                            Menu {
+                                MenuItem {
+                                    title: @tr("Open");
+                                    activated => { root.open(Explorer.current); }
+                                }
+                                MenuSeparator { }
+                                MenuItem {
+                                    title: @tr("New…");
+                                    enabled: Explorer.can-create;
+                                    activated => { root.ask-new(); }
+                                }
+                                MenuItem {
+                                    title: @tr("Rename");
+                                    enabled: Explorer.can-change;
+                                    activated => { root.ask-rename(); }
+                                }
+                                MenuItem {
+                                    title: @tr("Copy");
+                                    enabled: Explorer.can-copy;
+                                    activated => { root.copy(); }
+                                }
+                                MenuItem {
+                                    title: @tr("Paste");
+                                    enabled: Explorer.can-paste;
+                                    activated => { root.paste(); }
+                                }
+                                MenuSeparator { }
+                                MenuItem {
+                                    title: @tr("Delete");
+                                    enabled: Explorer.can-change;
+                                    activated => { root.ask-delete(); }
+                                }
+                            }
+                        }
                         TouchArea {
                             scroll-event(e) => {
                                 list.content-y = clamp(list.content-y + e.delta-y, min(0px, list.height - list.content-height), 0px);
@@ -330,6 +432,16 @@ export component FilesScreen inherits Rectangle {
                                             scope.focus();
                                         }
                                         double-clicked => { root.open(i); }
+                                        pointer-event(e) => {
+                                            if e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
+                                                root.select(i);
+                                                scope.focus();
+                                                row-menu.show({
+                                                    x: self.absolute-position.x + self.mouse-x - row-menu.absolute-position.x,
+                                                    y: self.absolute-position.y + self.mouse-y - row-menu.absolute-position.y,
+                                                });
+                                            }
+                                        }
                                     }
                                     HorizontalLayout {
                                         padding-left: 8px + row.depth * 18px;
@@ -392,6 +504,42 @@ export component FilesScreen inherits Rectangle {
                                 view-height: list.height;
                             }
                         }
+                    }
+                }
+                // What can be done to the current row; the keys say it too.
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Button {
+                        small: true;
+                        text: @tr("New…");
+                        enabled: Explorer.can-create;
+                        clicked => { root.ask-new(); }
+                    }
+                    Button {
+                        small: true;
+                        text: @tr("Rename");
+                        enabled: Explorer.can-change;
+                        clicked => { root.ask-rename(); }
+                    }
+                    Button {
+                        small: true;
+                        text: @tr("Copy");
+                        enabled: Explorer.can-copy;
+                        clicked => { root.copy(); }
+                    }
+                    Button {
+                        small: true;
+                        text: @tr("Paste");
+                        enabled: Explorer.can-paste;
+                        clicked => { root.paste(); }
+                    }
+                    Button {
+                        small: true;
+                        text: @tr("Delete");
+                        danger: true;
+                        enabled: Explorer.can-change;
+                        clicked => { root.ask-delete(); }
                     }
                 }
                 Text {

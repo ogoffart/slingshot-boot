@@ -92,12 +92,14 @@ export component Button inherits Rectangle {
     in property <bool> primary;
     in property <bool> danger;
     in property <bool> enabled: true;
+    // Lower and narrower, in a row of actions.
+    in property <bool> small;
     out property <bool> has-focus: fs.has-focus;
     callback clicked;
 
     forward-focus: fs;
-    min-height: 44px;
-    min-width: label.preferred-width + 40px + (root.icon != "" ? 28px : 0px);
+    min-height: root.small ? 32px : 44px;
+    min-width: label.preferred-width + (root.small ? 24px : 40px) + (root.icon != "" ? 28px : 0px);
     accessible-role: button;
     accessible-label: text;
     accessible-enabled: enabled;
@@ -135,8 +137,8 @@ export component Button inherits Rectangle {
     HorizontalLayout {
         alignment: center;
         spacing: 10px;
-        padding-left: 20px;
-        padding-right: 20px;
+        padding-left: root.small ? 12px : 20px;
+        padding-right: root.small ? 12px : 20px;
         if root.icon != "": VerticalLayout {
             alignment: center;
             Icon {
@@ -149,7 +151,7 @@ export component Button inherits Rectangle {
         label := Text {
             text: root.text;
             vertical-alignment: center;
-            font-size: 14px;
+            font-size: root.small ? 13px : 14px;
             font-weight: 600;
             color: root.primary ? Theme.on-accent.with-alpha(root.enabled ? 1 : 0.6)
                 : root.danger ? Theme.danger

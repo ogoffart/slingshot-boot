@@ -15,7 +15,7 @@ import { SettingsPage, SettingsScreen } from "settings-screen.slint";
 import { SplashScreen } from "splash-screen.slint";
 import { Install, InstallScreen, InstallInfo } from "install-screen.slint";
 import { Explorer, FilesScreen, HexRow, ProgramFact } from "files-screen.slint";
-import { Customize, Dialog, FileBrowser, FileDialog, FileRow, CustomizeDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
+import { Customize, Dialog, FileBrowser, FileDialog, FileRow, CustomizeDialog, NameDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
 
 export { Theme, Logos, BootMenu, Customize, Explorer, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, HexRow, ProgramFact, InstallInfo, BatteryInfo, BatteryFact, Focus }
 
@@ -473,7 +473,7 @@ export component AppWindow inherits Window {
     property <bool> modal: Passphrase.visible || root.error-visible || Install.confirm-visible || Install.result-visible
         || SettingsPage.confirm-save-visible || Customize.visible || BootMenu.options-visible || FileBrowser.visible || root.password-visible
         || System.time-dialog-visible || SettingsPage.confirm-reset-visible || SettingsPage.revert-countdown >= 0
-        || Explorer.confirm-save-visible || Explorer.discard-row >= 0;
+        || Explorer.confirm-save-visible || Explorer.discard-row >= 0 || Explorer.name-dialog != 0 || Explorer.confirm-delete-visible;
     ModalPopup {
         shown: Passphrase.visible;
         UnlockDialog { }
@@ -532,6 +532,43 @@ export component AppWindow inherits Window {
             accept => {
                 Explorer.confirm-save-visible = false;
                 Explorer.save();
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: Explorer.name-dialog != 0;
+        NameDialog {
+            title: Explorer.name-dialog == 1 ? @tr("New") : @tr("Rename {}", Explorer.selected-name);
+            initial: Explorer.name-dialog == 2 ? Explorer.selected-name : "";
+            accept-text: Explorer.name-dialog == 1 ? @tr("Make") : @tr("Rename");
+            choices: Explorer.name-dialog == 1 ? [@tr("File"), @tr("Folder")] : [];
+            choice <=> Explorer.new-kind;
+            cancel => { Explorer.name-dialog = 0; }
+            accept(name) => {
+                let new = Explorer.name-dialog == 1;
+                Explorer.name-dialog = 0;
+                if new {
+                    Explorer.new-entry(name, Explorer.new-kind == 1);
+                } else {
+                    Explorer.rename(name);
+                }
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: Explorer.confirm-delete-visible;
+        Dialog {
+            title: @tr("Delete {}?", Explorer.selected-name);
+            message: @tr("It can't be undone.");
+            cancel-text: @tr("Cancel");
+            accept-text: @tr("Delete");
+            highlighted: 0;
+            cancel => { Explorer.confirm-delete-visible = false; }
+            accept => {
+                Explorer.confirm-delete-visible = false;
+                Explorer.delete();
             }
         }
     }

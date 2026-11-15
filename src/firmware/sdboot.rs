@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use uefi::boot;
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::runtime;
-use uefi::{CString16, cstr16};
+use uefi::cstr16;
 
 /// An entry with a boot counter: its id and its file.
 pub type Counted = (String, String);
@@ -185,36 +185,17 @@ pub fn select_one_shot(id: &str) -> uefi::Result {
 /// path, or `None` when there's nothing to count or the rename failed.
 pub fn count_try(fs_device_path: &[u8], path: &str) -> Option<String> {
     use uefi::proto::device_path::DevicePath;
-    use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode};
 
     let next = bls::next_try_path(path)?;
     let new_name = next.rsplit('\\').next()?;
     let fs_dp: &DevicePath = fs_device_path.try_into().ok()?;
     let handle = boot::locate_device_path::<SimpleFileSystem>(&mut &*fs_dp).ok()?;
-    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle)?;
-    let mut root = sfs.open_volume().ok()?;
-    let mut file = root.open(&CString16::try_from(path).ok()?, FileMode::ReadWrite, FileAttribute::empty()).ok()?;
-    let info = file.get_boxed_info::<FileInfo>().ok()?;
     // A rename is a SetInfo with the new name (in the same directory): the
     // file isn't copied, which matters for a 50 MB unified kernel image.
-    let name = CString16::try_from(new_name).ok()?;
-    let mut buffer = alloc::boxed::Box::new(super::dir::InfoBuffer([0; 4096]));
-    let renamed = FileInfo::new(
-        &mut buffer.0,
-        info.file_size(),
-        info.physical_size(),
-        *info.create_time(),
-        *info.last_access_time(),
-        *info.modification_time(),
-        info.attribute(),
-        &name,
-    )
-    .ok()?;
-    if let Err(e) = file.set_info(renamed) {
-        log::warn!("boot counting: cannot rename {path}: {:?}", e.status());
+    if let Err(e) = super::dir::rename(handle, path, new_name) {
+        log::warn!("boot counting: cannot rename {path}: {e}");
         return None;
     }
-    let _ = file.flush();
     log::info!("boot counting: {path} → {next}");
     // Volatile, like systemd-boot sets it.
     let data = crate::parse::ucs2_bytes(&next);

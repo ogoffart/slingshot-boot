@@ -83,7 +83,10 @@ def test_tab_into_the_editor_keeps_the_text(window):
     replace the whole file."""
     open_files_tab(window)
     open_text(window, "/loader/loader.conf", "timeout 3")
-    press(window, keys.Tab)
+    # From the list: New…, Rename, Copy and Delete (Paste, Revert and
+    # Save are disabled), then the editor.
+    for _ in range(5):
+        press(window, keys.Tab)
     type_text(window, "#")
     assert wait_until(lambda: "#" in editor(window).accessible_value)
     assert "timeout 3" in editor(window).accessible_value
@@ -144,3 +147,118 @@ def test_a_picture_and_a_program_get_their_buttons(window):
     press(window, keys.Return)
     assert wait_until(lambda: buttons(window, "Start") and buttons(window, "Add to boot menu"))
     assert not buttons(window, "Use as wallpaper")
+
+
+def accept_dialog(window, label):
+    """Clicks the dialog's `label` button: the last one, after the screen's own."""
+    assert wait_until(lambda: len(buttons(window, label)) == 2)
+    buttons(window, label)[-1].single_click(PointerEventButton.Left)
+    assert wait_until(lambda: len(buttons(window, label)) == 1)
+
+
+def make(window, name, folder=False):
+    """Ctrl+N: a new file (the dialog's first choice) or folder."""
+    press(window, "n", ctrl=True)
+    type_text(window, name)
+    if folder:
+        window.query_descendants().match_accessible_role(AccessibleRole.RadioButton).match_accessible_label(
+            "Folder"
+        ).find_one().single_click(PointerEventButton.Left)
+    buttons(window, "Make")[0].single_click(PointerEventButton.Left)
+    assert wait_until(lambda: selected(window) == [name])
+
+
+def test_a_new_folder_is_made_where_the_row_is(window):
+    open_files_tab(window)
+    make(window, "Backup", folder=True)
+    assert "EFI" in names(window), "in the disk, beside its folders"
+
+
+def test_a_new_file_opens_in_the_editor(window):
+    open_files_tab(window)
+    make(window, "notes.txt")
+    assert wait_until(lambda: editor(window).accessible_value == "")
+    editor(window).single_click(PointerEventButton.Left)
+    type_text(window, "hello")
+    buttons(window, "Save")[0].single_click(PointerEventButton.Left)
+    accept_dialog(window, "Save")
+    # Back to the list, then the file opened again.
+    press(window, keys.Escape)
+    go(window, "/notes.txt")
+    press(window, keys.Return)
+    assert wait_until(lambda: editor(window).accessible_value == "hello")
+
+
+def test_paste_into_an_empty_folder(window):
+    """Paste puts the file in the folder selected (in a file's folder for a file)."""
+    open_files_tab(window)
+    make(window, "Backup", folder=True)
+    go(window, "/loader/loader.conf")
+    press(window, "c", ctrl=True)
+    go(window, "/Backup")
+    press(window, "v", ctrl=True)
+    assert wait_until(lambda: selected(window) == ["loader.conf"])
+    # In loader, and now in Backup.
+    assert names(window).count("loader.conf") == 2
+
+
+def menu_item(window, label):
+    """The context menu's entry `label` (not the button of the same name)."""
+    found = [e for e in labels(window, label) if e.accessible_role != AccessibleRole.Button]
+    return found[0] if found else None
+
+
+def test_right_click_selects_the_row_and_shows_its_menu(window):
+    open_files_tab(window)
+    press(window, keys.RightArrow)
+    assert wait_until(lambda: "loader" in names(window))
+    row = next(r for r in rows(window) if r.accessible_label == "loader")
+    row.single_click(PointerEventButton.Right)
+    assert wait_until(lambda: selected(window) == ["loader"])
+    assert wait_until(lambda: menu_item(window, "Rename"))
+    menu_item(window, "Rename").single_click(PointerEventButton.Left)
+    # The rename dialog, for that row.
+    assert wait_until(lambda: labels(window, "Rename loader"))
+
+
+def test_a_file_is_copied_into_another_folder(window):
+    open_files_tab(window)
+    go(window, "/loader/loader.conf")
+    press(window, "c", ctrl=True)
+    go(window, "/EFI")
+    press(window, "v", ctrl=True)
+    assert wait_until(lambda: selected(window) == ["loader.conf"])
+    assert names(window).count("loader.conf") == 2
+    press(window, keys.Return)
+    assert wait_until(lambda: "timeout 3" in editor(window).accessible_value)
+    # Pasted again: it's already there.
+    press(window, "v", ctrl=True)
+    assert wait_until(lambda: labels(window, "loader.conf is already in this folder."))
+
+
+def test_a_file_is_renamed(window):
+    open_files_tab(window)
+    go(window, "/loader/loader.conf")
+    press(window, "r", ctrl=True)
+    # The name is selected: typing replaces it.
+    type_text(window, "old.conf")
+    press(window, keys.Return)
+    assert wait_until(lambda: selected(window) == ["old.conf"])
+    assert "loader.conf" not in names(window)
+    press(window, keys.Return)
+    assert wait_until(lambda: "timeout 3" in editor(window).accessible_value)
+
+
+def test_delete_asks_and_keeps_folders_with_files(window):
+    open_files_tab(window)
+    go(window, "/loader/loader.conf")
+    press(window, keys.Delete)
+    accept_dialog(window, "Delete")
+    assert wait_until(lambda: "loader.conf" not in names(window))
+    assert selected(window) == ["loader"], "the folder, now empty"
+    # A folder with files stays.
+    go(window, "/EFI")
+    press(window, keys.Delete)
+    accept_dialog(window, "Delete")
+    assert wait_until(lambda: labels(window, "Could not delete EFI: the folder isn't empty"))
+    assert "EFI" in names(window)

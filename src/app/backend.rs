@@ -424,8 +424,22 @@ pub trait Backend {
     fn write_file(&self, _name: &str, _data: &[u8]) -> Result<(), String> {
         Err(String::from("not supported"))
     }
-    /// Replaces the file `path` of `volumes()[volume]` (a `writable` one).
+    /// Writes (makes or replaces) the file `path` of `volumes()[volume]`
+    /// (a `writable` one).
     fn write_volume_file(&self, _volume: usize, _path: &str, _data: &[u8]) -> Result<(), String> {
+        Err(String::from("not supported here"))
+    }
+    /// Makes the folder `path` on `volumes()[volume]` (a `writable` one).
+    fn create_dir(&self, _volume: usize, _path: &str) -> Result<(), String> {
+        Err(String::from("not supported here"))
+    }
+    /// Deletes the file or empty folder `path` of `volumes()[volume]`.
+    fn delete(&self, _volume: usize, _path: &str) -> Result<(), String> {
+        Err(String::from("not supported here"))
+    }
+    /// Renames the file or folder `path` of `volumes()[volume]` to
+    /// `new_name`, in the same folder.
+    fn rename(&self, _volume: usize, _path: &str, _new_name: &str) -> Result<(), String> {
         Err(String::from("not supported here"))
     }
     /// The free space and the size of `volumes()[volume]`, in bytes.

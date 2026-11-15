@@ -576,6 +576,71 @@ component FieldButton inherits Rectangle {
     }
 }
 
+// Asks for a name: a new file's or folder's, or a file's new one (the
+// Files screen). With `choices`, also which one (`choice`).
+export component NameDialog inherits DialogFrame {
+    in property <string> title;
+    in property <string> initial;
+    in property <string> accept-text;
+    in property <[string]> choices;
+    in-out property <int> choice;
+    callback cancel();
+    callback accept(string);
+
+    card-width: 480px;
+    card-height: layout.preferred-height;
+    // ← → move in the name.
+    arrows: false;
+    escape => { root.cancel(); }
+    init => {
+        input.text = root.initial;
+        input.focus();
+        input.select-all();
+    }
+
+    layout := VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text {
+            text: root.title;
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        if root.choices.length > 0: SegmentedControl {
+            options: root.choices;
+            current <=> root.choice;
+        }
+        Rectangle {
+            height: 46px;
+            border-radius: Theme.radius;
+            background: Theme.surface-raised;
+            border-width: 2px;
+            border-color: Theme.accent;
+            input := TextField {
+                x: 14px;
+                width: parent.width - 28px;
+                font-size: 16px;
+                accepted(text) => { root.accept(text); }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            padding-top: 6px;
+            Button {
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
+            }
+            Button {
+                text: root.accept-text;
+                primary: true;
+                clicked => { root.accept(input.text); }
+            }
+        }
+    }
+}
+
 // Asks for the Settings password (`settings.password` in slingshot.toml).
 export component PasswordDialog inherits DialogFrame {
     in property <bool> wrong;

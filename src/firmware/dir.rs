@@ -7,7 +7,7 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, RegularFile};
+use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::{CString16, Handle};
 
@@ -136,16 +136,65 @@ pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
 #[repr(C, align(8))]
 pub struct InfoBuffer(pub [u8; 4096]);
 
-/// Opens `path` on the file system `handle`.
-fn open(handle: Handle, path: &str, mode: FileMode) -> Option<uefi::proto::media::file::FileHandle> {
-    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle)?;
-    let mut root = sfs.open_volume().ok()?;
-    root.open(&CString16::try_from(path).ok()?, mode, FileAttribute::empty()).ok()
+/// Opens (or creates, with `mode` and `attributes`) `path` on the file
+/// system `handle`.
+fn open(handle: Handle, path: &str, mode: FileMode, attributes: FileAttribute) -> Result<uefi::proto::media::file::FileHandle, String> {
+    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
+    let mut root = sfs.open_volume().map_err(status)?;
+    let name = CString16::try_from(path).map_err(|_| String::from("bad path"))?;
+    root.open(&name, mode, attributes).map_err(status)
+}
+
+fn status(e: uefi::Error) -> String {
+    format!("{:?}", e.status())
+}
+
+/// Makes the folder `path` on the file system `handle`.
+pub fn create_dir(handle: Handle, path: &str) -> Result<(), String> {
+    open(handle, path, FileMode::CreateReadWrite, FileAttribute::DIRECTORY).map(drop)
+}
+
+/// Deletes the file or empty folder `path` on the file system `handle`.
+pub fn delete(handle: Handle, path: &str) -> Result<(), String> {
+    match open(handle, path, FileMode::ReadWrite, FileAttribute::empty())?.into_type().map_err(status)? {
+        FileType::Regular(file) => file.delete().map_err(status),
+        FileType::Dir(mut dir) => {
+            // Empty: nothing but `.` and `..`.
+            let mut buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
+            while let Some(info) = dir.read_entry(&mut buffer.0).map_err(|e| format!("{:?}", e.status()))? {
+                if !matches!(format!("{}", info.file_name()).as_str(), "." | "..") {
+                    return Err(String::from("the folder isn't empty"));
+                }
+            }
+            dir.delete().map_err(status)
+        }
+    }
+}
+
+/// Renames the file or folder `path` to `new_name`, in its folder: its
+/// information, with the new name (UEFI's way to rename).
+pub fn rename(handle: Handle, path: &str, new_name: &str) -> Result<(), String> {
+    let mut file = open(handle, path, FileMode::ReadWrite, FileAttribute::empty())?;
+    let info = file.get_boxed_info::<FileInfo>().map_err(status)?;
+    let name = CString16::try_from(new_name).map_err(|_| String::from("bad name"))?;
+    let mut buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
+    let renamed = FileInfo::new(
+        &mut buffer.0,
+        info.file_size(),
+        info.physical_size(),
+        *info.create_time(),
+        *info.last_access_time(),
+        *info.modification_time(),
+        info.attribute(),
+        &name,
+    )
+    .map_err(|_| String::from("name too long"))?;
+    file.set_info(renamed).map_err(status)
 }
 
 /// Whether the file `path` exists on the file system `handle`.
 pub fn exists(handle: Handle, path: &str) -> bool {
-    open(handle, path, FileMode::Read).is_some()
+    open(handle, path, FileMode::Read, FileAttribute::empty()).is_ok()
 }
 
 /// The contents of the file `path` on the file system `handle`. Like
@@ -161,7 +210,7 @@ pub const SMALL: usize = 1 << 20;
 
 /// Like `read_file`, `None` if the file is larger than `max` bytes.
 pub fn read_at_most(handle: Handle, path: &str, max: usize) -> Option<Vec<u8>> {
-    let mut file = open(handle, path, FileMode::Read)?.into_regular_file()?;
+    let mut file = open(handle, path, FileMode::Read, FileAttribute::empty()).ok()?.into_regular_file()?;
     let size = usize::try_from(file.get_boxed_info::<FileInfo>().ok()?.file_size()).ok()?;
     if size > max {
         log::info!("{path}: {size} bytes, too large");
@@ -182,7 +231,7 @@ fn zeroed(len: usize) -> Option<Vec<u8>> {
 /// The first `len` bytes of the file `path` (fewer if it's shorter).
 #[cfg_attr(not(feature = "luks"), allow(dead_code))] // the LUKS handoff's
 pub fn read_file_start(handle: Handle, path: &str, len: usize) -> Option<Vec<u8>> {
-    read_up_to(&mut open(handle, path, FileMode::Read)?.into_regular_file()?, len)
+    read_up_to(&mut open(handle, path, FileMode::Read, FileAttribute::empty()).ok()?.into_regular_file()?, len)
 }
 
 fn read_up_to(file: &mut RegularFile, len: usize) -> Option<Vec<u8>> {

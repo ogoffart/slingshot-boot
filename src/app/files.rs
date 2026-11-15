@@ -39,6 +39,14 @@ struct Files {
     /// under them.
     nodes: Vec<Node>,
     opened: Option<Opened>,
+    /// The file copied (Ctrl+C), to paste in another folder.
+    clipboard: Option<Clip>,
+}
+
+struct Clip {
+    volume: usize,
+    path: String,
+    name: String,
 }
 
 struct Node {
@@ -135,6 +143,23 @@ fn text_to_save(text: &str, crlf: bool, bom: bool) -> Vec<u8> {
     let mut data = if bom { b"\xef\xbb\xbf".to_vec() } else { Vec::new() };
     data.extend_from_slice(text.as_bytes());
     data
+}
+
+/// `name` trimmed, if it can name a file or folder (FAT's rules: none of
+/// \ / : * ? " < > |), else what's wrong.
+fn check_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    let bad = |c: char| c.is_control() || "\\/:*?\"<>|".contains(c);
+    if name.is_empty() || name == "." || name == ".." || name.chars().any(bad) {
+        return Err(trf("\"{}\" can't be a name.", &[&name]));
+    }
+    Ok(name)
+}
+
+/// Whether disk `volume`'s folder `folders` has an entry `name` (ignoring
+/// case, as FAT does).
+fn taken(backend: &dyn Backend, volume: usize, folders: &[String], name: &str) -> bool {
+    super::resolve_path(backend, volume, folders.to_vec(), name).is_ok()
 }
 
 /// The first bytes of `data`, 16 per row: offset, hex, characters.
@@ -285,6 +310,48 @@ impl Files {
         self.nodes[i].expanded = false;
     }
 
+    /// The row of disk `volume`'s folder `folders` (or the disk), if shown.
+    fn folder_row(&self, volume: usize, folders: &[String]) -> Option<usize> {
+        (0..self.nodes.len()).find(|&i| self.expandable(i) && self.place(i).is_some_and(|(v, f)| v == volume && f == folders))
+    }
+
+    /// Reads disk `volume`'s folder `folders` again, after a change, and
+    /// shows its entry `select` (else the folder). Its row, expanded.
+    fn reload_folder(&mut self, ui: &AppWindow, backend: &dyn Backend, volume: usize, folders: &[String], select: Option<&str>) -> Option<usize> {
+        let row = self.folder_row(volume, folders)?;
+        if self.nodes[row].expanded {
+            self.collapse(row);
+        }
+        if let Err(e) = self.expand(row, backend) {
+            ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
+        }
+        let current = select.and_then(|name| self.child_named(row, name)).unwrap_or(row);
+        self.show(ui, backend, current);
+        Some(row)
+    }
+
+    /// The entry `path` of disk `volume` as the disk now has it (after a
+    /// save): its size and date, in its row.
+    fn refresh_entry(&mut self, backend: &dyn Backend, volume: usize, path: &str) {
+        for n in &mut self.nodes {
+            if let What::Entry { volume: v, folders, entry } = &mut n.what
+                && *v == volume
+                && super::folder_path(folders, Some(&entry.name)) == path
+            {
+                let listed = backend.list_dir(volume, &super::folder_path(folders, None)).ok();
+                if let Some(e) = listed.and_then(|l| l.into_iter().find(|e| e.name == entry.name)) {
+                    *entry = e;
+                }
+            }
+        }
+    }
+
+    /// The row named `name` in the folder at row `folder`.
+    fn child_named(&self, folder: usize, name: &str) -> Option<usize> {
+        let depth = self.nodes[folder].depth + 1;
+        (folder + 1..self.nodes.len()).take_while(|&j| self.nodes[j].depth >= depth).find(|&j| self.nodes[j].depth == depth && self.name(j) == name)
+    }
+
     /// The node above `i` in the tree, if it's in one.
     fn parent(&self, i: usize) -> Option<usize> {
         let depth = self.nodes.get(i)?.depth;
@@ -353,28 +420,31 @@ impl Files {
                 explorer.set_space(SharedString::new());
             }
         }
-        let path = match (&place, self.nodes.get(i).map(|n| &n.what)) {
-            (Some((_, folders)), Some(What::Entry { entry, .. })) if !entry.is_dir => super::folder_path(folders, Some(&entry.name)),
+        let entry = match self.nodes.get(i).map(|n| &n.what) {
+            Some(What::Entry { entry, .. }) => Some(entry),
+            _ => None,
+        };
+        let path = match (&place, entry) {
+            (Some((_, folders)), Some(entry)) if !entry.is_dir => super::folder_path(folders, Some(&entry.name)),
             (Some((_, folders)), _) => super::folder_path(folders, None),
             _ => String::new(),
         };
         explorer.set_path(path.into());
-        let details = match self.nodes.get(i).map(|n| &n.what) {
-            Some(What::Entry { entry, .. }) => entry_details(entry),
-            _ => String::new(),
-        };
-        explorer.set_details(details.into());
+        explorer.set_details(entry.map(entry_details).unwrap_or_default().into());
+        // What can be done to it.
+        let writable = volume.is_some_and(|(_, vol)| vol.writable);
+        explorer.set_can_create(writable);
+        explorer.set_can_change(writable && entry.is_some_and(|e| !e.read_only));
+        explorer.set_can_copy(entry.is_some_and(|e| !e.is_dir));
+        explorer.set_can_paste(writable && self.clipboard.is_some());
+        explorer.set_selected_name(if i < self.nodes.len() { self.name(i) } else { String::new() }.into());
     }
 
     /// Opens `entry` of `folders` on disk `volume`: reads it, and shows it as its kind.
     fn open_file(&mut self, ui: &AppWindow, backend: &dyn Backend, volume: usize, folders: &[String], entry: &DirEntry) {
         let explorer = ui.global::<Explorer>();
         let path = super::folder_path(folders, Some(&entry.name));
-        let disk = self.volumes.get(volume).map(|v| v.name.clone()).unwrap_or_default();
-        explorer.set_name(entry.name.as_str().into());
-        explorer.set_about(format!("{disk} · {path} · {}", super::format_file_size(entry.size)).into());
-        explorer.set_dirty(false);
-        explorer.set_note(SharedString::new());
+        self.header(ui, volume, &path, entry);
         if entry.size > OPEN_MAX {
             explorer.set_kind("bytes".into());
             explorer.set_hex(ModelRc::default());
@@ -393,6 +463,23 @@ impl Files {
                 return;
             }
         };
+        self.show_file(ui, volume, path, entry, data);
+    }
+
+    /// The opened file's name, disk, path and size, over it.
+    fn header(&self, ui: &AppWindow, volume: usize, path: &str, entry: &DirEntry) {
+        let explorer = ui.global::<Explorer>();
+        let disk = self.volumes.get(volume).map(|v| v.name.clone()).unwrap_or_default();
+        explorer.set_name(entry.name.as_str().into());
+        explorer.set_about(format!("{disk} · {path} · {}", super::format_file_size(entry.size)).into());
+        explorer.set_dirty(false);
+        explorer.set_note(SharedString::new());
+    }
+
+    /// Shows the file `path` of disk `volume`, `data`, as its kind (after
+    /// `header`).
+    fn show_file(&mut self, ui: &AppWindow, volume: usize, path: String, entry: &DirEntry, data: Vec<u8>) {
+        let explorer = ui.global::<Explorer>();
         let mut kind = kind_of(&entry.name, &data);
         let writable = self.volumes.get(volume).is_some_and(|v| v.writable) && !entry.read_only;
         let (mut crlf, mut bom) = (false, false);
@@ -636,13 +723,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                         let mut row = f.nodes.iter().position(|n| matches!(n.what, What::Volume(v) if v == volume)).unwrap_or(0);
                         let _ = f.expand(row, &*backend);
                         for name in folders.iter().map(String::as_str).chain(select.as_deref()) {
-                            let depth = f.nodes[row].depth + 1;
-                            let Some(child) = (row + 1..f.nodes.len())
-                                .take_while(|&j| f.nodes[j].depth >= depth)
-                                .find(|&j| f.nodes[j].depth == depth && f.name(j) == name)
-                            else {
-                                break;
-                            };
+                            let Some(child) = f.child_named(row, name) else { break };
                             row = child;
                             if f.expandable(row) {
                                 let _ = f.expand(row, &*backend);
@@ -670,21 +751,10 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 Ok(()) => {
                     log::info!("files: saved {} on disk {} ({} bytes)", o.path, o.volume, data.len());
                     (actions.show_status)(&trf("Saved {}", &[&o.name]));
-                    let (volume, path, size) = (o.volume, o.path.clone(), data.len() as u64);
+                    let (volume, path) = (o.volume, o.path.clone());
                     o.data = data;
                     ui.global::<Explorer>().set_dirty(false);
-                    // Its new size and date, in the tree: as the disk has them.
-                    let now = backend.date_time();
-                    for n in &mut f.nodes {
-                        if let What::Entry { volume: v, folders, entry } = &mut n.what
-                            && *v == volume
-                            && super::folder_path(folders, Some(&entry.name)) == path
-                        {
-                            let folder = super::folder_path(folders, None);
-                            let listed = backend.list_dir(volume, &folder).ok().and_then(|l| l.into_iter().find(|e| e.name == entry.name));
-                            *entry = listed.unwrap_or_else(|| DirEntry { size, modified: now.or(entry.modified), ..entry.clone() });
-                        }
-                    }
+                    f.refresh_entry(&*backend, volume, &path);
                     f.show(&ui, &*backend, ui.global::<Explorer>().get_current().max(0) as usize);
                 }
                 Err(e) => {
@@ -712,6 +782,154 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                     false
                 }
             }
+        });
+    }
+    {
+        // A new folder, or a new empty file (opened to be written), in the
+        // current row's folder.
+        let (files, ui_weak, backend, actions) = (files.clone(), ui.as_weak(), backend.clone(), actions.clone());
+        explorer.on_new_entry(move |name, folder| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let name = match check_name(&name) {
+                Ok(name) => name,
+                Err(why) => return (actions.show_status)(&why),
+            };
+            let mut f = files.borrow_mut();
+            let Some((volume, folders)) = f.place(ui.global::<Explorer>().get_current().max(0) as usize) else { return };
+            if taken(&*backend, volume, &folders, name) {
+                return (actions.show_status)(&trf("{} is already in this folder.", &[&name]));
+            }
+            let path = super::folder_path(&folders, Some(name));
+            let made = if folder { backend.create_dir(volume, &path) } else { backend.write_volume_file(volume, &path, &[]) };
+            if let Err(e) = made {
+                log::warn!("files: making {path} on disk {volume}: {e}");
+                (actions.show_status)(&trf("Could not make {}: {}", &[&name, &e]));
+                return;
+            }
+            log::info!("files: made {path} on disk {volume}");
+            let row = f.reload_folder(&ui, &*backend, volume, &folders, Some(name));
+            // A new file: opened, empty (not read again).
+            let new = row.and_then(|row| f.child_named(row, name));
+            if let (false, Some(What::Entry { entry, .. })) = (folder, new.map(|i| &f.nodes[i].what)) {
+                let (entry, path) = (entry.clone(), super::folder_path(&folders, Some(name)));
+                f.header(&ui, volume, &path, &entry);
+                f.show_file(&ui, volume, path, &entry, Vec::new());
+            }
+        });
+    }
+    {
+        // Renames the current row's file or folder.
+        let (files, ui_weak, backend, actions) = (files.clone(), ui.as_weak(), backend.clone(), actions.clone());
+        explorer.on_rename(move |name| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let name = match check_name(&name) {
+                Ok(name) => name,
+                Err(why) => return (actions.show_status)(&why),
+            };
+            let mut f = files.borrow_mut();
+            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
+            let (volume, folders, old) = (*volume, folders.clone(), entry.name.clone());
+            if name == old {
+                return;
+            }
+            // Only the case changing is fine.
+            if !name.eq_ignore_ascii_case(&old) && taken(&*backend, volume, &folders, name) {
+                return (actions.show_status)(&trf("{} is already in this folder.", &[&name]));
+            }
+            let path = super::folder_path(&folders, Some(&old));
+            if let Err(e) = backend.rename(volume, &path, name) {
+                log::warn!("files: renaming {path} on disk {volume} to {name}: {e}");
+                (actions.show_status)(&trf("Could not rename {}: {}", &[&old, &e]));
+                return;
+            }
+            log::info!("files: renamed {path} on disk {volume} to {name}");
+            // The file open: its new name; one in the folder renamed: closed.
+            if let Some(o) = &mut f.opened
+                && o.volume == volume
+            {
+                if o.path == path {
+                    o.path = super::folder_path(&folders, Some(name));
+                    o.name = name.into();
+                    ui.global::<Explorer>().set_name(name.into());
+                } else if o.path.starts_with(&format!("{path}\\")) {
+                    f.opened = None;
+                    ui.global::<Explorer>().set_kind(SharedString::new());
+                }
+            }
+            f.reload_folder(&ui, &*backend, volume, &folders, Some(name));
+        });
+    }
+    {
+        // Deletes the current row's file or empty folder (after Delete's confirmation).
+        let (files, ui_weak, backend, actions) = (files.clone(), ui.as_weak(), backend.clone(), actions.clone());
+        explorer.on_delete(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let mut f = files.borrow_mut();
+            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
+            let (volume, folders, name) = (*volume, folders.clone(), entry.name.clone());
+            // Then the next row in the folder, else the one before (else the folder).
+            let depth = f.nodes[current].depth;
+            let sibling = |j: usize| f.nodes[j].depth == depth;
+            let next = (current + 1..f.nodes.len()).take_while(|&j| f.nodes[j].depth >= depth).find(|&j| sibling(j));
+            let before = (0..current).rev().take_while(|&j| f.nodes[j].depth >= depth).find(|&j| sibling(j));
+            let select = next.or(before).map(|j| f.name(j));
+            let path = super::folder_path(&folders, Some(&name));
+            if let Err(e) = backend.delete(volume, &path) {
+                log::warn!("files: deleting {path} on disk {volume}: {e}");
+                (actions.show_status)(&trf("Could not delete {}: {}", &[&name, &e]));
+                return;
+            }
+            log::info!("files: deleted {path} on disk {volume}");
+            (actions.show_status)(&trf("Deleted {}", &[&name]));
+            if f.opened.as_ref().is_some_and(|o| o.volume == volume && o.path == path) {
+                f.opened = None;
+                ui.global::<Explorer>().set_kind(SharedString::new());
+            }
+            f.reload_folder(&ui, &*backend, volume, &folders, select.as_deref());
+        });
+    }
+    {
+        // Ctrl+C: the current file, to paste in another folder.
+        let (files, ui_weak, backend, actions) = (files.clone(), ui.as_weak(), backend.clone(), actions.clone());
+        explorer.on_copy(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let mut f = files.borrow_mut();
+            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
+            if entry.is_dir {
+                return;
+            }
+            let clip = Clip { volume: *volume, path: super::folder_path(folders, Some(&entry.name)), name: entry.name.clone() };
+            (actions.show_status)(&trf("{} copied: Paste puts it in the folder chosen.", &[&clip.name]));
+            f.clipboard = Some(clip);
+            f.show_selected(&ui, &*backend, current);
+        });
+    }
+    {
+        // Ctrl+V: the file copied, into the current row's folder.
+        let (files, ui_weak, backend, actions) = (files.clone(), ui.as_weak(), backend.clone(), actions.clone());
+        explorer.on_paste(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let mut f = files.borrow_mut();
+            let Some(clip) = &f.clipboard else { return };
+            let (from_volume, from, name) = (clip.volume, clip.path.clone(), clip.name.clone());
+            let Some((volume, folders)) = f.place(ui.global::<Explorer>().get_current().max(0) as usize) else { return };
+            // Not over a file.
+            if taken(&*backend, volume, &folders, &name) {
+                return (actions.show_status)(&trf("{} is already in this folder.", &[&name]));
+            }
+            let path = super::folder_path(&folders, Some(&name));
+            let copied = backend.read_volume_file(from_volume, &from).and_then(|data| backend.write_volume_file(volume, &path, &data));
+            if let Err(e) = copied {
+                log::warn!("files: copying {from} on disk {from_volume} to {path} on disk {volume}: {e}");
+                (actions.show_status)(&trf("Could not copy {}: {}", &[&name, &e]));
+                return;
+            }
+            log::info!("files: copied {from} on disk {from_volume} to {path} on disk {volume}");
+            (actions.show_status)(&trf("Pasted {}", &[&name]));
+            f.reload_folder(&ui, &*backend, volume, &folders, Some(&name));
         });
     }
     {
@@ -811,6 +1029,15 @@ mod tests {
         assert_eq!(find_text(text, "nothing", 0), None);
         assert_eq!(find_text(text, "", 0), None);
         assert_eq!(find_text("é é", "é", 1), Some((3, 5, 2, 2)), "byte offsets");
+    }
+
+    #[test]
+    fn names() {
+        assert_eq!(check_name("  new folder "), Ok("new folder"));
+        assert_eq!(check_name("a.efi"), Ok("a.efi"));
+        for bad in ["", " ", ".", "..", "a\\b", "a/b", "a:b", "a*", "a?", "\"a\"", "a<b>", "a|b", "a\nb"] {
+            assert!(check_name(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

@@ -57,10 +57,11 @@ pub struct SimBackend {
     /// session (pictures added, slingshot.toml), nothing is written.
     memory: RefCell<std::collections::BTreeMap<String, Vec<u8>>>,
     /// This computer's file system (`--this-machine`): one disk instead of
-    /// the made-up ones. Read for real, written to `edited` only.
+    /// the made-up ones. Read for real, changed in `changes` only.
     pub root: Option<std::path::PathBuf>,
-    /// The files changed in the file explorer, by volume and path.
-    edited: RefCell<std::collections::BTreeMap<(usize, String), Vec<u8>>>,
+    /// What the Files screen changed on the disks, by volume and path
+    /// (`edit_key`): kept for the session, nothing is written.
+    changes: RefCell<std::collections::BTreeMap<(usize, String), Change>>,
     /// The Install screen, in `slingshot config`.
     installer: Option<super::install::Installer>,
     /// The made-up machine's encrypted disk: unlocked yet.
@@ -71,6 +72,15 @@ pub struct SimBackend {
     disk_open: std::cell::Cell<bool>,
     #[cfg(feature = "luks")]
     unlock_timer: Rc<slint::Timer>,
+}
+
+/// A change the Files screen made to a file or folder, kept for the session.
+enum Change {
+    /// Written: its path as given (the key may be lowercase), its contents.
+    File { path: String, data: Vec<u8>, modified: DateTime },
+    /// A folder made.
+    Dir { path: String, modified: DateTime },
+    Removed,
 }
 
 /// The made-up machine's encrypted disk: a real LUKS2 volume (the test one,
@@ -165,7 +175,7 @@ impl SimBackend {
             last_started: Default::default(),
             memory: RefCell::default(),
             root: None,
-            edited: RefCell::default(),
+            changes: RefCell::default(),
         }
     }
 
@@ -252,10 +262,46 @@ impl SimBackend {
         }
     }
 
-    /// Where `edited` keeps the file: the made-up disks are FAT, case-blind;
-    /// this computer's aren't.
+    /// Where `changes` keeps a path (without a final `\`): the made-up
+    /// disks are FAT, case-blind; this computer's aren't.
     fn edit_key(&self, volume: usize, path: &str) -> (usize, String) {
+        let path = path.trim_end_matches('\\');
         (volume, if self.root.is_some() { path.into() } else { path.to_ascii_lowercase() })
+    }
+
+    /// The name of disk `volume` if its files can be changed.
+    fn writable(&self, volume: usize) -> Result<String, String> {
+        self.volumes().into_iter().nth(volume).filter(|v| v.writable).map(|v| v.name).ok_or_else(|| String::from("read-only"))
+    }
+
+    fn now(&self) -> DateTime {
+        self.date_time().unwrap_or(DateTime { year: 2026, month: 1, day: 1, hour: 0, minute: 0 })
+    }
+
+    /// `entries` of folder `path` on disk `volume`, with the session's changes.
+    fn with_changes(&self, volume: usize, path: &str, mut entries: Vec<DirEntry>) -> Vec<DirEntry> {
+        let changes = self.changes.borrow();
+        let folder = self.edit_key(volume, path);
+        let key = |name: &str| self.edit_key(volume, &format!("{}\\{name}", folder.1));
+        entries.retain(|e| !matches!(changes.get(&key(&e.name)), Some(Change::Removed)));
+        for e in &mut entries {
+            if let Some(Change::File { data, modified, .. }) = changes.get(&key(&e.name)) {
+                (e.size, e.modified) = (data.len() as u64, Some(*modified));
+            }
+        }
+        for ((v, k), change) in changes.iter() {
+            let (Some((parent, _)), true) = (k.rsplit_once('\\'), *v == volume) else { continue };
+            let (path, is_dir, size, modified) = match change {
+                Change::File { path, data, modified } => (path, false, data.len() as u64, *modified),
+                Change::Dir { path, modified } => (path, true, 0, *modified),
+                Change::Removed => continue,
+            };
+            let name = path.rsplit_once('\\').map_or(path.as_str(), |(_, n)| n);
+            if parent == folder.1 && !entries.iter().any(|e| key(&e.name).1 == *k) {
+                entries.push(DirEntry { name: name.into(), is_dir, size, modified: Some(modified), ..Default::default() });
+            }
+        }
+        entries
     }
 
     /// The encrypted disk's file system is in the file browser.
@@ -509,8 +555,10 @@ impl Backend for SimBackend {
     }
 
     fn read_volume_file(&self, volume: usize, path: &str) -> Result<Vec<u8>, String> {
-        if let Some(data) = self.edited.borrow().get(&self.edit_key(volume, path)) {
-            return Ok(data.clone());
+        match self.changes.borrow().get(&self.edit_key(volume, path)) {
+            Some(Change::File { data, .. }) => return Ok(data.clone()),
+            Some(_) => return Err(String::from("no such file")),
+            None => {}
         }
         if let Some(root) = &self.root {
             use std::io::Read;
@@ -531,11 +579,45 @@ impl Backend for SimBackend {
     }
 
     fn write_volume_file(&self, volume: usize, path: &str, data: &[u8]) -> Result<(), String> {
-        let Some(name) = self.volumes().into_iter().nth(volume).filter(|v| v.writable).map(|v| v.name) else {
-            return Err(String::from("read-only"));
-        };
+        let name = self.writable(volume)?;
         println!("Simulator: would write {} bytes to {path} on {name} (kept for this session)", data.len());
-        self.edited.borrow_mut().insert(self.edit_key(volume, path), data.to_vec());
+        let change = Change::File { path: path.into(), data: data.to_vec(), modified: self.now() };
+        self.changes.borrow_mut().insert(self.edit_key(volume, path), change);
+        Ok(())
+    }
+
+    fn create_dir(&self, volume: usize, path: &str) -> Result<(), String> {
+        let name = self.writable(volume)?;
+        println!("Simulator: would make the folder {path} on {name} (kept for this session)");
+        let change = Change::Dir { path: path.trim_end_matches('\\').into(), modified: self.now() };
+        self.changes.borrow_mut().insert(self.edit_key(volume, path), change);
+        Ok(())
+    }
+
+    fn delete(&self, volume: usize, path: &str) -> Result<(), String> {
+        let name = self.writable(volume)?;
+        if self.list_dir(volume, path).is_ok_and(|l| !l.is_empty()) {
+            return Err(String::from("the folder isn't empty"));
+        }
+        println!("Simulator: would delete {path} on {name} (for this session)");
+        self.changes.borrow_mut().insert(self.edit_key(volume, path), Change::Removed);
+        Ok(())
+    }
+
+    fn rename(&self, volume: usize, path: &str, new_name: &str) -> Result<(), String> {
+        let name = self.writable(volume)?;
+        let folder = path.trim_end_matches('\\').rsplit_once('\\').map_or("", |(f, _)| f);
+        let new_path = format!("{folder}\\{new_name}");
+        let change = match self.read_volume_file(volume, path) {
+            Ok(data) => Change::File { path: new_path.clone(), data, modified: self.now() },
+            // A folder: only an empty one (its files would have to move too).
+            Err(_) if self.list_dir(volume, path).is_ok_and(|l| l.is_empty()) => Change::Dir { path: new_path.clone(), modified: self.now() },
+            Err(_) => return Err(String::from("the simulator renames only files and empty folders")),
+        };
+        println!("Simulator: would rename {path} to {new_name} on {name} (for this session)");
+        let mut changes = self.changes.borrow_mut();
+        changes.insert(self.edit_key(volume, &new_path), change);
+        changes.insert(self.edit_key(volume, path), Change::Removed);
         Ok(())
     }
 
@@ -678,7 +760,7 @@ impl Backend for SimBackend {
                     name,
                 })
             };
-            return Ok(entries.filter_map(Result::ok).filter_map(entry).collect());
+            return Ok(self.with_changes(volume, path, entries.filter_map(Result::ok).filter_map(entry).collect()));
         }
         let (_, _, _, files) = SIM_VOLUMES.get(volume).ok_or("no such volume")?;
         let dir = if path.ends_with('\\') { String::from(path) } else { format!("{path}\\") };
@@ -692,7 +774,7 @@ impl Backend for SimBackend {
             let modified = Some(crate::app::DateTime { year: 2026, month: 11, day: 9, hour: 14, minute: 22 });
             (!name.is_empty() && !name.contains('\\')).then(|| DirEntry { name: name.into(), is_dir, size, modified, ..Default::default() })
         });
-        Ok(entries.collect())
+        Ok(self.with_changes(volume, path, entries.collect()))
     }
 
     fn add_boot_entry(&self, volume: usize, path: &str, title: &str) -> Result<u16, String> {
