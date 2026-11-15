@@ -16,6 +16,12 @@ pub trait Disk {
     /// The entries of a folder: name, and whether it's a folder.
     fn list(&self, dir: &str) -> Option<Vec<(String, bool)>>;
     fn read(&self, path: &str) -> Option<Vec<u8>>;
+    /// Whether `path` is there, as written, if the disk can say: cheaper
+    /// than listing its folders (on EfiFs, listing Ubuntu's /etc takes a
+    /// second and a half). `None`: found by listing them.
+    fn exists(&self, _path: &str) -> Option<bool> {
+        None
+    }
 }
 
 /// Something found to start.
@@ -39,9 +45,14 @@ fn find(entries: &[(String, bool)], name: &str, is_dir: bool) -> Option<String> 
     entries.iter().find(|(n, d)| *d == is_dir && n.eq_ignore_ascii_case(name)).map(|(n, _)| n.clone())
 }
 
-/// The path `parts` under the root, with each part's real case, if it all
-/// exists (the last part is a file).
+/// The path `parts` under the root, if it all exists (the last part is a
+/// file): as written when the disk can open paths (FAT ignores case, and
+/// Linux's are lowercase), else with each part's real case.
 fn resolve(disk: &dyn Disk, parts: &[&str]) -> Option<String> {
+    let exact: String = parts.iter().map(|p| format!("\\{p}")).collect();
+    if let Some(there) = disk.exists(&exact) {
+        return there.then_some(exact);
+    }
     let mut path = String::new();
     for (i, part) in parts.iter().enumerate() {
         let entries = disk.list(if path.is_empty() { "\\" } else { &path })?;
@@ -51,9 +62,13 @@ fn resolve(disk: &dyn Disk, parts: &[&str]) -> Option<String> {
     Some(path)
 }
 
-/// The folder `parts` under the root, with each part's real case, if it
-/// exists.
+/// The folder `parts` under the root, if it exists: as written when the
+/// disk can open paths, else with each part's real case.
 fn resolve_dir(disk: &dyn Disk, parts: &[&str]) -> Option<String> {
+    let exact: String = parts.iter().map(|p| format!("\\{p}")).collect();
+    if let Some(there) = disk.exists(&exact) {
+        return there.then_some(exact);
+    }
     let mut path = String::new();
     for part in parts {
         let entries = disk.list(if path.is_empty() { "\\" } else { &path })?;
@@ -224,8 +239,11 @@ fn linux(disk: &dyn Disk, partuuid: Option<&str>) -> Vec<Found> {
         }
     }
     if is_root_fs {
-        let dir_path = resolve_dir(disk, &[boot_parts.as_slice(), &["loader", "entries"]].concat()).unwrap_or_default();
-        for (name, is_dir) in disk.list(&dir_path).into_iter().flatten().filter(|_| !dir_path.is_empty()) {
+        let dir_path = resolve_dir(disk, &[boot_parts.as_slice(), &["loader", "entries"]].concat());
+        let dir_path = dir_path.as_deref().unwrap_or_default();
+        // Not listed when it isn't there: "" would list the root again.
+        let listing = if dir_path.is_empty() { None } else { disk.list(dir_path) };
+        for (name, is_dir) in listing.into_iter().flatten() {
             if !is_dir && super::bls::ends_with_ignore_case(&name, ".conf")
                 && let Some(text) = disk.read(&format!("{dir_path}\\{name}"))
                 && let Some(entry) = bls_entry(&String::from_utf8_lossy(&text), &dir)

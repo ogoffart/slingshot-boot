@@ -36,6 +36,9 @@ impl Disk for FileSystem {
     fn read(&self, path: &str) -> Option<Vec<u8>> {
         super::dir::read_at_most(self.handle, path, super::dir::SMALL)
     }
+    fn exists(&self, path: &str) -> Option<bool> {
+        Some(super::dir::exists(self.handle, path))
+    }
 }
 
 /// The program a removable disk starts (`\EFI\BOOT\BOOTX64.EFI`).
