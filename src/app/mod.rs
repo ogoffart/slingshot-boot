@@ -228,9 +228,10 @@ fn show_wallpaper(ui: &AppWindow, image: slint::Image) {
         height: source.height() as usize,
         data: source.as_slice().iter().map(|p| [p.r, p.g, p.b, p.a]).collect(),
     };
-    // Small: the blur is cheap, and it's drawn stretched anyway.
-    let small = backdrop::shrink(&pixels, 480);
-    let blurred = backdrop::blur(&small, 3);
+    // Smaller: the blur is cheaper, and it's drawn stretched anyway. Not
+    // too small: on a 4K screen, its pixels show as blocks.
+    let small = backdrop::shrink(&pixels, 960);
+    let blurred = backdrop::blur(&small, 6);
     let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(blurred.width as u32, blurred.height as u32);
     for (out, p) in buffer.make_mut_slice().iter_mut().zip(&blurred.data) {
         *out = slint::Rgba8Pixel { r: p[0], g: p[1], b: p[2], a: p[3] };
