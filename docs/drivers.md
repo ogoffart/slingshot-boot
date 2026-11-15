@@ -50,8 +50,9 @@ sudo mkdir -p /boot/EFI/slingshot/drivers
 sudo cp /usr/share/refind/drivers_x64/ext4_x64.efi /boot/EFI/slingshot/drivers/
 ```
 
-[EfiFs](https://github.com/pbatard/efifs) has drivers for more file systems
-(NTFS, XFS, ZFS…), untested with Slingshot.
+[EfiFs](https://github.com/pbatard/efifs)'s ext4 driver works, but reads big
+folders slowly (Files shows a spinner meanwhile); its drivers for other file
+systems (NTFS, XFS, ZFS…) are untested with Slingshot.
 
 To remove a driver, delete it from the folder.
 

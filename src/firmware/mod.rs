@@ -591,10 +591,11 @@ impl Backend for UefiBackend {
 
     fn list_dir(&self, volume: usize, path: &str) -> Result<Vec<DirEntry>, String> {
         let handle = self.disk(volume)?;
-        Ok(dir::read_dir(handle, path)?
-            .into_iter()
-            .map(|e| DirEntry { name: e.name, is_dir: e.is_dir, size: e.size, modified: e.modified, read_only: e.read_only, hidden: e.hidden })
-            .collect())
+        dir::read_dir(handle, path)
+    }
+
+    fn start_listing(&self, volume: usize, path: &str) -> Result<Box<dyn crate::app::Listing>, String> {
+        Ok(Box::new(dir::Folder::open(self.disk(volume)?, path)?))
     }
 
     fn add_boot_entry(&self, volume: usize, path: &str, title: &str) -> Result<u16, String> {

@@ -15,7 +15,7 @@ msgstr "和"
 msgid " · {} new"
 msgstr " · 新电池 {}"
 
-#: src/app/files.rs:139
+#: src/app/files.rs:151
 msgid "\"{}\" can't be a name."
 msgstr "“{}”不能用作名称。"
 
@@ -27,7 +27,7 @@ msgstr "1 小时"
 msgid "1 memory device"
 msgstr "1 个内存设备"
 
-#: src/app/cards.rs:372
+#: src/app/cards.rs:392
 msgid "1 other entry"
 msgstr "1 个其他启动项"
 
@@ -44,7 +44,7 @@ msgid "5 min"
 msgstr "5 分钟"
 
 #: src/firmware/luks.rs:292
-#: src/firmware/mod.rs:728
+#: src/firmware/mod.rs:729
 msgid "A passphrase check is still running. Try again in a moment."
 msgstr "仍在检查密码短语，请稍后再试。"
 
@@ -76,12 +76,12 @@ msgstr "强调色"
 msgid "Add Slingshot to systemd-boot's menu"
 msgstr "将 Slingshot 添加到 systemd-boot 菜单"
 
-#: ui/dialogs.slint:1271
-#: ui/files-screen.slint:620
+#: ui/dialogs.slint:1256
+#: ui/files-screen.slint:611
 msgid "Add to boot menu"
 msgstr "添加到启动菜单"
 
-#: src/app/mod.rs:2303
+#: src/app/mod.rs:2311
 msgid "Added “{}” as Boot{}"
 msgstr "已将“{}”添加为 Boot{}"
 
@@ -89,7 +89,7 @@ msgstr "已将“{}”添加为 Boot{}"
 msgid "Add…"
 msgstr "添加…"
 
-#: src/app/files.rs:417
+#: src/app/files.rs:440
 #: src/app/mod.rs:536
 #: src/app/mod.rs:556
 msgid "All disks"
@@ -99,11 +99,11 @@ msgstr "所有磁盘"
 msgid "Also in systemd-boot's menu"
 msgstr "也在 systemd-boot 菜单中"
 
-#: ui/footer.slint:65
+#: ui/footer.slint:67
 msgid "Alt ↑ ↓"
 msgstr "Alt ↑ ↓"
 
-#: src/app/cards.rs:217
+#: src/app/cards.rs:232
 msgid "An EFI program on any disk"
 msgstr "任意磁盘上的 EFI 程序"
 
@@ -119,11 +119,11 @@ msgstr "立即生效。若不保留，10 秒后恢复。"
 msgid "Apply"
 msgstr "应用"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Apr"
 msgstr "4月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "April"
 msgstr "4月"
 
@@ -131,11 +131,11 @@ msgstr "4月"
 msgid "At startup, show"
 msgstr "启动时显示"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Aug"
 msgstr "8月"
 
-#: src/app/backend.rs:624
+#: src/app/backend.rs:649
 msgid "August"
 msgstr "8月"
 
@@ -148,11 +148,11 @@ msgstr "自动"
 msgid "Automatic ({})"
 msgstr "自动（{}）"
 
-#: src/app/cards.rs:352
+#: src/app/cards.rs:372
 msgid "Back"
 msgstr "返回"
 
-#: ui/footer.slint:70
+#: ui/footer.slint:72
 msgid "Back to boot"
 msgstr "返回启动"
 
@@ -187,7 +187,7 @@ msgstr "主板 {}"
 msgid "Boot"
 msgstr "启动"
 
-#: src/app/cards.rs:139
+#: src/app/cards.rs:148
 msgid "Boot entry"
 msgstr "启动项"
 
@@ -199,7 +199,7 @@ msgstr "启动菜单"
 msgid "Boot order"
 msgstr "启动顺序"
 
-#: src/app/mod.rs:2400
+#: src/app/mod.rs:2408
 msgid "Boot order saved to the firmware"
 msgstr "启动顺序已保存到固件"
 
@@ -213,13 +213,12 @@ msgstr "固件内置"
 msgid "Cancel"
 msgstr "取消"
 
-#: src/app/files.rs:459
+#: src/app/files.rs:482
 msgid "Cannot read this file: {}"
 msgstr "无法读取此文件：{}"
 
-#: src/app/files.rs:316
-#: src/app/files.rs:607
-#: src/app/files.rs:645
+#: src/app/files.rs:593
+#: src/app/mod.rs:581
 msgid "Cannot read this folder: {}"
 msgstr "无法读取此文件夹：{}"
 
@@ -227,7 +226,7 @@ msgstr "无法读取此文件夹：{}"
 msgid "Capacity"
 msgstr "容量"
 
-#: ui/footer.slint:64
+#: ui/footer.slint:66
 msgid "Change"
 msgstr "更改"
 
@@ -251,11 +250,11 @@ msgstr "充电功率"
 msgid "Checking the passphrase…"
 msgstr "正在检查密码短语…"
 
-#: ui/dialogs.slint:1276
+#: ui/dialogs.slint:1261
 msgid "Choose"
 msgstr "选择"
 
-#: ui/dialogs.slint:1115
+#: ui/dialogs.slint:1110
 msgid "Choose a picture"
 msgstr "选择图片"
 
@@ -267,12 +266,12 @@ msgstr "选择…"
 msgid "Clock set to {}"
 msgstr "时钟已设为 {}"
 
-#: ui/dialogs.slint:1267
-#: ui/main.slint:608
+#: ui/dialogs.slint:1252
+#: ui/main.slint:604
 msgid "Close"
 msgstr "关闭"
 
-#: ui/footer.slint:60
+#: ui/footer.slint:62
 msgid "Collapse, expand"
 msgstr "折叠、展开"
 
@@ -281,33 +280,33 @@ msgid "Copies it to the boot partition and adds it to the computer's boot menu. 
 msgstr "将其复制到启动分区，并添加到电脑的启动菜单。启动方式暂时不变。"
 
 #: ui/files-screen.slint:393
-#: ui/files-screen.slint:527
+#: ui/files-screen.slint:518
 msgid "Copy"
 msgstr "复制"
 
-#: src/app/mod.rs:2307
+#: src/app/mod.rs:2315
 msgid "Could not add a boot entry: {}"
 msgstr "无法添加启动项：{}"
 
-#: src/app/files.rs:997
-#: src/app/mod.rs:2085
-#: src/app/mod.rs:2201
+#: src/app/files.rs:1128
+#: src/app/mod.rs:2093
+#: src/app/mod.rs:2209
 msgid "Could not add the picture: {}"
 msgstr "无法添加图片：{}"
 
-#: src/app/files.rs:940
+#: src/app/files.rs:1071
 msgid "Could not copy {}: {}"
 msgstr "无法复制 {}：{}"
 
-#: src/app/files.rs:895
+#: src/app/files.rs:1026
 msgid "Could not delete {}: {}"
 msgstr "无法删除 {}：{}"
 
-#: src/app/files.rs:811
+#: src/app/files.rs:942
 msgid "Could not make {}: {}"
 msgstr "无法创建 {}：{}"
 
-#: src/app/files.rs:853
+#: src/app/files.rs:984
 msgid "Could not rename {}: {}"
 msgstr "无法重命名 {}：{}"
 
@@ -323,7 +322,7 @@ msgstr "无法重启：{}"
 msgid "Could not save slingshot.toml: {}"
 msgstr "无法保存 slingshot.toml：{}"
 
-#: src/app/mod.rs:2402
+#: src/app/mod.rs:2410
 msgid "Could not save the boot order: {}"
 msgstr "无法保存启动顺序：{}"
 
@@ -331,7 +330,7 @@ msgstr "无法保存启动顺序：{}"
 msgid "Could not save the settings: {}"
 msgstr "无法保存设置：{}"
 
-#: src/app/files.rs:767
+#: src/app/files.rs:898
 msgid "Could not save {}: {}"
 msgstr "无法保存 {}：{}"
 
@@ -339,7 +338,7 @@ msgstr "无法保存 {}：{}"
 msgid "Could not set the clock: {}"
 msgstr "无法设置时钟：{}"
 
-#: src/app/mod.rs:1656
+#: src/app/mod.rs:1664
 msgid "Couldn't save the changes"
 msgstr "无法保存更改"
 
@@ -351,15 +350,15 @@ msgstr "无法保存日志：{}"
 msgid "Couldn't start {}"
 msgstr "无法启动 {}"
 
-#: ui/footer.slint:62
+#: ui/footer.slint:64
 msgid "Ctrl F"
 msgstr "Ctrl F"
 
-#: ui/footer.slint:61
+#: ui/footer.slint:63
 msgid "Ctrl S"
 msgstr "Ctrl S"
 
-#: ui/footer.slint:58
+#: ui/footer.slint:60
 msgid "Customize"
 msgstr "自定义"
 
@@ -384,30 +383,30 @@ msgstr "深色"
 msgid "Date and time"
 msgstr "日期和时间"
 
-#: src/app/backend.rs:648
+#: src/app/backend.rs:673
 msgid "Dec"
 msgstr "12月"
 
-#: src/app/backend.rs:624
+#: src/app/backend.rs:649
 msgid "December"
 msgstr "12月"
 
 #: ui/files-screen.slint:404
-#: ui/files-screen.slint:539
-#: ui/main.slint:659
+#: ui/files-screen.slint:530
+#: ui/main.slint:655
 msgid "Delete"
 msgstr "删除"
 
-#: ui/main.slint:656
+#: ui/main.slint:652
 msgid "Delete {}?"
 msgstr "删除 {}？"
 
-#: src/app/files.rs:899
+#: src/app/files.rs:1030
 msgid "Deleted {}"
 msgstr "已删除 {}"
 
-#: ui/main.slint:676
-#: ui/main.slint:677
+#: ui/main.slint:672
+#: ui/main.slint:673
 msgid "Discard"
 msgstr "放弃"
 
@@ -420,11 +419,11 @@ msgstr "磁盘"
 msgid "Disk {} of {}"
 msgstr "第 {} 个磁盘，共 {} 个"
 
-#: ui/main.slint:592
+#: ui/main.slint:588
 msgid "Do it"
 msgstr "执行"
 
-#: ui/main.slint:605
+#: ui/main.slint:601
 msgid "Done"
 msgstr "完成"
 
@@ -440,23 +439,23 @@ msgstr "耗电"
 msgid "EFI System Partition"
 msgstr "EFI 系统分区"
 
-#: src/app/files.rs:181
+#: src/app/files.rs:193
 msgid "EFI application"
 msgstr "EFI 应用程序"
 
-#: src/app/files.rs:182
+#: src/app/files.rs:194
 msgid "EFI driver"
 msgstr "EFI 驱动程序"
 
-#: src/app/cards.rs:232
+#: src/app/cards.rs:247
 msgid "EFI program"
 msgstr "EFI 程序"
 
-#: src/app/files.rs:183
+#: src/app/files.rs:195
 msgid "EFI runtime driver"
 msgstr "EFI 运行时驱动程序"
 
-#: ui/footer.slint:43
+#: ui/footer.slint:45
 msgid "Each step asks for your password"
 msgstr "每一步都会要求输入密码"
 
@@ -476,12 +475,12 @@ msgstr "英语（英国）"
 msgid "English (US)"
 msgstr "英语（美国）"
 
-#: ui/footer.slint:56
-#: ui/footer.slint:59
+#: ui/footer.slint:58
+#: ui/footer.slint:61
 msgid "Enter"
 msgstr "Enter"
 
-#: ui/files-screen.slint:558
+#: ui/files-screen.slint:549
 msgid "Enter or a double click opens a file here: a text to edit, a picture, a program to start."
 msgstr "按 Enter 或双击可在此打开文件：编辑文本、查看图片或启动程序。"
 
@@ -489,11 +488,11 @@ msgstr "按 Enter 或双击可在此打开文件：编辑文本、查看图片�
 msgid "Enter the password to change the settings."
 msgstr "输入密码以更改设置。"
 
-#: ui/footer.slint:70
+#: ui/footer.slint:72
 msgid "Esc"
 msgstr "Esc"
 
-#: src/app/cards.rs:133
+#: src/app/cards.rs:142
 msgid "Failed to start (no tries left)"
 msgstr "启动失败（已无剩余尝试次数）"
 
@@ -509,15 +508,15 @@ msgstr "快"
 msgid "Faster"
 msgstr "更快"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Feb"
 msgstr "2月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "February"
 msgstr "2月"
 
-#: ui/main.slint:638
+#: ui/main.slint:634
 msgid "File"
 msgstr "文件"
 
@@ -525,15 +524,15 @@ msgstr "文件"
 msgid "Files"
 msgstr "文件"
 
-#: ui/footer.slint:62
+#: ui/footer.slint:64
 msgid "Find"
 msgstr "查找"
 
-#: ui/files-screen.slint:683
+#: ui/files-screen.slint:674
 msgid "Find in the text"
 msgstr "在文本中查找"
 
-#: src/desktop/simulator.rs:497
+#: src/desktop/simulator.rs:499
 #: src/firmware/mod.rs:476
 msgid "Firmware"
 msgstr "固件"
@@ -542,7 +541,7 @@ msgstr "固件"
 msgid "Firmware entry"
 msgstr "固件启动项"
 
-#: src/app/cards.rs:201
+#: src/app/cards.rs:216
 msgid "Firmware setup"
 msgstr "固件设置"
 
@@ -550,11 +549,11 @@ msgstr "固件设置"
 msgid "First in the boot order"
 msgstr "启动顺序中的第一项"
 
-#: ui/footer.slint:67
+#: ui/footer.slint:69
 msgid "Focus"
 msgstr "聚焦"
 
-#: ui/main.slint:638
+#: ui/main.slint:634
 #: src/app/mod.rs:571
 msgid "Folder"
 msgstr "文件夹"
@@ -567,11 +566,11 @@ msgstr "已找到"
 msgid "French (AZERTY)"
 msgstr "法语（AZERTY）"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Fri"
 msgstr "周五"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Friday"
 msgstr "星期五"
 
@@ -583,7 +582,7 @@ msgstr "已充满"
 msgid "German (QWERTZ)"
 msgstr "德语（QWERTZ）"
 
-#: ui/main.slint:823
+#: ui/main.slint:819
 msgid "Going back to the previous resolution in {} s."
 msgstr "{} 秒后恢复之前的分辨率。"
 
@@ -625,11 +624,11 @@ msgstr "安装 Slingshot"
 msgid "Installed"
 msgstr "已安装"
 
-#: ui/main.slint:657
+#: ui/main.slint:653
 msgid "It can't be undone."
 msgstr "此操作无法撤销。"
 
-#: ui/main.slint:605
+#: ui/main.slint:601
 msgid "It didn't work"
 msgstr "没有成功"
 
@@ -641,39 +640,39 @@ msgstr "意大利语"
 msgid "Its entries are cards in Slingshot"
 msgstr "其条目在 Slingshot 中显示为卡片"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Jan"
 msgstr "1月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "January"
 msgstr "1月"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Jul"
 msgstr "7月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "July"
 msgstr "7月"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Jun"
 msgstr "6月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "June"
 msgstr "6月"
 
-#: ui/main.slint:825
+#: ui/main.slint:821
 msgid "Keep"
 msgstr "保留"
 
-#: ui/main.slint:822
+#: ui/main.slint:818
 msgid "Keep this resolution?"
 msgstr "保留此分辨率？"
 
-#: src/app/files.rs:192
+#: src/app/files.rs:204
 msgid "Kernel"
 msgstr "内核"
 
@@ -698,7 +697,7 @@ msgstr "键盘布局"
 msgid "Keys enrolled, not enforced"
 msgstr "已注册密钥，未强制执行"
 
-#: src/app/files.rs:178
+#: src/app/files.rs:190
 msgid "Kind"
 msgstr "类型"
 
@@ -718,8 +717,8 @@ msgstr "铅酸"
 msgid "Light"
 msgstr "浅色"
 
-#: src/app/cards.rs:137
-#: src/app/cards.rs:232
+#: src/app/cards.rs:146
+#: src/app/cards.rs:247
 msgid "Linux"
 msgstr "Linux"
 
@@ -731,41 +730,41 @@ msgstr "日志已保存为 {}"
 msgid "Made {}"
 msgstr "生产于 {}"
 
-#: ui/main.slint:637
+#: ui/main.slint:633
 msgid "Make"
 msgstr "创建"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Mar"
 msgstr "3月"
 
-#: src/app/backend.rs:623
+#: src/app/backend.rs:648
 msgid "March"
 msgstr "3月"
 
-#: src/app/backend.rs:623
-#: src/app/backend.rs:647
+#: src/app/backend.rs:648
+#: src/app/backend.rs:672
 msgid "May"
 msgstr "5月"
 
-#: src/desktop/simulator.rs:495
+#: src/desktop/simulator.rs:497
 #: src/firmware/mod.rs:468
 msgid "Memory"
 msgstr "内存"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Mon"
 msgstr "周一"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Monday"
 msgstr "星期一"
 
-#: src/app/cards.rs:371
+#: src/app/cards.rs:391
 msgid "More…"
 msgstr "更多…"
 
-#: ui/footer.slint:63
+#: ui/footer.slint:65
 msgid "Move"
 msgstr "移动"
 
@@ -787,12 +786,12 @@ msgstr "网络 · {}"
 msgid "Never"
 msgstr "从不"
 
-#: ui/main.slint:635
+#: ui/main.slint:631
 msgid "New"
 msgstr "新建"
 
 #: ui/files-screen.slint:383
-#: ui/files-screen.slint:515
+#: ui/files-screen.slint:506
 msgid "New…"
 msgstr "新建…"
 
@@ -826,7 +825,7 @@ msgstr "无"
 msgid "Normal"
 msgstr "正常"
 
-#: src/app/files.rs:184
+#: src/app/files.rs:196
 msgid "Not an EFI program"
 msgstr "不是 EFI 程序"
 
@@ -834,12 +833,12 @@ msgstr "不是 EFI 程序"
 msgid "Not enough memory to check the passphrase."
 msgstr "内存不足，无法检查密码短语。"
 
-#: src/app/files.rs:786
+#: src/app/files.rs:917
 msgid "Not found"
 msgstr "未找到"
 
-#: src/app/files.rs:744
-#: src/app/mod.rs:2271
+#: src/app/files.rs:875
+#: src/app/mod.rs:2279
 msgid "Not found: {}"
 msgstr "未找到：{}"
 
@@ -851,7 +850,7 @@ msgstr "未安装"
 msgid "Not on every boot"
 msgstr "不在每次启动时"
 
-#: src/app/files.rs:187
+#: src/app/files.rs:199
 msgid "Not signed"
 msgstr "未签名"
 
@@ -863,23 +862,23 @@ msgstr "不支持"
 msgid "Nothing happened for {}. Press a key or move the pointer to stay on."
 msgstr "已 {} 无操作。按任意键或移动指针以保持开机。"
 
-#: src/app/backend.rs:648
+#: src/app/backend.rs:673
 msgid "Nov"
 msgstr "11月"
 
-#: src/app/backend.rs:624
+#: src/app/backend.rs:649
 msgid "November"
 msgstr "11月"
 
-#: ui/main.slint:580
+#: ui/main.slint:576
 msgid "OK"
 msgstr "确定"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Oct"
 msgstr "10月"
 
-#: src/app/backend.rs:624
+#: src/app/backend.rs:649
 msgid "October"
 msgstr "10月"
 
@@ -923,14 +922,14 @@ msgstr "一次：无论发生什么，之后的重启都会恢复正常。每次
 msgid "Only when chosen"
 msgstr "仅在选择时"
 
-#: ui/dialogs.slint:1276
+#: ui/dialogs.slint:1261
 #: ui/files-screen.slint:378
-#: ui/footer.slint:59
+#: ui/footer.slint:61
 msgid "Open"
 msgstr "打开"
 
-#: ui/footer.slint:57
-#: src/app/files.rs:192
+#: ui/footer.slint:59
+#: src/app/files.rs:204
 msgid "Options"
 msgstr "选项"
 
@@ -947,16 +946,16 @@ msgid "Password"
 msgstr "密码"
 
 #: ui/files-screen.slint:398
-#: ui/files-screen.slint:533
+#: ui/files-screen.slint:524
 msgid "Paste"
 msgstr "粘贴"
 
-#: src/app/files.rs:944
+#: src/app/files.rs:1075
 msgid "Pasted {}"
 msgstr "已粘贴 {}"
 
-#: ui/footer.slint:66
 #: ui/footer.slint:68
+#: ui/footer.slint:70
 msgid "PgUp PgDn"
 msgstr "PgUp PgDn"
 
@@ -985,35 +984,39 @@ msgstr "指针速度"
 msgid "Press any key for the boot menu"
 msgstr "按任意键进入启动菜单"
 
-#: src/app/files.rs:176
-#: src/desktop/simulator.rs:494
+#: src/app/files.rs:188
+#: src/desktop/simulator.rs:496
 #: src/firmware/mod.rs:467
 msgid "Processor"
 msgstr "处理器"
+
+#: src/app/files.rs:649
+msgid "Reading {}: {} entries…"
+msgstr "正在读取 {}：{} 项…"
 
 #: ui/install-screen.slint:133
 msgid "Reading…"
 msgstr "正在读取…"
 
-#: ui/main.slint:592
+#: ui/main.slint:588
 msgid "Remove"
 msgstr "移除"
 
 #: ui/files-screen.slint:388
-#: ui/files-screen.slint:521
-#: ui/main.slint:637
+#: ui/files-screen.slint:512
+#: ui/main.slint:633
 msgid "Rename"
 msgstr "重命名"
 
-#: ui/main.slint:635
+#: ui/main.slint:631
 msgid "Rename {}"
 msgstr "重命名 {}"
 
-#: ui/footer.slint:65
+#: ui/footer.slint:67
 msgid "Reorder"
 msgstr "排序"
 
-#: ui/main.slint:808
+#: ui/main.slint:804
 msgid "Reset"
 msgstr "重置"
 
@@ -1021,16 +1024,16 @@ msgstr "重置"
 msgid "Reset all settings"
 msgstr "重置所有设置"
 
-#: ui/main.slint:805
+#: ui/main.slint:801
 msgid "Reset all settings?"
 msgstr "重置所有设置？"
 
 #: ui/boot-screen.slint:642
-#: ui/footer.slint:56
+#: ui/footer.slint:58
 msgid "Restart"
 msgstr "重启"
 
-#: ui/main.slint:607
+#: ui/main.slint:603
 msgid "Restart now"
 msgstr "立即重启"
 
@@ -1038,7 +1041,7 @@ msgstr "立即重启"
 msgid "Restarting…"
 msgstr "正在重启…"
 
-#: ui/settings-screen.slint:1356
+#: ui/settings-screen.slint:1342
 msgid "Restore original order"
 msgstr "恢复原始顺序"
 
@@ -1046,12 +1049,12 @@ msgstr "恢复原始顺序"
 msgid "Resuming {} in {} s. Press any key to stay here."
 msgstr "{} 将在 {} 秒后恢复。按任意键留在此处。"
 
-#: ui/files-screen.slint:601
-#: ui/main.slint:824
+#: ui/files-screen.slint:592
+#: ui/main.slint:820
 msgid "Revert"
 msgstr "恢复"
 
-#: ui/main.slint:592
+#: ui/main.slint:588
 msgid "Running…"
 msgstr "正在运行…"
 
@@ -1063,43 +1066,43 @@ msgstr "SATA 磁盘"
 msgid "SCSI disk"
 msgstr "SCSI 磁盘"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Sat"
 msgstr "周六"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Saturday"
 msgstr "星期六"
 
 #: ui/dialogs.slint:536
-#: ui/files-screen.slint:606
-#: ui/footer.slint:61
+#: ui/files-screen.slint:597
+#: ui/footer.slint:63
 msgid "Save"
 msgstr "保存"
 
-#: ui/footer.slint:69
+#: ui/footer.slint:71
 msgid "Save log"
 msgstr "保存日志"
 
-#: ui/main.slint:672
+#: ui/main.slint:668
 msgid "Save the changes?"
 msgstr "保存更改？"
 
-#: ui/main.slint:620
+#: ui/main.slint:616
 msgid "Save the file?"
 msgstr "保存文件？"
 
-#: ui/main.slint:700
+#: ui/main.slint:696
 msgid "Save the new boot order?"
 msgstr "保存新的启动顺序？"
 
-#: ui/settings-screen.slint:1361
+#: ui/settings-screen.slint:1347
 msgid "Save to firmware…"
 msgstr "保存到固件…"
 
-#: src/app/mod.rs:1654
-#: src/app/mod.rs:1777
-#: src/app/mod.rs:1797
+#: src/app/mod.rs:1662
+#: src/app/mod.rs:1785
+#: src/app/mod.rs:1805
 msgid "Saved in slingshot.toml"
 msgstr "已保存到 slingshot.toml"
 
@@ -1107,7 +1110,7 @@ msgstr "已保存到 slingshot.toml"
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr "保存在 Slingshot 旁边的 slingshot.toml 中。留空的字段保持启动项原有的值。图片是同一文件夹中的 PNG 或 JPEG 文件。"
 
-#: src/app/files.rs:758
+#: src/app/files.rs:889
 msgid "Saved {}"
 msgstr "已保存 {}"
 
@@ -1115,16 +1118,16 @@ msgstr "已保存 {}"
 msgid "Screen resolution"
 msgstr "屏幕分辨率"
 
-#: ui/footer.slint:68
+#: ui/footer.slint:70
 msgid "Scroll"
 msgstr "滚动"
 
-#: ui/footer.slint:66
+#: ui/footer.slint:68
 msgid "Section"
 msgstr "栏目"
 
 #: ui/install-screen.slint:175
-#: src/desktop/simulator.rs:498
+#: src/desktop/simulator.rs:500
 #: src/firmware/mod.rs:477
 msgid "Secure Boot"
 msgstr "安全启动"
@@ -1141,15 +1144,15 @@ msgstr "安全启动已关闭"
 msgid "Secure Boot on"
 msgstr "安全启动已开启"
 
-#: ui/footer.slint:55
+#: ui/footer.slint:57
 msgid "Select"
 msgstr "选择"
 
-#: src/app/backend.rs:647
+#: src/app/backend.rs:672
 msgid "Sep"
 msgstr "9月"
 
-#: src/app/backend.rs:624
+#: src/app/backend.rs:649
 msgid "September"
 msgstr "9月"
 
@@ -1179,7 +1182,7 @@ msgstr "设置已锁定"
 msgid "Settings are saved in slingshot.toml, next to Slingshot"
 msgstr "设置保存在 Slingshot 旁边的 slingshot.toml 中"
 
-#: src/app/mod.rs:1852
+#: src/app/mod.rs:1860
 msgid "Settings reset to their defaults"
 msgstr "设置已恢复为默认值"
 
@@ -1204,7 +1207,7 @@ msgid "Shown"
 msgstr "显示"
 
 #: ui/boot-screen.slint:647
-#: ui/footer.slint:56
+#: ui/footer.slint:58
 msgid "Shut down"
 msgstr "关机"
 
@@ -1212,11 +1215,11 @@ msgstr "关机"
 msgid "Shutting down…"
 msgstr "正在关机…"
 
-#: src/app/files.rs:187
+#: src/app/files.rs:199
 msgid "Signature"
 msgstr "签名"
 
-#: src/app/files.rs:187
+#: src/app/files.rs:199
 msgid "Signed (not checked here)"
 msgstr "已签名（此处未验证）"
 
@@ -1226,7 +1229,7 @@ msgstr "跳过"
 
 #: ui/install-screen.slint:147
 #: ui/main.slint:216
-#: ui/system-screen.slint:685
+#: ui/system-screen.slint:670
 msgid "Slingshot"
 msgstr "Slingshot"
 
@@ -1238,8 +1241,8 @@ msgstr "Slingshot（模拟器）"
 msgid "Slingshot can't read this disk's data."
 msgstr "Slingshot 无法读取此磁盘的数据。"
 
-#: src/app/files.rs:689
-#: src/app/mod.rs:2182
+#: src/app/files.rs:820
+#: src/app/mod.rs:2190
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr "Slingshot 无法读取 {} 磁盘：这台电脑没有相应的驱动。"
 
@@ -1272,8 +1275,8 @@ msgid "Splash screen"
 msgstr "启动画面"
 
 #: ui/dialogs.slint:347
-#: ui/dialogs.slint:1276
-#: ui/files-screen.slint:624
+#: ui/dialogs.slint:1261
+#: ui/files-screen.slint:615
 msgid "Start"
 msgstr "启动"
 
@@ -1289,11 +1292,11 @@ msgstr "每次启动时运行 Slingshot"
 msgid "Start Slingshot once, on the next restart"
 msgstr "下次重启时运行一次 Slingshot"
 
-#: ui/dialogs.slint:1115
+#: ui/dialogs.slint:1110
 msgid "Start a file"
 msgstr "启动文件"
 
-#: src/app/cards.rs:216
+#: src/app/cards.rs:231
 msgid "Start a file…"
 msgstr "启动文件…"
 
@@ -1333,11 +1336,11 @@ msgstr "启动"
 msgid "Stop starting Slingshot on every boot"
 msgstr "不再每次启动时运行 Slingshot"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Sun"
 msgstr "周日"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Sunday"
 msgstr "星期日"
 
@@ -1347,7 +1350,7 @@ msgstr "星期日"
 msgid "System"
 msgstr "系统"
 
-#: ui/footer.slint:67
+#: ui/footer.slint:69
 msgid "Tab"
 msgstr "Tab"
 
@@ -1359,11 +1362,11 @@ msgstr "青色"
 msgid "Temperatures"
 msgstr "温度"
 
-#: ui/main.slint:674
+#: ui/main.slint:670
 msgid "The changes to this file aren't saved, and can't be: it's read-only."
 msgstr "此文件的更改尚未保存，也无法保存：它是只读的。"
 
-#: ui/main.slint:673
+#: ui/main.slint:669
 msgid "The changes to this file aren't saved."
 msgstr "此文件的更改尚未保存。"
 
@@ -1376,7 +1379,7 @@ msgstr "默认启动项"
 msgid "The disk couldn't be read."
 msgstr "无法读取该磁盘。"
 
-#: src/app/files.rs:394
+#: src/app/files.rs:417
 #: src/app/mod.rs:547
 msgid "The firmware can't read any disk."
 msgstr "固件无法读取任何磁盘。"
@@ -1389,11 +1392,11 @@ msgstr "固件无法加载 {}。它可能不是适用于这台电脑的 EFI 程�
 msgid "The firmware only starts Slingshot once it is signed"
 msgstr "固件只会启动已签名的 Slingshot"
 
-#: src/app/cards.rs:204
+#: src/app/cards.rs:219
 msgid "The firmware's own settings"
 msgstr "固件自身的设置"
 
-#: src/app/files.rs:532
+#: src/app/files.rs:555
 msgid "The first {} of {}."
 msgstr "{1} 中的前 {0}。"
 
@@ -1409,7 +1412,7 @@ msgstr "菜单的语言、按键输入的字符（包括密码短语），以及
 msgid "The last one started"
 msgstr "上次启动的"
 
-#: src/app/cards.rs:353
+#: src/app/cards.rs:373
 msgid "The main entries"
 msgstr "主要启动项"
 
@@ -1417,11 +1420,11 @@ msgstr "主要启动项"
 msgid "The one set as default"
 msgstr "设为默认的"
 
-#: src/app/files.rs:994
+#: src/app/files.rs:1125
 msgid "The splash picture is changed."
 msgstr "启动画面图片已更改。"
 
-#: src/app/files.rs:993
+#: src/app/files.rs:1124
 msgid "The wallpaper is changed."
 msgstr "壁纸已更改。"
 
@@ -1429,11 +1432,11 @@ msgstr "壁纸已更改。"
 msgid "Theme"
 msgstr "主题"
 
-#: ui/main.slint:806
+#: ui/main.slint:802
 msgid "Theme, accent color, startup screen, timeout and resolution go back to their defaults. The boot order isn't changed."
 msgstr "主题、强调色、启动画面、等待时间和分辨率将恢复为默认值。启动顺序不变。"
 
-#: ui/main.slint:590
+#: ui/main.slint:586
 msgid "These commands will run as root (your password is asked for):\n\n"
 msgstr "以下命令将以 root 身份运行（会询问你的密码）：\n\n"
 
@@ -1454,7 +1457,7 @@ msgstr "此磁盘已不存在。"
 msgid "This disk is locked."
 msgstr "此磁盘已锁定。"
 
-#: src/app/files.rs:505
+#: src/app/files.rs:528
 msgid "This disk or file is read-only: changes can't be saved."
 msgstr "此磁盘或文件为只读：无法保存更改。"
 
@@ -1463,31 +1466,31 @@ msgstr "此磁盘或文件为只读：无法保存更改。"
 msgid "This disk's encryption couldn't be read."
 msgstr "无法读取此磁盘的加密信息。"
 
-#: src/app/files.rs:449
+#: src/app/files.rs:472
 msgid "This file is too large to open here."
 msgstr "此文件太大，无法在此打开。"
 
-#: src/app/files.rs:524
+#: src/app/files.rs:547
 msgid "This isn't a valid EFI program."
 msgstr "这不是有效的 EFI 程序。"
 
-#: ui/system-screen.slint:588
+#: ui/system-screen.slint:590
 msgid "This machine"
 msgstr "这台电脑"
 
-#: src/app/files.rs:516
+#: src/app/files.rs:539
 msgid "This picture can't be shown."
 msgstr "无法显示此图片。"
 
-#: ui/main.slint:701
+#: ui/main.slint:697
 msgid "This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen."
 msgstr "这会写入固件中的 BootOrder。原始顺序会被保留，可在此界面恢复。"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Thu"
 msgstr "周四"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Thursday"
 msgstr "星期四"
 
@@ -1495,11 +1498,11 @@ msgstr "星期四"
 msgid "Title"
 msgstr "标题"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Tue"
 msgstr "周二"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Tuesday"
 msgstr "星期二"
 
@@ -1511,15 +1514,15 @@ msgstr "空闲时关机"
 msgid "Turning off in {} s"
 msgstr "{} 秒后关机"
 
-#: ui/dialogs.slint:1260
+#: ui/dialogs.slint:1245
 msgid "Type a name to find it · / types a path · + adds to the menu"
 msgstr "输入名称查找 · / 输入路径 · + 添加到菜单"
 
-#: ui/dialogs.slint:1260
+#: ui/dialogs.slint:1245
 msgid "Type a name to find it · / types a path · Enter chooses"
 msgstr "输入名称查找 · / 输入路径 · Enter 选择"
 
-#: ui/dialogs.slint:1164
+#: ui/dialogs.slint:1159
 #: ui/files-screen.slint:348
 msgid "Type a path, like \\EFI\\BOOT"
 msgstr "输入路径，例如 \\EFI\\BOOT"
@@ -1544,7 +1547,7 @@ msgstr "USB · 可移动"
 msgid "Under More…"
 msgstr "在“更多…”中"
 
-#: src/app/files.rs:180
+#: src/app/files.rs:192
 msgid "Unified kernel image"
 msgstr "统一内核映像"
 
@@ -1573,7 +1576,7 @@ msgstr "解锁"
 msgid "Unlock the encrypted disk"
 msgstr "解锁加密磁盘"
 
-#: src/app/mod.rs:2167
+#: src/app/mod.rs:2175
 msgid "Unlocked, but its files can't be shown: this computer has no driver for what's inside."
 msgstr "已解锁，但无法显示其中的文件：这台电脑没有读取其内容的驱动。"
 
@@ -1582,11 +1585,11 @@ msgstr "已解锁，但无法显示其中的文件：这台电脑没有读取其
 msgid "Update"
 msgstr "更新"
 
-#: ui/files-screen.slint:616
+#: ui/files-screen.slint:607
 msgid "Use as splash"
 msgstr "用作启动画面"
 
-#: ui/files-screen.slint:612
+#: ui/files-screen.slint:603
 msgid "Use as wallpaper"
 msgstr "用作壁纸"
 
@@ -1607,11 +1610,11 @@ msgstr "电压"
 msgid "Wallpaper"
 msgstr "壁纸"
 
-#: src/app/backend.rs:645
+#: src/app/backend.rs:670
 msgid "Wed"
 msgstr "周三"
 
-#: src/app/backend.rs:620
+#: src/app/backend.rs:645
 msgid "Wednesday"
 msgstr "星期三"
 
@@ -1627,7 +1630,7 @@ msgstr "Windows 启动管理器"
 msgid "Wrong password."
 msgstr "密码错误。"
 
-#: src/app/files.rs:217
+#: src/app/files.rs:229
 msgid "hidden"
 msgstr "隐藏"
 
@@ -1635,9 +1638,9 @@ msgstr "隐藏"
 msgid "macOS"
 msgstr "macOS"
 
-#: src/app/files.rs:214
-#: src/app/files.rs:412
-#: src/app/files.rs:412
+#: src/app/files.rs:226
+#: src/app/files.rs:435
+#: src/app/files.rs:435
 msgid "read-only"
 msgstr "只读"
 
@@ -1670,7 +1673,7 @@ msgstr "{} 转/分"
 msgid "{} boot"
 msgstr "{} 启动"
 
-#: src/app/files.rs:918
+#: src/app/files.rs:1049
 msgid "{} copied: Paste puts it in the folder chosen."
 msgstr "已复制 {}：“粘贴”会将其放入所选文件夹。"
 
@@ -1682,7 +1685,7 @@ msgstr "{} 核"
 msgid "{} firmware {} · {} · {}"
 msgstr "{} 固件 {} · {} · {}"
 
-#: src/app/files.rs:409
+#: src/app/files.rs:432
 msgid "{} free of {}"
 msgstr "{} 可用，共 {}"
 
@@ -1694,14 +1697,14 @@ msgstr "{} 小时"
 msgid "{} h {} min"
 msgstr "{} 小时 {} 分钟"
 
-#: src/app/files.rs:805
-#: src/app/files.rs:848
-#: src/app/files.rs:934
+#: src/app/files.rs:936
+#: src/app/files.rs:979
+#: src/app/files.rs:1065
 msgid "{} is already in this folder."
 msgstr "{} 已在此文件夹中。"
 
-#: src/app/files.rs:687
-#: src/app/mod.rs:2180
+#: src/app/files.rs:818
+#: src/app/mod.rs:2188
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr "{} 的加密方式 Slingshot 无法解锁。"
 
@@ -1725,12 +1728,12 @@ msgstr "{} 分钟"
 msgid "{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it."
 msgstr "共 {} 种模式，最高 {}。立即生效；10 秒内不保留则恢复。"
 
-#: src/app/files.rs:782
+#: src/app/files.rs:913
 #: src/app/power.rs:119
 msgid "{} of {}"
 msgstr "{} / {}"
 
-#: src/app/cards.rs:372
+#: src/app/cards.rs:392
 msgid "{} other entries"
 msgstr "{} 个其他启动项"
 
@@ -1750,15 +1753,15 @@ msgstr "{} 线程"
 msgid "{} until full"
 msgstr "{} 后充满"
 
-#: src/app/backend.rs:652
+#: src/app/backend.rs:677
 msgid "{} {} {}"
 msgstr "{2}{1}日 {0}"
 
-#: src/app/backend.rs:629
+#: src/app/backend.rs:654
 msgid "{} {} {} {}"
 msgstr "{3}年{2}{1}日 {0}"
 
-#: src/app/sensors.rs:88
+#: src/app/sensors.rs:91
 msgid "{} °C"
 msgstr "{} °C"
 

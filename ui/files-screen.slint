@@ -8,7 +8,7 @@ import "fonts/JetBrainsMono-Regular.ttf";
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { Button, Panel, ScrollList, TextField } from "widgets.slint";
+import { Button, Panel, ScrollList, Spinner, TextField } from "widgets.slint";
 // A row of the tree: a disk, a folder, a file.
 export struct TreeRow {
     name: string,
@@ -20,6 +20,8 @@ export struct TreeRow {
     depth: int,
     expandable: bool,
     expanded: bool,
+    // Being read (a big folder, a slice at a time): a spinner for its arrow.
+    loading: bool,
 }
 
 export struct HexRow {
@@ -47,6 +49,9 @@ export global Explorer {
     in-out property <int> current;
     // Shown under the rows: an empty folder, an error.
     in property <string> message;
+    // A big folder being read (slices between frames; its row has a
+    // spinner): its name and how many entries so far.
+    in property <string> reading;
     // The current row's folder or file, as typed in the location field.
     in property <string> path;
     // The selected row's size, date and attributes; the disk's free space.
@@ -300,7 +305,7 @@ export component FilesScreen inherits Rectangle {
                         overflow: elide;
                     }
                     Text {
-                        text: Explorer.space;
+                        text: Explorer.reading != "" ? Explorer.reading : Explorer.space;
                         font-size: 13px;
                         color: Theme.text-muted;
                         vertical-alignment: center;
@@ -439,12 +444,18 @@ export component FilesScreen inherits Rectangle {
                                     // Expands or collapses: the arrow, for the mouse.
                                     Rectangle {
                                         width: 18px;
-                                        if row.expandable: Icon {
+                                        if row.expandable && !row.loading: Icon {
                                             x: (parent.width - self.width) / 2;
                                             y: (parent.height - self.height) / 2;
                                             kind: row.expanded ? "chevron-down" : "chevron-right";
                                             size: 14px;
                                             color: Theme.text-muted;
+                                        }
+                                        if row.loading: Spinner {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            size: 14px;
+                                            thickness: 2px;
                                         }
                                         if row.expandable: TouchArea {
                                             clicked => {

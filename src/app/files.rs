@@ -15,8 +15,8 @@ use core::cell::RefCell;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use super::{
-    AppWindow, Backend, DateTime, DirEntry, Explorer, HexRow, LockedVolume, PictureFor, ProgramFact, ScreenPicture, Target, TreeRow,
-    Volume,
+    AppWindow, Backend, DateTime, DirEntry, Explorer, HexRow, Listing, LockedVolume, PictureFor, ProgramFact, ScreenPicture, Target,
+    TreeRow, Volume,
 };
 use crate::tr::{tr, trf};
 
@@ -25,6 +25,8 @@ const TEXT_MAX: usize = 256 << 10;
 const BYTES_SHOWN: usize = 4096;
 /// The largest file opened at all (a picture can be a few MB).
 const OPEN_MAX: u64 = 32 << 20;
+/// How long a folder is read between two frames.
+const SLICE: core::time::Duration = core::time::Duration::from_millis(10);
 
 #[derive(Default)]
 struct Files {
@@ -36,6 +38,16 @@ struct Files {
     opened: Option<Opened>,
     /// The file copied (Ctrl+C), to paste in another folder.
     clipboard: Option<Clip>,
+    /// A folder being expanded, read a slice at a time.
+    reading: Option<Reading>,
+}
+
+/// Disk `volume`'s folder `folders`, read until now.
+struct Reading {
+    volume: usize,
+    folders: Vec<String>,
+    listing: Box<dyn Listing>,
+    entries: Vec<DirEntry>,
 }
 
 struct Clip {
@@ -263,17 +275,26 @@ impl Files {
         matches!(&self.nodes[i].what, What::Volume(_) | What::Entry { entry: DirEntry { is_dir: true, .. }, .. })
     }
 
+    /// The disk and the folder of node `i`, if it can expand and hasn't.
+    fn to_expand(&self, i: usize) -> Result<Option<(usize, Vec<String>)>, String> {
+        if !self.expandable(i) || self.nodes[i].expanded {
+            return Ok(None);
+        }
+        Ok(Some(self.place(i).ok_or("not a folder")?))
+    }
+
     /// Shows the folder or disk of node `i` expanded: its entries under it.
     fn expand(&mut self, i: usize, backend: &dyn Backend) -> Result<(), String> {
-        if !self.expandable(i) || self.nodes[i].expanded {
-            return Ok(());
-        }
-        let (volume, folders) = self.place(i).ok_or("not a folder")?;
+        let Some((volume, folders)) = self.to_expand(i)? else { return Ok(()) };
         let path = super::folder_path(&folders, None);
-        let mut entries = backend.list_dir(volume, &path).map_err(|e| {
-            log::warn!("files: {path} on disk {volume}: {e}");
-            e
-        })?;
+        let entries = backend.list_dir(volume, &path).map_err(|e| failed(&folders, volume, e))?;
+        self.insert(i, volume, folders, entries);
+        Ok(())
+    }
+
+    /// Node `i` expanded, with `entries`, the ones of disk `volume`'s folder
+    /// `folders`, under it.
+    fn insert(&mut self, i: usize, volume: usize, folders: Vec<String>, mut entries: Vec<DirEntry>) {
         entries.retain(|e| e.name != "." && e.name != "..");
         entries.sort_by_key(|e| (!e.is_dir, e.name.to_ascii_lowercase()));
         let depth = self.nodes[i].depth + 1;
@@ -284,7 +305,6 @@ impl Files {
         });
         self.nodes.splice(i + 1..i + 1, children);
         self.nodes[i].expanded = true;
-        Ok(())
     }
 
     /// Hides what's under node `i`.
@@ -313,7 +333,7 @@ impl Files {
             self.collapse(row);
         }
         if let Err(e) = self.expand(row, backend) {
-            ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
+            cannot_read(ui, &e);
         }
         // In order: a folder opened shows its own, opened after it.
         let mut j = row + 1;
@@ -366,6 +386,8 @@ impl Files {
 
     /// Shows the rows, with row `current` the current one.
     fn show(&self, ui: &AppWindow, backend: &dyn Backend, current: usize) {
+        // The folder being read, with a spinner.
+        let loading = self.reading.as_ref().and_then(|r| self.folder_row(r.volume, &r.folders)).filter(|&i| !self.nodes[i].expanded);
         let rows: Vec<TreeRow> = (0..self.nodes.len())
             .map(|i| {
                 let node = &self.nodes[i];
@@ -384,6 +406,7 @@ impl Files {
                     depth: node.depth as i32,
                     expandable: self.expandable(i),
                     expanded: node.expanded,
+                    loading: Some(i) == loading,
                 }
             })
             .collect();
@@ -559,6 +582,117 @@ pub struct Actions {
     pub show_status: Rc<dyn Fn(&str)>,
 }
 
+/// A folder that couldn't be read, logged.
+fn failed(folders: &[String], volume: usize, e: String) -> String {
+    log::warn!("files: {} on disk {volume}: {e}", super::folder_path(folders, None));
+    e
+}
+
+/// Says a folder couldn't be read, and why.
+fn cannot_read(ui: &AppWindow, e: &str) {
+    ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
+}
+
+/// The row the tree's cursor is on.
+fn current(ui: &AppWindow) -> usize {
+    ui.global::<Explorer>().get_current().max(0) as usize
+}
+
+/// Row `row`'s spinner, on or off, without showing the rows again.
+fn show_loading(ui: &AppWindow, row: usize, loading: bool) {
+    let rows = ui.global::<Explorer>().get_rows();
+    if let Some(data) = rows.row_data(row) {
+        rows.set_row_data(row, TreeRow { loading, ..data });
+    }
+}
+
+/// Expands node `i` like `Files::expand`, but a big folder is read a slice
+/// at a time, between frames, with "Reading…" shown; a folder that can't be
+/// read says so.
+fn expand_in_slices(files: &Rc<RefCell<Files>>, ui: &AppWindow, backend: &Rc<dyn Backend>, i: usize) {
+    let mut f = files.borrow_mut();
+    let (volume, folders) = match f.to_expand(i) {
+        Ok(Some(place)) => place,
+        Ok(None) => return,
+        Err(e) => return cannot_read(ui, &e),
+    };
+    // Asked again while it's read: it goes on.
+    if f.reading.as_ref().is_some_and(|r| r.volume == volume && r.folders == folders) {
+        return;
+    }
+    let path = super::folder_path(&folders, None);
+    let first = backend.start_listing(volume, &path).and_then(|mut listing| listing.more(SLICE).map(|more| (listing, more)));
+    let (listing, (entries, done)) = match first {
+        Ok(first) => first,
+        Err(e) => return cannot_read(ui, &failed(&folders, volume, e)),
+    };
+    if done {
+        f.insert(i, volume, folders, entries);
+        f.show(ui, &**backend, i);
+        return;
+    }
+    // Another folder being read gives way; its slices go on with this one.
+    let going = f.reading.is_some();
+    f.reading = Some(Reading { volume, folders, listing, entries });
+    show_reading(ui, &f);
+    show_loading(ui, i, true);
+    drop(f);
+    if !going {
+        read_more(files.clone(), ui.as_weak(), backend.clone());
+    }
+}
+
+/// "Reading…": the folder being read and how many entries so far.
+fn show_reading(ui: &AppWindow, f: &Files) {
+    let text = f.reading.as_ref().map_or_else(String::new, |r| {
+        let name = r.folders.last().cloned().or_else(|| f.volumes.get(r.volume).map(|v| v.name.clone())).unwrap_or_default();
+        trf("Reading {}: {} entries…", &[&name, &r.entries.len()])
+    });
+    ui.global::<Explorer>().set_reading(text.into());
+}
+
+/// The next slice of the folder being read, after this frame; once it's all
+/// read, its row expanded (if it's still shown).
+fn read_more(files: Rc<RefCell<Files>>, ui: slint::Weak<AppWindow>, backend: Rc<dyn Backend>) {
+    slint::Timer::single_shot(core::time::Duration::ZERO, move || {
+        let Some(ui_strong) = ui.upgrade() else { return };
+        let mut f = files.borrow_mut();
+        let Some(mut r) = f.reading.take() else { return };
+        let error = match r.listing.more(SLICE) {
+            Ok((entries, done)) => {
+                r.entries.extend(entries);
+                if !done {
+                    f.reading = Some(r);
+                    show_reading(&ui_strong, &f);
+                    drop(f);
+                    return read_more(files, ui, backend);
+                }
+                None
+            }
+            Err(e) => Some(e),
+        };
+        show_reading(&ui_strong, &f);
+        let row = f.folder_row(r.volume, &r.folders).filter(|&row| !f.nodes[row].expanded);
+        match (error, row) {
+            (None, Some(row)) => {
+                let before = f.nodes.len();
+                f.insert(row, r.volume, r.folders, r.entries);
+                // The current row stays the same one.
+                let current = current(&ui_strong);
+                let current = if current > row { current + f.nodes.len() - before } else { current };
+                f.show(&ui_strong, &*backend, current);
+            }
+            (None, None) => {}
+            (Some(e), row) => {
+                if let Some(row) = row {
+                    show_loading(&ui_strong, row, false);
+                }
+                cannot_read(&ui_strong, &failed(&r.folders, r.volume, e));
+            }
+        }
+    });
+}
+
 /// Wires the Files screen.
 pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
     let files: Rc<RefCell<Files>> = Rc::default();
@@ -573,7 +707,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             // The disks again: one may have come, gone or been unlocked.
             let before = f.nodes.len();
             f.reload_volumes(&*backend);
-            let current = if f.nodes.len() == before { ui.global::<Explorer>().get_current().max(0) as usize } else { 0 };
+            let current = if f.nodes.len() == before { current(&ui) } else { 0 };
             f.show(&ui, &*backend, current);
         });
     }
@@ -590,7 +724,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
         explorer.on_expand(move |index| {
             let Some(ui) = ui_weak.upgrade() else { return index };
             let i = index.max(0) as usize;
-            let mut f = files.borrow_mut();
+            let f = files.borrow();
             if i >= f.nodes.len() {
                 return index;
             }
@@ -603,11 +737,8 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 let has_child = f.nodes.get(i + 1).is_some_and(|n| n.depth > f.nodes[i].depth);
                 return if has_child { index + 1 } else { index };
             }
-            if let Err(e) = f.expand(i, &*backend) {
-                ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
-                return index;
-            }
-            f.show(&ui, &*backend, i);
+            drop(f);
+            expand_in_slices(&files, &ui, &backend, i);
             index
         });
     }
@@ -641,11 +772,11 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 What::Volume(_) | What::Entry { entry: DirEntry { is_dir: true, .. }, .. } => {
                     if node.expanded {
                         f.collapse(i);
-                    } else if let Err(e) = f.expand(i, &*backend) {
-                        ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
-                        return;
+                        f.show(&ui, &*backend, i);
+                    } else {
+                        drop(f);
+                        expand_in_slices(&files, &ui, &backend, i);
                     }
-                    f.show(&ui, &*backend, i);
                 }
                 What::Entry { volume, folders, entry } => {
                     let (volume, folders, entry) = (*volume, folders.clone(), entry.clone());
@@ -704,7 +835,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             let Some(ui) = ui_weak.upgrade() else { return -1 };
             let rows = ui.global::<Explorer>().get_rows();
             let names: Vec<String> = rows.iter().map(|r| String::from(r.name.as_str())).collect();
-            super::find_row(&names, &typed, ui.global::<Explorer>().get_current().max(0) as usize).map_or(-1, |i| i as i32)
+            super::find_row(&names, &typed, current(&ui)).map_or(-1, |i| i as i32)
         });
     }
     {
@@ -716,7 +847,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             let Some(ui) = ui_weak.upgrade() else { return false };
             let mut f = files.borrow_mut();
             let absolute = path.starts_with(['\\', '/']);
-            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let current = current(&ui);
             let candidates: Vec<(usize, Vec<String>)> = match f.place(current) {
                 Some((v, folders)) => alloc::vec![(v, if absolute { Vec::new() } else { folders })],
                 None => (0..f.volumes.len()).map(|v| (v, Vec::new())).collect(),
@@ -760,7 +891,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                     o.data = data;
                     ui.global::<Explorer>().set_dirty(false);
                     f.refresh_entry(&*backend, volume, &path);
-                    f.show(&ui, &*backend, ui.global::<Explorer>().get_current().max(0) as usize);
+                    f.show(&ui, &*backend, current(&ui));
                 }
                 Err(e) => {
                     log::warn!("files: saving {} on disk {}: {e}", o.path, o.volume);
@@ -800,7 +931,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 Err(why) => return (actions.show_status)(&why),
             };
             let mut f = files.borrow_mut();
-            let Some((volume, folders)) = f.place(ui.global::<Explorer>().get_current().max(0) as usize) else { return };
+            let Some((volume, folders)) = f.place(current(&ui)) else { return };
             if taken(&*backend, volume, &folders, name) {
                 return (actions.show_status)(&trf("{} is already in this folder.", &[&name]));
             }
@@ -837,7 +968,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 Err(why) => return (actions.show_status)(&why),
             };
             let mut f = files.borrow_mut();
-            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let current = current(&ui);
             let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
             let (volume, folders, old) = (*volume, folders.clone(), entry.name.clone());
             if name == old {
@@ -880,7 +1011,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
         explorer.on_delete(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut f = files.borrow_mut();
-            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let current = current(&ui);
             let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
             let (volume, folders, name) = (*volume, folders.clone(), entry.name.clone());
             // Then the next row in the folder, else the one before (else the folder).
@@ -909,7 +1040,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
         explorer.on_copy(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
             let mut f = files.borrow_mut();
-            let current = ui.global::<Explorer>().get_current().max(0) as usize;
+            let current = current(&ui);
             let Some(What::Entry { volume, folders, entry }) = f.nodes.get(current).map(|n| &n.what) else { return };
             if entry.is_dir {
                 return;
@@ -928,7 +1059,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             let mut f = files.borrow_mut();
             let Some(clip) = &f.clipboard else { return };
             let (from_volume, from, name) = (clip.volume, clip.path.clone(), clip.name.clone());
-            let Some((volume, folders)) = f.place(ui.global::<Explorer>().get_current().max(0) as usize) else { return };
+            let Some((volume, folders)) = f.place(current(&ui)) else { return };
             // Not over a file.
             if taken(&*backend, volume, &folders, &name) {
                 return (actions.show_status)(&trf("{} is already in this folder.", &[&name]));

@@ -7,6 +7,8 @@
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+
+use crate::app::DirEntry;
 use uefi::proto::media::file::{Directory, File, FileAttribute, FileInfo, FileMode, FileType, RegularFile};
 use uefi::proto::media::fs::SimpleFileSystem;
 use uefi::{CString16, Handle};
@@ -71,16 +73,6 @@ pub fn unreadable_partitions() -> Vec<Unreadable> {
     found
 }
 
-/// A folder's entry: name, whether it's a folder, size, when it changed.
-pub struct Entry {
-    pub name: String,
-    pub is_dir: bool,
-    pub size: u64,
-    pub modified: Option<crate::app::DateTime>,
-    pub read_only: bool,
-    pub hidden: bool,
-}
-
 /// The entries of the folder `path` on the file system `handle`, without
 /// "." and "..".
 ///
@@ -93,69 +85,114 @@ pub struct Entry {
 /// root folder at each open_volume, read to its end by the previous
 /// listing), and a folder is one when its information says so (the uefi
 /// crate's test is GetPosition failing, which EfiFs answers for folders).
-pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
-    // Each step's error logged, but a folder that isn't there: drivers fail
-    // in their own ways.
-    let failed = |what: &str, status: uefi::Status| {
-        if status != uefi::Status::NOT_FOUND {
-            log::info!("{path}: {what}: {status:?}");
-        }
-        format!("{status:?}")
-    };
-    let mut sfs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
-    let mut root = sfs.open_volume().map_err(|e| failed("opening the volume", e.status()))?;
-    let mut dir = if path.is_empty() || path == "\\" {
-        root
-    } else {
-        let name = CString16::try_from(path).map_err(|_| String::from("bad path"))?;
-        let mut file = root.open(&name, FileMode::Read, FileAttribute::empty()).map_err(|e| failed("opening it", e.status()))?;
-        let info = file.get_boxed_info::<FileInfo>().map_err(|e| failed("its information", e.status()))?;
-        if !info.attribute().contains(FileAttribute::DIRECTORY) {
-            return Err(String::from("not a folder"));
-        }
-        // SAFETY: The driver says it's a folder.
-        unsafe { Directory::new(file) }
-    };
-    // Not every driver supports it on a folder; those start there anyway.
-    let _ = dir.reset_entry_readout();
+pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<DirEntry>, String> {
+    let mut folder = Folder::open(handle, path)?;
     let mut entries = Vec::new();
-    let mut buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
-    loop {
-        match dir.read_entry(&mut buffer.0) {
-            Ok(Some(info)) => {
-                let name = format!("{}", info.file_name());
-                if name != "." && name != ".." {
-                    let t = info.modification_time();
-                    let modified = (t.year() > 0).then(|| crate::app::DateTime {
-                        year: t.year(),
-                        month: t.month(),
-                        day: t.day(),
-                        hour: t.hour(),
-                        minute: t.minute(),
-                    });
-                    let attributes = info.attribute();
-                    entries.push(Entry {
-                        name,
-                        is_dir: info.is_directory(),
-                        size: info.file_size(),
-                        modified,
-                        read_only: attributes.contains(FileAttribute::READ_ONLY),
-                        hidden: attributes.contains(FileAttribute::HIDDEN),
-                    });
-                }
-            }
-            Ok(None) => break,
-            Err(e) if entries.is_empty() => return Err(failed("reading it", e.status())),
-            // A driver failing on one entry (EfiFs on Ubuntu's /boot): the
-            // ones before it are still worth showing.
-            Err(e) => {
-                let after = entries.last().map_or("", |e: &Entry| e.name.as_str());
-                log::info!("{path}: {:?} after {} entries (the last: {after})", e.status(), entries.len());
-                break;
-            }
-        }
+    while let Some(entry) = folder.next()? {
+        entries.push(entry);
     }
     Ok(entries)
+}
+
+/// A folder being read, an entry at a time: a big one takes seconds on
+/// EfiFs, which reads entry n by going over the n before it.
+pub struct Folder {
+    // Before `_fs`: closed first.
+    dir: Directory,
+    buffer: alloc::boxed::Box<InfoBuffer>,
+    path: String,
+    read: usize,
+    last: String,
+    _fs: uefi::boot::ScopedProtocol<SimpleFileSystem>,
+}
+
+impl Folder {
+    /// The folder `path` on the file system `handle`, from its first entry.
+    pub fn open(handle: Handle, path: &str) -> Result<Self, String> {
+        let mut fs = crate::uefi_platform::open_shared::<SimpleFileSystem>(handle).ok_or("cannot open the disk")?;
+        let mut root = fs.open_volume().map_err(|e| failed(path, "opening the volume", e.status()))?;
+        let mut dir = if path.is_empty() || path == "\\" {
+            root
+        } else {
+            let name = CString16::try_from(path).map_err(|_| String::from("bad path"))?;
+            let mut file =
+                root.open(&name, FileMode::Read, FileAttribute::empty()).map_err(|e| failed(path, "opening it", e.status()))?;
+            let info = file.get_boxed_info::<FileInfo>().map_err(|e| failed(path, "its information", e.status()))?;
+            if !info.attribute().contains(FileAttribute::DIRECTORY) {
+                return Err(String::from("not a folder"));
+            }
+            // SAFETY: The driver says it's a folder.
+            unsafe { Directory::new(file) }
+        };
+        // Not every driver supports it on a folder; those start there anyway.
+        let _ = dir.reset_entry_readout();
+        let buffer = alloc::boxed::Box::new(InfoBuffer([0; 4096]));
+        Ok(Folder { dir, buffer, path: path.into(), read: 0, last: String::new(), _fs: fs })
+    }
+
+    /// The next entry, without "." and ".."; `None` after the last, or
+    /// after an error once some are read. An error only for the first.
+    pub fn next(&mut self) -> Result<Option<DirEntry>, String> {
+        loop {
+            let info = match self.dir.read_entry(&mut self.buffer.0) {
+                Ok(Some(info)) => info,
+                Ok(None) => return Ok(None),
+                Err(e) if self.read == 0 => return Err(failed(&self.path, "reading it", e.status())),
+                // A driver failing on one entry (EfiFs on Ubuntu's /boot):
+                // the ones before it are still worth showing.
+                Err(e) => {
+                    log::info!("{}: {:?} after {} entries (the last: {})", self.path, e.status(), self.read, self.last);
+                    return Ok(None);
+                }
+            };
+            let name = format!("{}", info.file_name());
+            if name == "." || name == ".." {
+                continue;
+            }
+            let t = info.modification_time();
+            let modified = (t.year() > 0).then(|| crate::app::DateTime {
+                year: t.year(),
+                month: t.month(),
+                day: t.day(),
+                hour: t.hour(),
+                minute: t.minute(),
+            });
+            let attributes = info.attribute();
+            self.read += 1;
+            self.last.clone_from(&name);
+            return Ok(Some(DirEntry {
+                name,
+                is_dir: info.is_directory(),
+                size: info.file_size(),
+                modified,
+                read_only: attributes.contains(FileAttribute::READ_ONLY),
+                hidden: attributes.contains(FileAttribute::HIDDEN),
+            }));
+        }
+    }
+}
+
+impl crate::app::Listing for Folder {
+    fn more(&mut self, budget: core::time::Duration) -> Result<(Vec<DirEntry>, bool), String> {
+        let start = crate::uefi_platform::uptime();
+        let mut entries = Vec::new();
+        while let Some(e) = self.next()? {
+            entries.push(e);
+            if crate::uefi_platform::uptime() - start >= budget {
+                return Ok((entries, false));
+            }
+        }
+        Ok((entries, true))
+    }
+}
+
+/// The error of a step reading `path`, logged (but a folder that isn't
+/// there): drivers fail in their own ways.
+fn failed(path: &str, what: &str, status: uefi::Status) -> String {
+    if status != uefi::Status::NOT_FOUND {
+        log::info!("{path}: {what}: {status:?}");
+    }
+    format!("{status:?}")
 }
 
 /// Bytes for a `FileInfo`: 80, then a name of up to 255 UCS-2 characters

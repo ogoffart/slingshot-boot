@@ -216,6 +216,23 @@ pub struct Volume {
     pub writable: bool,
 }
 
+/// A folder being read (`Backend::start_listing`).
+pub trait Listing {
+    /// The entries read in about `budget`, and whether the folder is all
+    /// read. An error only before the first entry: one after ends the
+    /// folder there.
+    fn more(&mut self, budget: core::time::Duration) -> Result<(Vec<DirEntry>, bool), String>;
+}
+
+/// A folder read all at once.
+struct Listed(Option<Vec<DirEntry>>);
+
+impl Listing for Listed {
+    fn more(&mut self, _budget: core::time::Duration) -> Result<(Vec<DirEntry>, bool), String> {
+        Ok((self.0.take().unwrap_or_default(), true))
+    }
+}
+
 /// A file or folder, in "Start a file…".
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DirEntry {
@@ -417,6 +434,11 @@ pub trait Backend {
     /// `volumes()[volume]`.
     fn list_dir(&self, _volume: usize, _path: &str) -> Result<Vec<DirEntry>, String> {
         Err(String::from("not supported here"))
+    }
+    /// Starts reading the same, a little at a time: a big folder can take
+    /// seconds (EfiFs). Here, all at once.
+    fn start_listing(&self, volume: usize, path: &str) -> Result<Box<dyn Listing>, String> {
+        Ok(Box::new(Listed(Some(self.list_dir(volume, path)?))))
     }
     /// Adds a firmware boot entry (Boot####, at the end of the boot order)
     /// that starts `path` of `volumes()[volume]`. Returns its number.

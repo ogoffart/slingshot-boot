@@ -18,7 +18,8 @@ Notes for developers and coding agents. The README is for users: keep build and 
   `detect.rs`, what a file system can start. They build on both targets, so `cargo test` runs them on the desktop.
 - `src/uefi_platform/`: UEFI only: the Slint platform (GOP, keyboard and pointer protocols, cursor, event loop). It
   knows nothing of Slingshot (no `crate::`), to be usable by other applications: what Slingshot adds goes through its
-  `Hooks`, implemented in `src/firmware/platform.rs`.
+  `Hooks`, implemented in `src/firmware/platform.rs`. On x86, the screen's memory, which firmware maps uncached, is
+  made write-combining through the PAT (`write_combining.rs`): a 4K frame reaches the screen in 4 ms, not 200.
 - `src/firmware/`: UEFI only: firmware variables, systemd-boot, chainloading, system info, USB mice (`usbmouse.rs`),
   batteries (`battery.rs`; `battery/acpi.rs` runs the firmware's ACPI code with the `battery` feature) and I2C
   touchpads (`touchpad.rs` over `i2c.rs`, with the `touchpad` feature, x86 only). Both features are on by default. QEMU
@@ -27,7 +28,11 @@ Notes for developers and coding agents. The README is for users: keep build and 
   machine's details. Log what a bug report from a real machine would need.
 - Startup: the menu is drawn first, from what's already connected. Then (`Hooks::first_frame`) Slingshot connects the
   drivers in slices of about 10 ms, in Slint timers between frames and input, finds the mice and the touchpad, and the
-  app rescans the disks (`Hub::devices_connected`).
+  app rescans the disks (`Hub::devices_connected`). Network cards aren't connected (their link can take seconds):
+  their entries start through the firmware, after a reset.
+- Folders and files on drivers' file systems: `src/firmware/dir.rs`, which works around their quirks (EfiFs gives
+  back its root folder already read, answers GetPosition on folders, which the uefi crate takes for files, and reads big
+  folders slowly: Files reads those in slices).
 - Patched dependencies (`acpi`, `argon2`): `[patch.crates-io]` in Cargo.toml says why.
 - `ui/`: the `.slint` files: `main.slint` (the window, its state and the keyboard), one file per screen, `top-bar`,
   `footer`, `dialogs` and `widgets`. What the Rust code shows and handles is in a global per screen (`BootMenu`,
