@@ -11,7 +11,7 @@
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { BootEntry, Button, EntryGlyph, Focus, IconPicker, Panel, PicturePicker, SegmentedControl, Spinner, TextField, Toggle } from "widgets.slint";
+import { BootEntry, Button, EntryGlyph, Focus, IconPicker, Panel, PicturePicker, ScrollList, SegmentedControl, Spinner, TextField, Toggle } from "widgets.slint";
 
 // What every dialog is in: the screen dimmed behind it (clicks and the wheel
 // stop there), and a card `card-width` by `card-height` with the dialog's
@@ -1020,12 +1020,7 @@ export component FileDialog inherits DialogFrame {
     function select(i: int) {
         FileBrowser.current = clamp(i, 0, root.rows.length - 1);
         // Keeps the current row in view.
-        let top = FileBrowser.current * root.row-height;
-        if top < -list.content-y {
-            list.content-y = -top;
-        } else if top + root.row-height > -list.content-y + list.height {
-            list.content-y = list.height - top - root.row-height;
-        }
+        list.show(FileBrowser.current * root.row-height, (FileBrowser.current + 1) * root.row-height);
     }
 
     init => {
@@ -1181,66 +1176,56 @@ export component FileDialog inherits DialogFrame {
                 border-width: scope.has-focus ? 2px : 0px;
                 border-color: Theme.accent;
                 clip: true;
-                // The mouse wheel (the Flickable isn't interactive: it
-                // only follows the keyboard). Around the rows: they get
-                // the clicks, the wheel comes up to here.
-                TouchArea {
-                    scroll-event(e) => {
-                        list.content-y = clamp(list.content-y + e.delta-y, min(0px, list.height - list.content-height), 0px);
-                        accept
-                    }
-                    list := Flickable {
-                        interactive: false;
-                        content-height: root.rows.length * root.row-height;
-                        for row[i] in root.rows: file-row := Rectangle {
-                            y: i * root.row-height;
-                            accessible-role: list-item;
-                            accessible-label: row.name;
-                            accessible-item-selectable: true;
-                            accessible-item-selected: i == FileBrowser.current;
-                            height: root.row-height;
-                            background: i == FileBrowser.current ? Theme.surface-strong : touch.has-hover ? Theme.surface : transparent;
-                            border-width: i == FileBrowser.current ? 2px : 0px;
-                            border-color: Theme.accent;
-                            border-radius: Theme.radius;
-                            touch := TouchArea {
-                                clicked => {
-                                    FileBrowser.current = i;
-                                    scope.focus();
-                                }
-                                double-clicked => { FileBrowser.open(i); }
+                list := ScrollList {
+                    content-height: root.rows.length * root.row-height;
+                    for row[i] in root.rows: file-row := Rectangle {
+                        y: i * root.row-height;
+                        accessible-role: list-item;
+                        accessible-label: row.name;
+                        accessible-item-selectable: true;
+                        accessible-item-selected: i == FileBrowser.current;
+                        height: root.row-height;
+                        background: i == FileBrowser.current ? Theme.surface-strong : touch.has-hover ? Theme.surface : transparent;
+                        border-width: i == FileBrowser.current ? 2px : 0px;
+                        border-color: Theme.accent;
+                        border-radius: Theme.radius;
+                        touch := TouchArea {
+                            clicked => {
+                                FileBrowser.current = i;
+                                scope.focus();
                             }
-                            HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 16px;
-                                spacing: 14px;
-                                Rectangle {
-                                    width: 34px;
-                                    Icon {
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        kind: row.kind;
-                                        size: 22px;
-                                        color: row.file ? Theme.accent : row.dim ? Theme.text-muted : Theme.text-soft;
-                                    }
+                            double-clicked => { FileBrowser.open(i); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 16px;
+                            spacing: 14px;
+                            Rectangle {
+                                width: 34px;
+                                Icon {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    kind: row.kind;
+                                    size: 22px;
+                                    color: row.file ? Theme.accent : row.dim ? Theme.text-muted : Theme.text-soft;
                                 }
-                                Text {
-                                    horizontal-stretch: 1;
-                                    text: row.name;
-                                    font-size: 15px;
-                                    font-weight: i == FileBrowser.current ? 600 : 400;
-                                    color: row.dim ? Theme.text-muted : Theme.text;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-                                Text {
-                                    text: row.detail;
-                                    font-size: 13px;
-                                    color: Theme.text-muted;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
-                                    overflow: elide;
-                                }
+                            }
+                            Text {
+                                horizontal-stretch: 1;
+                                text: row.name;
+                                font-size: 15px;
+                                font-weight: i == FileBrowser.current ? 600 : 400;
+                                color: row.dim ? Theme.text-muted : Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: row.detail;
+                                font-size: 13px;
+                                color: Theme.text-muted;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                                overflow: elide;
                             }
                         }
                     }

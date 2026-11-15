@@ -837,13 +837,10 @@ export component TextField inherits Rectangle {
     }
 }
 
-// Frosted glass: the blurred wallpaper (`Theme.backdrop`) as it is behind
-// this element, clipped to its rounded corners, under a tint. Without a
-// wallpaper, just the tint.
 // A vertical scroll bar for a Flickable (`content-y <=> flickable.content-y`):
 // shows which part is in view, and scrolls when its thumb is dragged or its
 // track clicked. Hidden when everything fits.
-export component ScrollBar inherits Rectangle {
+component ScrollBar inherits Rectangle {
     in-out property <length> content-y;
     in property <length> content-height;
     in property <length> view-height;
@@ -882,6 +879,57 @@ export component ScrollBar inherits Rectangle {
     }
 }
 
+// A list that scrolls: with the wheel and its bar, not by dragging (its
+// rows take the clicks), `scroll-by`, `page` and `show` for the keys. Its
+// children are the content, `content-height` tall, `content-y` the scroll
+// (0 at the top).
+export component ScrollList inherits TouchArea {
+    in property <length> content-height;
+    in-out property <length> content-y <=> flick.content-y;
+    // The content doesn't fit.
+    out property <bool> scrolls: root.content-height > root.height;
+
+    // Moves by `dy`, within the ends: whether it moved.
+    public function scroll-by(dy: length) -> bool {
+        let before = flick.content-y;
+        flick.content-y = clamp(flick.content-y + dy, min(0px, root.height - root.content-height), 0px);
+        flick.content-y != before
+    }
+    // Most of what's in view, down or up.
+    public function page(down: bool) -> bool {
+        root.scroll-by((down ? -0.8 : 0.8) * root.height)
+    }
+    // Scrolls as little as needed for `top` to `bottom` (in the content) to be in view.
+    public function show(top: length, bottom: length) {
+        if top < -flick.content-y {
+            flick.content-y = -top;
+        } else if bottom > -flick.content-y + root.height {
+            flick.content-y = root.height - bottom;
+        }
+    }
+
+    scroll-event(e) => {
+        root.scroll-by(e.delta-y);
+        accept
+    }
+    flick := Flickable {
+        interactive: false;
+        content-height: root.content-height;
+        @children
+    }
+    ScrollBar {
+        x: root.width - self.width - 3px;
+        y: 4px;
+        height: root.height - 8px;
+        content-y <=> flick.content-y;
+        content-height: root.content-height;
+        view-height: root.height;
+    }
+}
+
+// Frosted glass: the blurred wallpaper (`Theme.backdrop`) as it is behind
+// this element, clipped to its rounded corners, under a tint. Without a
+// wallpaper, just the tint.
 export component Frost inherits Rectangle {
     in property <color> tint;
     // Over a full-window Theme.backdrop already: the same pixels, so the

@@ -432,12 +432,11 @@ export component AppWindow inherits Window {
             reject
         }
         key-pressed(event) => {
-            // Page Up / Page Down, Ctrl+Tab / Ctrl+Shift+Tab, or 1 2 3,
-            // switch screens (in Settings, Page Up / Page Down go from
-            // section to section, on System they scroll its list: the screen
-            // handles them first).
-            if event.text == Key.PageDown || event.text == Key.PageUp {
-                root.show-next-screen(event.text == Key.PageUp);
+            // Ctrl+Tab / Ctrl+Shift+Tab, or 1 2 3, switch screens. Page Up
+            // and Page Down don't: they scroll the System screen's list (in
+            // Settings, they go from section to section).
+            if (event.text == Key.PageDown || event.text == Key.PageUp) && root.screen == 1 {
+                system-screen.page(event.text == Key.PageDown);
                 return accept;
             }
             if (event.text == Key.Tab || event.text == Key.Backtab) && event.modifiers.control {

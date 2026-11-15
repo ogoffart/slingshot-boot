@@ -3,7 +3,7 @@
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { BootEntry, Button, Focus, Panel, PicturePicker, Segment, SegmentedControl, Slider, TextField, Toggle } from "widgets.slint";
+import { BootEntry, Button, Focus, Panel, PicturePicker, ScrollList, Segment, SegmentedControl, Slider, TextField, Toggle } from "widgets.slint";
 
 component IconButton inherits Rectangle {
     in property <string> icon;
@@ -1269,79 +1269,65 @@ export component SettingsScreen inherits Rectangle {
                 }
                     // Scrolls when there are more entries than room (many
                     // firmware have a dozen): the list must not grow the screen.
-                    // Not interactive: dragging a row moves it, the wheel scrolls.
-                    TouchArea {
+                    list := ScrollList {
                         min-height: 0;
                         preferred-height: rows.preferred-height;
                         max-height: rows.preferred-height;
-                        scroll-event(event) => {
-                            list.content-y = clamp(list.content-y + event.delta-y, min(0px, list.height - rows.preferred-height), 0px);
-                            accept
-                        }
-                        list := Flickable {
-                            interactive: false;
-                            content-height: rows.preferred-height;
-                            rows := VerticalLayout {
-                                spacing: root.row-pitch - 50px;
-                                for entry[i] in SettingsPage.order: order-row := OrderRow {
-                                    entry: entry;
-                                    position: i;
-                                    count: SettingsPage.order.length;
-                                    shown-position: i == root.drag-from ? root.drag-to
-                                        : self.shift < 0 ? i - 1 : self.shift > 0 ? i + 1 : i;
-                                    shift: root.drag-from < 0 || i == root.drag-from ? 0px
-                                        : root.drag-from < i && i <= root.drag-to ? -root.row-pitch
-                                        : root.drag-to <= i && i < root.drag-from ? root.row-pitch
-                                        : 0px;
-                                    // The focus on this row, when it's made (the
-                                    // list was changed) or asked.
-                                    property <int> request: root.row-request;
-                                    init => {
-                                        if root.row-focus == i {
-                                            self.focus();
-                                        }
+                        content-height: rows.preferred-height;
+                        rows := VerticalLayout {
+                            spacing: root.row-pitch - 50px;
+                            for entry[i] in SettingsPage.order: order-row := OrderRow {
+                                entry: entry;
+                                position: i;
+                                count: SettingsPage.order.length;
+                                shown-position: i == root.drag-from ? root.drag-to
+                                    : self.shift < 0 ? i - 1 : self.shift > 0 ? i + 1 : i;
+                                shift: root.drag-from < 0 || i == root.drag-from ? 0px
+                                    : root.drag-from < i && i <= root.drag-to ? -root.row-pitch
+                                    : root.drag-to <= i && i < root.drag-from ? root.row-pitch
+                                    : 0px;
+                                // The focus on this row, when it's made (the
+                                // list was changed) or asked.
+                                property <int> request: root.row-request;
+                                init => {
+                                    if root.row-focus == i {
+                                        self.focus();
                                     }
-                                    changed request => {
-                                        if root.row-focus == i {
-                                            self.focus();
-                                        }
+                                }
+                                changed request => {
+                                    if root.row-focus == i {
+                                        self.focus();
                                     }
-                                    changed has-focus => {
-                                        if self.has-focus {
-                                            root.row-focus = i;
-                                            // Keeps it in view.
-                                            let top = i * root.row-pitch;
-                                            let bottom = top + 50px;
-                                            if top < -list.content-y {
-                                                list.content-y = -top;
-                                            } else if bottom > -list.content-y + list.height {
-                                                list.content-y = list.height - bottom;
-                                            }
-                                        }
+                                }
+                                changed has-focus => {
+                                    if self.has-focus {
+                                        root.row-focus = i;
+                                        // Keeps it in view.
+                                        list.show(i * root.row-pitch, i * root.row-pitch + 50px);
                                     }
-                                    drag-started => {
-                                        root.drag-from = i;
-                                        root.drag-dy = 0;
+                                }
+                                drag-started => {
+                                    root.drag-from = i;
+                                    root.drag-dy = 0;
+                                }
+                                dragged(dy) => { root.drag-dy = dy; }
+                                dropped => {
+                                    let from = root.drag-from;
+                                    let to = root.drag-to;
+                                    root.drag-from = -1;
+                                    root.row-focus = to;
+                                    if to != from {
+                                        SettingsPage.move-entry(from, to);
                                     }
-                                    dragged(dy) => { root.drag-dy = dy; }
-                                    dropped => {
-                                        let from = root.drag-from;
-                                        let to = root.drag-to;
-                                        root.drag-from = -1;
-                                        root.row-focus = to;
-                                        if to != from {
-                                            SettingsPage.move-entry(from, to);
-                                        }
-                                    }
-                                    // The focus goes with the row.
-                                    move-up => {
-                                        root.row-focus = i - 1;
-                                        SettingsPage.move-entry(i, i - 1);
-                                    }
-                                    move-down => {
-                                        root.row-focus = i + 1;
-                                        SettingsPage.move-entry(i, i + 1);
-                                    }
+                                }
+                                // The focus goes with the row.
+                                move-up => {
+                                    root.row-focus = i - 1;
+                                    SettingsPage.move-entry(i, i - 1);
+                                }
+                                move-down => {
+                                    root.row-focus = i + 1;
+                                    SettingsPage.move-entry(i, i + 1);
                                 }
                             }
                         }

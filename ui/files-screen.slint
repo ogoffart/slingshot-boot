@@ -8,7 +8,7 @@ import "fonts/JetBrainsMono-Regular.ttf";
 
 import { Theme } from "theme.slint";
 import { Icon } from "icons.slint";
-import { Button, Panel, ScrollBar, TextField } from "widgets.slint";
+import { Button, Panel, ScrollList, TextField } from "widgets.slint";
 // A row of the tree: a disk, a folder, a file.
 export struct TreeRow {
     name: string,
@@ -180,12 +180,7 @@ export component FilesScreen inherits Rectangle {
         Explorer.current = clamp(i, 0, root.rows.length - 1);
         Explorer.selected(Explorer.current);
         // Keeps the current row in view.
-        let top = Explorer.current * root.row-height;
-        if top < -list.content-y {
-            list.content-y = -top;
-        } else if top + root.row-height > -list.content-y + list.height {
-            list.content-y = list.height - top - root.row-height;
-        }
+        list.show(Explorer.current * root.row-height, (Explorer.current + 1) * root.row-height);
     }
 
     // Opens row `i`, asking first if that would lose changes.
@@ -407,101 +402,86 @@ export component FilesScreen inherits Rectangle {
                                 }
                             }
                         }
-                        TouchArea {
-                            scroll-event(e) => {
-                                list.content-y = clamp(list.content-y + e.delta-y, min(0px, list.height - list.content-height), 0px);
-                                accept
-                            }
-                            list := Flickable {
-                                interactive: false;
-                                content-height: root.rows.length * root.row-height;
-                                for row[i] in root.rows: tree-row := Rectangle {
-                                    y: i * root.row-height;
-                                    height: root.row-height;
-                                    accessible-role: list-item;
-                                    accessible-label: row.name;
-                                    accessible-item-selectable: true;
-                                    accessible-item-selected: i == Explorer.current;
-                                    background: i == Explorer.current ? Theme.surface-strong : touch.has-hover ? Theme.surface : transparent;
-                                    border-width: i == Explorer.current ? 2px : 0px;
-                                    border-color: Theme.accent;
-                                    border-radius: Theme.radius;
-                                    touch := TouchArea {
-                                        clicked => {
+                        list := ScrollList {
+                            content-height: root.rows.length * root.row-height;
+                            for row[i] in root.rows: tree-row := Rectangle {
+                                y: i * root.row-height;
+                                height: root.row-height;
+                                accessible-role: list-item;
+                                accessible-label: row.name;
+                                accessible-item-selectable: true;
+                                accessible-item-selected: i == Explorer.current;
+                                background: i == Explorer.current ? Theme.surface-strong : touch.has-hover ? Theme.surface : transparent;
+                                border-width: i == Explorer.current ? 2px : 0px;
+                                border-color: Theme.accent;
+                                border-radius: Theme.radius;
+                                touch := TouchArea {
+                                    clicked => {
+                                        root.select(i);
+                                        scope.focus();
+                                    }
+                                    double-clicked => { root.open(i); }
+                                    pointer-event(e) => {
+                                        if e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
                                             root.select(i);
                                             scope.focus();
-                                        }
-                                        double-clicked => { root.open(i); }
-                                        pointer-event(e) => {
-                                            if e.button == PointerEventButton.right && e.kind == PointerEventKind.down {
-                                                root.select(i);
-                                                scope.focus();
-                                                row-menu.show({
-                                                    x: self.absolute-position.x + self.mouse-x - row-menu.absolute-position.x,
-                                                    y: self.absolute-position.y + self.mouse-y - row-menu.absolute-position.y,
-                                                });
-                                            }
-                                        }
-                                    }
-                                    HorizontalLayout {
-                                        padding-left: 8px + row.depth * 18px;
-                                        padding-right: 14px;
-                                        spacing: 6px;
-                                        // Expands or collapses: the arrow, for the mouse.
-                                        Rectangle {
-                                            width: 18px;
-                                            if row.expandable: Icon {
-                                                x: (parent.width - self.width) / 2;
-                                                y: (parent.height - self.height) / 2;
-                                                kind: row.expanded ? "chevron-down" : "chevron-right";
-                                                size: 14px;
-                                                color: Theme.text-muted;
-                                            }
-                                            if row.expandable: TouchArea {
-                                                clicked => {
-                                                    root.select(i);
-                                                    Explorer.open(i);
-                                                    scope.focus();
-                                                }
-                                            }
-                                        }
-                                        Rectangle {
-                                            width: 28px;
-                                            Icon {
-                                                x: (parent.width - self.width) / 2;
-                                                y: (parent.height - self.height) / 2;
-                                                kind: row.kind;
-                                                size: 20px;
-                                                color: row.file ? Theme.accent : row.dim ? Theme.text-muted : Theme.text-soft;
-                                            }
-                                        }
-                                        Text {
-                                            horizontal-stretch: 1;
-                                            text: row.name;
-                                            font-size: 14px;
-                                            font-weight: i == Explorer.current ? 600 : 400;
-                                            color: row.dim ? Theme.text-muted : Theme.text;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                        }
-                                        Text {
-                                            text: row.detail;
-                                            font-size: 12px;
-                                            color: Theme.text-muted;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: right;
-                                            overflow: elide;
+                                            row-menu.show({
+                                                x: self.absolute-position.x + self.mouse-x - row-menu.absolute-position.x,
+                                                y: self.absolute-position.y + self.mouse-y - row-menu.absolute-position.y,
+                                            });
                                         }
                                     }
                                 }
-                            }
-                            ScrollBar {
-                                x: parent.width - self.width - 3px;
-                                y: 4px;
-                                height: parent.height - 8px;
-                                content-y <=> list.content-y;
-                                content-height: list.content-height;
-                                view-height: list.height;
+                                HorizontalLayout {
+                                    padding-left: 8px + row.depth * 18px;
+                                    padding-right: 14px;
+                                    spacing: 6px;
+                                    // Expands or collapses: the arrow, for the mouse.
+                                    Rectangle {
+                                        width: 18px;
+                                        if row.expandable: Icon {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            kind: row.expanded ? "chevron-down" : "chevron-right";
+                                            size: 14px;
+                                            color: Theme.text-muted;
+                                        }
+                                        if row.expandable: TouchArea {
+                                            clicked => {
+                                                root.select(i);
+                                                Explorer.open(i);
+                                                scope.focus();
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 28px;
+                                        Icon {
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            kind: row.kind;
+                                            size: 20px;
+                                            color: row.file ? Theme.accent : row.dim ? Theme.text-muted : Theme.text-soft;
+                                        }
+                                    }
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: row.name;
+                                        font-size: 14px;
+                                        font-weight: i == Explorer.current ? 600 : 400;
+                                        color: row.dim ? Theme.text-muted : Theme.text;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: row.detail;
+                                        font-size: 12px;
+                                        color: Theme.text-muted;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                        overflow: elide;
+                                    }
+                                }
                             }
                         }
                     }
@@ -726,58 +706,38 @@ export component FilesScreen inherits Rectangle {
                                 }
                                 reject
                             }
-                            TouchArea {
-                                scroll-event(e) => {
-                                    flick.content-y = clamp(flick.content-y + e.delta-y, min(0px, flick.height - flick.content-height), 0px);
-                                    accept
-                                }
-                                flick := Flickable {
-                                    interactive: false;
-                                    content-height: max(self.height, input.preferred-height + 24px);
-                                    input := TextInput {
-                                        x: 12px;
-                                        y: 12px;
-                                        width: flick.width - 24px;
-                                        height: max(self.preferred-height, flick.height - 24px);
-                                        text <=> Explorer.text;
-                                        single-line: false;
-                                        wrap: word-wrap;
-                                        // PgUp and PgDn move by what's in view.
-                                        page-height: flick.height;
-                                        read-only: !Explorer.writable;
-                                        font-family: "JetBrains Mono";
-                                        font-size: 14px;
-                                        color: Theme.text;
-                                        selection-background-color: Theme.accent.with-alpha(0.35);
-                                        selection-foreground-color: Theme.text;
-                                        edited => { Explorer.dirty = true; }
-                                        // Tab selects all the text of a TextInput: the next key
-                                        // would replace the whole file.
-                                        changed has-focus => {
-                                            if self.has-focus && !text-view.keep-selection {
-                                                self.clear-selection();
-                                            }
-                                            text-view.keep-selection = false;
+                            flick := ScrollList {
+                                content-height: input.preferred-height + 24px;
+                                input := TextInput {
+                                    x: 12px;
+                                    y: 12px;
+                                    width: flick.width - 24px;
+                                    height: max(self.preferred-height, flick.height - 24px);
+                                    text <=> Explorer.text;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                    // PgUp and PgDn move by what's in view.
+                                    page-height: flick.height;
+                                    read-only: !Explorer.writable;
+                                    font-family: "JetBrains Mono";
+                                    font-size: 14px;
+                                    color: Theme.text;
+                                    selection-background-color: Theme.accent.with-alpha(0.35);
+                                    selection-foreground-color: Theme.text;
+                                    edited => { Explorer.dirty = true; }
+                                    // Tab selects all the text of a TextInput: the next key
+                                    // would replace the whole file.
+                                    changed has-focus => {
+                                        if self.has-focus && !text-view.keep-selection {
+                                            self.clear-selection();
                                         }
-                                        // Keeps the cursor in view.
-                                        cursor-position-changed(pos) => {
-                                            let line = self.font-size * 1.5;
-                                            if pos.y + 12px < -flick.content-y {
-                                                flick.content-y = -(pos.y + 12px) + 12px;
-                                            } else if pos.y + 12px + line > -flick.content-y + flick.height {
-                                                flick.content-y = flick.height - pos.y - 12px - line;
-                                            }
-                                        }
+                                        text-view.keep-selection = false;
+                                    }
+                                    // Keeps the cursor in view.
+                                    cursor-position-changed(pos) => {
+                                        flick.show(pos.y, pos.y + 12px + self.font-size * 1.5);
                                     }
                                 }
-                            }
-                            ScrollBar {
-                                x: parent.width - self.width - 3px;
-                                y: 4px;
-                                height: parent.height - 8px;
-                                content-y <=> flick.content-y;
-                                content-height: flick.content-height;
-                                view-height: flick.height;
                             }
                         }
                     }
@@ -824,18 +784,15 @@ export component FilesScreen inherits Rectangle {
                     clip: true;
                     // A stop for Tab: the arrows scroll.
                     hex-scope := FocusScope {
-                        function scroll(by: length) {
-                            hex-list.content-y = clamp(hex-list.content-y + by, min(0px, hex-list.height - hex-list.content-height), 0px);
-                        }
                         key-pressed(event) => {
                             if event.text == Key.UpArrow {
-                                self.scroll(root.hex-row-height);
+                                hex-list.scroll-by(root.hex-row-height);
                             } else if event.text == Key.DownArrow {
-                                self.scroll(-root.hex-row-height);
+                                hex-list.scroll-by(-root.hex-row-height);
                             } else if event.text == Key.PageUp {
-                                self.scroll(hex-list.height);
+                                hex-list.page(false);
                             } else if event.text == Key.PageDown {
-                                self.scroll(-hex-list.height);
+                                hex-list.page(true);
                             } else if event.text == Key.Escape {
                                 scope.focus();
                             } else {
@@ -843,51 +800,36 @@ export component FilesScreen inherits Rectangle {
                             }
                             accept
                         }
-                        TouchArea {
-                            scroll-event(e) => {
-                                hex-scope.scroll(e.delta-y);
-                                accept
-                            }
-                            hex-list := Flickable {
-                                interactive: false;
-                                content-height: Explorer.hex.length * root.hex-row-height + 16px;
-                                for line[i] in Explorer.hex: Rectangle {
-                                    y: 8px + i * root.hex-row-height;
-                                    height: root.hex-row-height;
-                                    // Monospace: every row's columns line up.
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        padding-left: 12px;
-                                        spacing: 24px;
-                                        Text {
-                                            text: line.offset;
-                                            font-family: "JetBrains Mono";
-                                            font-size: 13px;
-                                            color: Theme.text-muted;
-                                        }
-                                        Text {
-                                            text: line.hex;
-                                            font-family: "JetBrains Mono";
-                                            font-size: 13px;
-                                            color: Theme.text;
-                                        }
-                                        Text {
-                                            text: line.ascii;
-                                            font-family: "JetBrains Mono";
-                                            font-size: 13px;
-                                            color: Theme.text-soft;
-                                        }
+                        hex-list := ScrollList {
+                            content-height: Explorer.hex.length * root.hex-row-height + 16px;
+                            for line[i] in Explorer.hex: Rectangle {
+                                y: 8px + i * root.hex-row-height;
+                                height: root.hex-row-height;
+                                // Monospace: every row's columns line up.
+                                HorizontalLayout {
+                                    alignment: start;
+                                    padding-left: 12px;
+                                    spacing: 24px;
+                                    Text {
+                                        text: line.offset;
+                                        font-family: "JetBrains Mono";
+                                        font-size: 13px;
+                                        color: Theme.text-muted;
+                                    }
+                                    Text {
+                                        text: line.hex;
+                                        font-family: "JetBrains Mono";
+                                        font-size: 13px;
+                                        color: Theme.text;
+                                    }
+                                    Text {
+                                        text: line.ascii;
+                                        font-family: "JetBrains Mono";
+                                        font-size: 13px;
+                                        color: Theme.text-soft;
                                     }
                                 }
                             }
-                        }
-                        ScrollBar {
-                            x: parent.width - self.width - 3px;
-                            y: 4px;
-                            height: parent.height - 8px;
-                            content-y <=> hex-list.content-y;
-                            content-height: hex-list.content-height;
-                            view-height: hex-list.height;
                         }
                     }
                 }
