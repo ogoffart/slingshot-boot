@@ -272,3 +272,45 @@ def test_a_long_text_opens_in_the_editor(window):
     assert "3000. A change" in editor(window).accessible_value
     press(window, keys.End, ctrl=True)
     type_text(window, "#")
+
+
+def test_a_new_file_asks_about_unsaved_changes(window):
+    open_files_tab(window)
+    open_text(window, "/loader/loader.conf", "timeout 3")
+    editor(window).single_click(PointerEventButton.Left)
+    type_text(window, "#")
+    press(window, keys.Escape)
+    press(window, "n", ctrl=True)
+    type_text(window, "new.txt")
+    buttons(window, "Make")[0].single_click(PointerEventButton.Left)
+    # Made, but the changes are asked about before it opens.
+    assert wait_until(lambda: buttons(window, "Discard"))
+    buttons(window, "Discard")[0].single_click(PointerEventButton.Left)
+    assert wait_until(lambda: editor(window).accessible_value == "")
+
+
+def test_deleting_the_open_file_leaves_nothing_to_save(window):
+    open_files_tab(window)
+    open_text(window, "/loader/loader.conf", "timeout 3")
+    editor(window).single_click(PointerEventButton.Left)
+    type_text(window, "#")
+    press(window, keys.Escape)
+    press(window, keys.Delete)
+    accept_dialog(window, "Delete")
+    assert wait_until(lambda: "loader.conf" not in names(window))
+    # Another file opens without asking about changes.
+    go(window, "/EFI/BOOT/BOOTX64.EFI")
+    press(window, keys.Return)
+    assert wait_until(lambda: buttons(window, "Start"))
+    assert not buttons(window, "Discard")
+
+
+def test_only_the_case_of_a_name_changes(window):
+    open_files_tab(window)
+    go(window, "/loader/loader.conf")
+    press(window, "r", ctrl=True)
+    type_text(window, "Loader.conf")
+    press(window, keys.Return)
+    assert wait_until(lambda: selected(window) == ["Loader.conf"])
+    press(window, keys.Return)
+    assert wait_until(lambda: "timeout 3" in editor(window).accessible_value)

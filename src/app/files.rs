@@ -304,11 +304,24 @@ impl Files {
     /// shows its entry `select` (else the folder). Its row, expanded.
     fn reload_folder(&mut self, ui: &AppWindow, backend: &dyn Backend, volume: usize, folders: &[String], select: Option<&str>) -> Option<usize> {
         let row = self.folder_row(volume, folders)?;
+        let depth = self.nodes[row].depth;
+        let inside = |s: &Self, j: usize| j < s.nodes.len() && s.nodes[j].depth > depth;
+        // Its subfolders that are open, to open again.
+        let open: Vec<Vec<String>> =
+            (row + 1..).take_while(|&j| inside(self, j)).filter(|&j| self.nodes[j].expanded).filter_map(|j| self.place(j).map(|(_, f)| f)).collect();
         if self.nodes[row].expanded {
             self.collapse(row);
         }
         if let Err(e) = self.expand(row, backend) {
             ui.global::<Explorer>().set_message(trf("Cannot read this folder: {}", &[&e]).into());
+        }
+        // In order: a folder opened shows its own, opened after it.
+        let mut j = row + 1;
+        while inside(self, j) {
+            if !self.nodes[j].expanded && self.expandable(j) && self.place(j).is_some_and(|(_, f)| open.contains(&f)) {
+                let _ = self.expand(j, backend);
+            }
+            j += 1;
         }
         let current = select.and_then(|name| self.child_named(row, name)).unwrap_or(row);
         self.show(ui, backend, current);
@@ -454,11 +467,24 @@ impl Files {
     /// The opened file's name, disk, path and size, over it.
     fn header(&self, ui: &AppWindow, volume: usize, path: &str, entry: &DirEntry) {
         let explorer = ui.global::<Explorer>();
-        let disk = self.volumes.get(volume).map(|v| v.name.clone()).unwrap_or_default();
         explorer.set_name(entry.name.as_str().into());
-        explorer.set_about(format!("{disk} · {path} · {}", super::format_file_size(entry.size)).into());
+        explorer.set_about(self.about(volume, path, entry.size).into());
         explorer.set_dirty(false);
         explorer.set_note(SharedString::new());
+    }
+
+    /// Under the opened file's name: its disk, path and size.
+    fn about(&self, volume: usize, path: &str, size: u64) -> String {
+        let disk = self.volumes.get(volume).map(|v| v.name.clone()).unwrap_or_default();
+        format!("{disk} · {path} · {}", super::format_file_size(size))
+    }
+
+    /// No file open any more (deleted): nothing on the right, nothing to save.
+    fn close_opened(&mut self, ui: &AppWindow) {
+        self.opened = None;
+        let explorer = ui.global::<Explorer>();
+        explorer.set_kind(SharedString::new());
+        explorer.set_dirty(false);
     }
 
     /// Shows the file `path` of disk `volume`, `data`, as its kind (after
@@ -787,9 +813,14 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             }
             log::info!("files: made {path} on disk {volume}");
             let row = f.reload_folder(&ui, &*backend, volume, &folders, Some(name));
-            // A new file: opened, empty (not read again).
+            // A new file: opened, empty (not read again); with changes not
+            // saved in the file open, after asking about them.
             let new = row.and_then(|row| f.child_named(row, name));
-            if let (false, Some(What::Entry { entry, .. })) = (folder, new.map(|i| &f.nodes[i].what)) {
+            if let (false, Some(i)) = (folder, new)
+                && ui.global::<Explorer>().get_dirty()
+            {
+                ui.global::<Explorer>().set_discard_row(i as i32);
+            } else if let (false, Some(What::Entry { entry, .. })) = (folder, new.map(|i| &f.nodes[i].what)) {
                 let (entry, path) = (entry.clone(), super::folder_path(&folders, Some(name)));
                 f.header(&ui, volume, &path, &entry);
                 f.show_file(&ui, volume, path, &entry, Vec::new());
@@ -823,17 +854,21 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
                 return;
             }
             log::info!("files: renamed {path} on disk {volume} to {name}");
-            // The file open: its new name; one in the folder renamed: closed.
+            // The file open, or in the folder renamed: its new path (its
+            // changes not saved stay).
+            let new_path = super::folder_path(&folders, Some(name));
             if let Some(o) = &mut f.opened
                 && o.volume == volume
             {
-                if o.path == path {
-                    o.path = super::folder_path(&folders, Some(name));
-                    o.name = name.into();
-                    ui.global::<Explorer>().set_name(name.into());
-                } else if o.path.starts_with(&format!("{path}\\")) {
-                    f.opened = None;
-                    ui.global::<Explorer>().set_kind(SharedString::new());
+                // The file itself (nothing after), or one in the folder (`\` after).
+                if let Some(rest) = o.path.strip_prefix(path.as_str()).filter(|r| r.is_empty() || r.starts_with('\\')) {
+                    if rest.is_empty() {
+                        o.name = name.into();
+                        ui.global::<Explorer>().set_name(name.into());
+                    }
+                    o.path = format!("{new_path}{rest}");
+                    let (path, size) = (o.path.clone(), o.data.len() as u64);
+                    ui.global::<Explorer>().set_about(f.about(volume, &path, size).into());
                 }
             }
             f.reload_folder(&ui, &*backend, volume, &folders, Some(name));
@@ -863,8 +898,7 @@ pub fn wire(ui: &AppWindow, backend: Rc<dyn Backend>, actions: Actions) {
             log::info!("files: deleted {path} on disk {volume}");
             (actions.show_status)(&trf("Deleted {}", &[&name]));
             if f.opened.as_ref().is_some_and(|o| o.volume == volume && o.path == path) {
-                f.opened = None;
-                ui.global::<Explorer>().set_kind(SharedString::new());
+                f.close_opened(&ui);
             }
             f.reload_folder(&ui, &*backend, volume, &folders, select.as_deref());
         });

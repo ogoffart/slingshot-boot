@@ -289,8 +289,10 @@ impl SimBackend {
         let key = |name: &str| self.edit_key(volume, &format!("{}\\{name}", folder.1));
         entries.retain(|e| !matches!(changes.get(&key(&e.name)), Some(Change::Removed)));
         for e in &mut entries {
-            if let Some(Change::File { data, modified, .. }) = changes.get(&key(&e.name)) {
+            if let Some(Change::File { path, data, modified }) = changes.get(&key(&e.name)) {
                 (e.size, e.modified) = (data.len() as u64, Some(*modified));
+                // Its name as written last (only its case may differ).
+                e.name = path.rsplit_once('\\').map_or(path.as_str(), |(_, n)| n).into();
             }
         }
         for ((v, k), change) in changes.iter() {
@@ -644,8 +646,12 @@ impl Backend for SimBackend {
         };
         println!("Simulator: would rename {path} to {new_name} on {name} (for this session)");
         let mut changes = self.changes.borrow_mut();
-        changes.insert(self.edit_key(volume, &new_path), change);
-        changes.insert(self.edit_key(volume, path), Change::Removed);
+        // Only the case changing (FAT): the same key, nothing to remove.
+        let (old, new) = (self.edit_key(volume, path), self.edit_key(volume, &new_path));
+        if old != new {
+            changes.insert(old, Change::Removed);
+        }
+        changes.insert(new, change);
         Ok(())
     }
 
