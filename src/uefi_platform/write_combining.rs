@@ -48,7 +48,8 @@ pub fn enable(base: u64, size: u64) {
         return;
     }
     // Already changed for a previous mode, or the default.
-    let pat = rdmsr(IA32_PAT);
+    // SAFETY: The PAT, which every processor with a PAT has.
+    let pat = unsafe { rdmsr(IA32_PAT) };
     if pat != DEFAULT_PAT && pat != COMBINING_PAT {
         log::info!("display: PAT {pat:#x} isn't the default, the screen's memory stays as it is");
         return;
@@ -169,9 +170,13 @@ fn flush_tlb() {
     }
 }
 
-fn rdmsr(msr: u32) -> u64 {
+/// Reads the model-specific register `msr`.
+///
+/// # Safety
+/// The processor must have it (CPUID says): reading another one faults.
+pub unsafe fn rdmsr(msr: u32) -> u64 {
     let (low, high): (u32, u32);
-    // SAFETY: The PAT, which every processor with a PAT has.
+    // SAFETY: A register the processor has (the caller's promise).
     unsafe { asm!("rdmsr", in("ecx") msr, out("eax") low, out("edx") high, options(nomem, nostack)) };
     u64::from(high) << 32 | u64::from(low)
 }

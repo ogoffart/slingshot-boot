@@ -24,6 +24,8 @@ mod input;
 mod timer;
 #[cfg(target_arch = "x86_64")]
 mod write_combining;
+#[cfg(target_arch = "x86_64")]
+pub use write_combining::rdmsr;
 
 use alloc::rc::Rc;
 use alloc::vec;

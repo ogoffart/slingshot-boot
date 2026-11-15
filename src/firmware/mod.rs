@@ -7,6 +7,7 @@
 mod battery;
 mod bootvars;
 mod chainload;
+mod cputemp;
 mod dir;
 #[cfg(all(target_arch = "x86_64", feature = "touchpad"))]
 mod i2c;
@@ -493,7 +494,12 @@ impl Backend for UefiBackend {
     }
 
     fn sensors(&self) -> crate::parse::sensors::Sensors {
-        self.batteries().sensors()
+        let mut sensors = self.batteries().sensors();
+        // No ACPI thermal zone (desktops): the processor's own sensor.
+        if sensors.temperatures.is_empty() {
+            sensors.temperatures.extend(cputemp::package());
+        }
+        sensors
     }
 
     fn date_time(&self) -> Option<crate::app::DateTime> {

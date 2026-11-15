@@ -21,8 +21,9 @@ Notes for developers and coding agents. The README is for users: keep build and 
   `Hooks`, implemented in `src/firmware/platform.rs`. On x86, the screen's memory, which firmware maps uncached, is
   made write-combining through the PAT (`write_combining.rs`): a 4K frame reaches the screen in 4 ms, not 200.
 - `src/firmware/`: UEFI only: firmware variables, systemd-boot, chainloading, system info, USB mice (`usbmouse.rs`),
-  batteries (`battery.rs`; `battery/acpi.rs` runs the firmware's ACPI code with the `battery` feature) and I2C
-  touchpads (`touchpad.rs` over `i2c.rs`, with the `touchpad` feature, x86 only). Both features are on by default. QEMU
+  batteries (`battery.rs`; `battery/acpi.rs` runs the firmware's ACPI code with the `battery` feature), I2C
+  touchpads (`touchpad.rs` over `i2c.rs`, with the `touchpad` feature, x86 only), and the processor's temperature when
+  ACPI has none (`cputemp.rs`, Intel's sensor, read from its MSRs). Both features are on by default. QEMU
   has no I2C touchpad: test it on real machines, from the log.
 - The log: `debuglog.rs`. F12 on the System screen saves it as `slingshot.log` next to `slingshot.efi`, with the
   machine's details. Log what a bug report from a real machine would need.
