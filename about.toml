@@ -1,0 +1,20 @@
+# The licenses of the crates in the release's programs, for
+# scripts/third-party-licenses.sh: one is picked for each "A OR B", in this
+# order, and a crate under any other fails the release.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "GPL-3.0-only",
+]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-unknown-uefi", "aarch64-unknown-uefi"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# Slingshot itself: LICENSE.
+private = { ignore = true }

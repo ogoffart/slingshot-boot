@@ -35,6 +35,8 @@ jobs:
                   targets: x86_64-unknown-uefi, aarch64-unknown-uefi
                   # The x86 build with hardware floating point builds core.
                   components: rust-src
+            - name: Install cargo-about
+              run: cargo install cargo-about --version 0.9.3 --locked --features cli
             - name: Install Linux dependencies
               run: |
                   sudo apt-get update
@@ -48,6 +50,11 @@ jobs:
                       echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml's version $version"
                       exit 1
                   fi
+            - name: Licenses
+              # First: a crate under a license about.toml doesn't accept fails here.
+              run: |
+                  mkdir -p dist
+                  scripts/third-party-licenses.sh > dist/THIRD-PARTY-LICENSES.txt
             - name: Test
               run: |
                   cargo test --release --locked
@@ -63,17 +70,16 @@ jobs:
                   VERSION: ${{ steps.version.outputs.version }}
               run: |
                   name="slingshot-$VERSION-x86_64-linux"
-                  mkdir -p "dist/$name/licenses"
+                  mkdir -p "dist/$name"
                   cp target/release/slingshot dist/slingshot.efi \
                      scripts/slingshot-setup README.md LICENSE "dist/$name/"
                   cp -r docs assets/wallpapers "dist/$name/"
-                  # What the program carries: the logos' and the fonts' licenses.
-                  cp assets/os/SOURCES.md "dist/$name/licenses/logos.md"
-                  cp ui/fonts/LICENSE-*.txt "dist/$name/licenses/"
+                  # Also next to the .efi files, which are downloaded alone.
+                  cp dist/THIRD-PARTY-LICENSES.txt "dist/$name/"
                   strip "dist/$name/slingshot"
                   tar -C dist -czf "dist/$name.tar.gz" "$name"
                   # slingshot-aarch64.efi: 64-bit ARM, the program alone (docs/mac.md, docs/install-manually.md).
-                  (cd dist && sha256sum "$name.tar.gz" slingshot.efi slingshot-aarch64.efi > SHA256SUMS)
+                  (cd dist && sha256sum "$name.tar.gz" slingshot.efi slingshot-aarch64.efi THIRD-PARTY-LICENSES.txt > SHA256SUMS)
             - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
               with:
                   name: release-files
@@ -81,6 +87,7 @@ jobs:
                       dist/*.tar.gz
                       dist/slingshot.efi
                       dist/slingshot-aarch64.efi
+                      dist/THIRD-PARTY-LICENSES.txt
                       dist/SHA256SUMS
 
     release:
@@ -113,4 +120,5 @@ jobs:
               run: |
                   gh release create "$GITHUB_REF_NAME" --draft --verify-tag --generate-notes \
                       --title "Slingshot $VERSION" \
-                      "dist/slingshot-$VERSION-x86_64-linux.tar.gz" dist/slingshot.efi dist/slingshot-aarch64.efi dist/SHA256SUMS
+                      "dist/slingshot-$VERSION-x86_64-linux.tar.gz" dist/slingshot.efi dist/slingshot-aarch64.efi \
+                      dist/THIRD-PARTY-LICENSES.txt dist/SHA256SUMS

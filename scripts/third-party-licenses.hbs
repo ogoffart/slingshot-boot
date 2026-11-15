@@ -1,0 +1,14 @@
+Slingshot (GPL-3.0-or-later, LICENSE) carries the work of others, under
+their own licenses: the crates its programs are built from, below, then
+its fonts and its logos.
+
+{{#each licenses}}
+================================================================================
+{{{name}}}, used by:
+{{#each used_by}}
+    {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

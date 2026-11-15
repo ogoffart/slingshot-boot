@@ -178,7 +178,9 @@ authors in `assets/wallpapers/SOURCES.md`. Calm ones with room for the cards, th
 ## Releases
 
 Bump `version` in Cargo.toml, then push a tag `vX.Y.Z`: `.github/workflows/release.yaml` tests, builds, and drafts a
-release with the Linux archive, `slingshot.efi`, `slingshot-aarch64.efi` and `SHA256SUMS`. Publish the draft by hand.
+release with the Linux archive, `slingshot.efi`, `slingshot-aarch64.efi`, `THIRD-PARTY-LICENSES.txt`
+(`scripts/third-party-licenses.sh`, needs `cargo install cargo-about --features cli`) and `SHA256SUMS`. Publish the draft
+by hand. A crate under a license `about.toml` doesn't accept fails the release: add the license there once it's checked.
 
 The .efi files are built reproducibly by `scripts/build-efi.sh` (docs/reproducible-builds.md). The release workflow's
 `build` job runs the dependencies' code with a read-only token, and `release` only drafts the release and attests the
