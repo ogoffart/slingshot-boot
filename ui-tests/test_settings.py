@@ -25,7 +25,7 @@ def order(window):
 
 
 def open_settings(window):
-    press(window, keys.F3)
+    press(window, keys.F4)
     tab = window.query_descendants().match_accessible_role(AccessibleRole.Tab).match_accessible_label("Settings").find_one()
     wait_until(lambda: tab.accessible_item_selected)
 
@@ -43,13 +43,14 @@ def focused_row(window):
 
 def test_tabs_switch_screens(window):
     tabs = window.query_descendants().match_accessible_role(AccessibleRole.Tab).find_all()
-    assert [t.accessible_label for t in tabs] == ["Boot", "System", "Settings"]
+    assert [t.accessible_label for t in tabs] == ["Boot", "Files", "System", "Settings"]
     assert tabs[0].accessible_item_selected
-    press(window, keys.F2)
-    wait_until(lambda: tabs[1].accessible_item_selected)
-    tabs[2].single_click(PointerEventButton.Left)
+    # The F keys follow the tabs' order.
+    press(window, keys.F3)
     wait_until(lambda: tabs[2].accessible_item_selected)
-    assert not tabs[1].accessible_item_selected
+    tabs[3].single_click(PointerEventButton.Left)
+    wait_until(lambda: tabs[3].accessible_item_selected)
+    assert not tabs[2].accessible_item_selected
 
 
 def test_left_right_change_the_theme(window):

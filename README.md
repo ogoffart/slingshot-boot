@@ -20,6 +20,7 @@ https://github.com/user-attachments/assets/e7206b0e-a50d-4cc1-a8d7-2d55f78f3529
 - Boot counting, resuming a hibernated Linux
 - Secure Boot with shim
 - System screen: hardware and battery
+- Files screen: browse the disks, edit text files, preview pictures, start EFI programs
 - Keyboard, mouse, touchpad and touch screen
 - Localized, with keyboard layouts
 

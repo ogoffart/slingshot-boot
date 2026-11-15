@@ -72,10 +72,13 @@ export component Dialog inherits DialogFrame {
     in property <string> title;
     in property <string> message;
     in property <string> cancel-text;
+    // A third button, between the two ("" for none).
+    in property <string> other-text;
     in property <string> accept-text;
     // The button with the focus at first: 0 cancel, 1 accept.
     in property <int> highlighted: 1;
     callback cancel();
+    callback other();
     callback accept();
 
     card-width: 520px;
@@ -122,6 +125,10 @@ export component Dialog inherits DialogFrame {
                 width: root.cancel-text != "" ? self.preferred-width : 0px;
                 text: root.cancel-text;
                 clicked => { root.cancel(); }
+            }
+            if root.other-text != "": Button {
+                text: root.other-text;
+                clicked => { root.other(); }
             }
             accept-button := Button {
                 text: root.accept-text;

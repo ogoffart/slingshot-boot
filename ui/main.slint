@@ -7,16 +7,17 @@ import { Theme } from "theme.slint";
 import { Logos } from "logos.slint";
 import { BootEntry, InfoItem, MemorySegment, Panel, Spinner, BatteryInfo, BatteryFact, Focus } from "widgets.slint";
 import { Palette } from "std-widgets.slint";
-import { TopBar } from "top-bar.slint";
+import { TabInfo, TopBar } from "top-bar.slint";
 import { Footer } from "footer.slint";
 import { BootMenu, BootScreen } from "boot-screen.slint";
 import { System, SystemScreen } from "system-screen.slint";
 import { SettingsPage, SettingsScreen } from "settings-screen.slint";
 import { SplashScreen } from "splash-screen.slint";
 import { Install, InstallScreen, InstallInfo } from "install-screen.slint";
+import { Explorer, FilesScreen, HexRow } from "files-screen.slint";
 import { Customize, Dialog, FileBrowser, FileDialog, FileRow, CustomizeDialog, OptionsDialog, Passphrase, PasswordDialog, TimeDialog, UnlockDialog } from "dialogs.slint";
 
-export { Theme, Logos, BootMenu, Customize, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, InstallInfo, BatteryInfo, BatteryFact, Focus }
+export { Theme, Logos, BootMenu, Customize, Explorer, FileBrowser, Install, Passphrase, SettingsPage, System, BootEntry, InfoItem, MemorySegment, FileRow, HexRow, InstallInfo, BatteryInfo, BatteryFact, Focus }
 
 // A dialog over the whole window, in a popup: modal (Tab stays in it), and
 // the keyboard focus goes back where it was when it closes. Shown while
@@ -77,7 +78,8 @@ export component AppWindow inherits Window {
     property <bool> password-accepted;
     pure callback check-password(string) -> bool;
     // What the password unlocks: 0 = the Settings screen, 1 = the clock,
-    // 2 = customizing an entry, 3 = the file browser, 4 = the kernel options.
+    // 2 = customizing an entry, 3 = the file browser, 4 = the kernel options,
+    // 5 = the Files screen.
     property <int> password-for;
 
     // Why an entry couldn't start.
@@ -132,34 +134,69 @@ export component AppWindow inherits Window {
     min-width: 1024px;
     min-height: 640px;
 
-    // The next screen, or the previous one.
-    // Boot and System are always there; Settings unless hidden; Install
-    // only in `slingshot config`.
-    function screen-available(s: int) -> bool {
-        return s == 0 || s == 1 || (s == 2 && root.settings-access != 1) || (s == 3 && Install.available);
+    // Boot and System are always there; Settings unless hidden; Files
+    // too, but not in `slingshot config`; Install only there.
+    pure function screen-available(s: int) -> bool {
+        return s == 0 || s == 1 || (s == 2 && root.settings-access != 1) || (s == 3 && Install.available)
+            || (s == 4 && Explorer.available && root.settings-access != 1);
     }
 
+    // The tabs: F1 is the first one, F2 the second, and so on.
+    property <[TabInfo]> tabs: root.settings-access == 1 ? (Install.available ? [
+        { text: @tr("Boot"), screen: 0 },
+        { text: @tr("System"), screen: 1 },
+        { text: @tr("Install"), screen: 3 },
+    ] : [
+        { text: @tr("Boot"), screen: 0 },
+        { text: @tr("System"), screen: 1 },
+    ]) : root.screen-available(4) ? [
+        { text: @tr("Boot"), screen: 0 },
+        { text: @tr("Files"), screen: 4 },
+        { text: @tr("System"), screen: 1 },
+        { text: @tr("Settings"), screen: 2 },
+    ] : (Install.available ? [
+        { text: @tr("Boot"), screen: 0 },
+        { text: @tr("System"), screen: 1 },
+        { text: @tr("Settings"), screen: 2 },
+        { text: @tr("Install"), screen: 3 },
+    ] : [
+        { text: @tr("Boot"), screen: 0 },
+        { text: @tr("System"), screen: 1 },
+        { text: @tr("Settings"), screen: 2 },
+    ]);
+
+    // The screens in the tabs' order (Boot, Files, System, Settings,
+    // Install), and back.
+    function screen-at(position: int) -> int {
+        return position == 0 ? 0 : position == 1 ? 4 : position == 2 ? 1 : position == 3 ? 2 : 3;
+    }
+    function position-of(s: int) -> int {
+        return s == 0 ? 0 : s == 4 ? 1 : s == 1 ? 2 : s == 2 ? 3 : 4;
+    }
+
+    // The next screen, or the previous one.
     function step-screen(back: bool) {
-        let d = back ? 3 : 1;
-        let a = mod(root.screen + d, 4);
-        let b = mod(a + d, 4);
-        root.go-to(root.screen-available(a) ? a : root.screen-available(b) ? b : mod(b + d, 4));
+        let d = back ? 4 : 1;
+        let a = mod(root.position-of(root.screen) + d, 5);
+        let b = mod(a + d, 5);
+        let c = mod(b + d, 5);
+        root.go-to(root.screen-available(root.screen-at(a)) ? root.screen-at(a)
+            : root.screen-available(root.screen-at(b)) ? root.screen-at(b) : root.screen-at(c));
     }
 
     function go-to(s: int) {
-        // Choosing a screen (a tab, F1 to F4) means someone is there: stop
+        // Choosing a screen (a tab, an F key) means someone is there: stop
         // the countdown, also when Settings first asks for its password.
         root.user-activity();
         if !root.screen-available(s) {
             return;
         }
-        if s == 2 && !root.settings-unlocked {
-            root.ask-password(0);
+        if (s == 2 || s == 4) && !root.settings-unlocked {
+            root.ask-password(s == 2 ? 0 : 5);
             return;
         }
         if s != root.screen {
-            // The tabs' order: Boot, System, Settings, Install.
-            root.transition-direction = s > root.screen ? 1 : -1;
+            root.transition-direction = root.position-of(s) > root.position-of(root.screen) ? 1 : -1;
             root.transition-start = animation-tick();
             root.transitioning = Theme.motion;
             transition-timer.restart();
@@ -191,6 +228,8 @@ export component AppWindow inherits Window {
             settings.enter();
         } else if root.screen == 3 {
             install.enter();
+        } else if root.screen == 4 {
+            files.enter();
         } else {
             keys.focus();
         }
@@ -318,13 +357,16 @@ export component AppWindow inherits Window {
                 root.show-next-screen(event.text == Key.Backtab || event.modifiers.shift);
                 return accept;
             }
-            // 1 to 4, or F1 to F4: the screens.
-            let s = event.text == "1" || event.text == Key.F1 ? 0
+            // 1 to 5, or F1 to F5: the tabs, in their order.
+            let n = event.text == "1" || event.text == Key.F1 ? 0
                 : event.text == "2" || event.text == Key.F2 ? 1
                 : event.text == "3" || event.text == Key.F3 ? 2
-                : event.text == "4" || event.text == Key.F4 ? 3 : -1;
-            if s >= 0 {
-                root.show-screen(s);
+                : event.text == "4" || event.text == Key.F4 ? 3
+                : event.text == "5" || event.text == Key.F5 ? 4 : -1;
+            if n >= 0 {
+                if n < root.tabs.length {
+                    root.show-screen(root.tabs[n].screen);
+                }
                 return accept;
             }
             if event.text == Key.F12 && root.can-save-log {
@@ -363,7 +405,7 @@ export component AppWindow inherits Window {
             badge: root.badge;
             clock: root.clock;
             screen: root.screen;
-            settings-access: root.settings-access;
+            tabs: root.tabs;
             go-to(s) => { root.show-screen(s); }
             step(back) => { root.step-screen(back); }
             enter => { root.enter-screen(); }
@@ -390,6 +432,12 @@ export component AppWindow inherits Window {
                 active: root.screen == 1;
                 can-change-time: root.can-change-time;
                 change-time => { root.ask-change-time(); }
+            }
+            files := FilesScreen {
+                visible: root.screen == 4;
+                x: root.screen-shift;
+                opacity: root.screen-opacity;
+                leave-up => { top-bar.focus-tab(); }
             }
             install := InstallScreen {
                 visible: root.screen == 3;
@@ -424,7 +472,8 @@ export component AppWindow inherits Window {
     // A dialog is open.
     property <bool> modal: Passphrase.visible || root.error-visible || Install.confirm-visible || Install.result-visible
         || SettingsPage.confirm-save-visible || Customize.visible || BootMenu.options-visible || FileBrowser.visible || root.password-visible
-        || System.time-dialog-visible || SettingsPage.confirm-reset-visible || SettingsPage.revert-countdown >= 0;
+        || System.time-dialog-visible || SettingsPage.confirm-reset-visible || SettingsPage.revert-countdown >= 0
+        || Explorer.confirm-save-visible || Explorer.discard-row >= 0;
     ModalPopup {
         shown: Passphrase.visible;
         UnlockDialog { }
@@ -469,6 +518,49 @@ export component AppWindow inherits Window {
                 Install.restart();
             }
             accept => { Install.result-visible = false; }
+        }
+    }
+
+    ModalPopup {
+        shown: Explorer.confirm-save-visible;
+        Dialog {
+            title: @tr("Save the file?");
+            message: Explorer.name + "\n" + Explorer.about;
+            cancel-text: @tr("Cancel");
+            accept-text: @tr("Save");
+            cancel => { Explorer.confirm-save-visible = false; }
+            accept => {
+                Explorer.confirm-save-visible = false;
+                Explorer.save();
+            }
+        }
+    }
+
+    ModalPopup {
+        shown: Explorer.discard-row >= 0;
+        Dialog {
+            title: @tr("Save the changes?");
+            message: Explorer.writable ? @tr("The changes to this file aren't saved.")
+                : @tr("The changes to this file aren't saved, and can't be: it's read-only.");
+            cancel-text: @tr("Cancel");
+            other-text: Explorer.writable ? @tr("Discard") : "";
+            accept-text: Explorer.writable ? @tr("Save") : @tr("Discard");
+            highlighted: 0;
+            function then-open(save: bool) {
+                let row = Explorer.discard-row;
+                Explorer.discard-row = -1;
+                if save {
+                    Explorer.save();
+                }
+                // Not if saving failed: the changes are still there.
+                if !save || !Explorer.dirty {
+                    Explorer.dirty = false;
+                    Explorer.open(row);
+                }
+            }
+            cancel => { Explorer.discard-row = -1; }
+            other => { self.then-open(false); }
+            accept => { self.then-open(Explorer.writable); }
         }
     }
 
@@ -541,6 +633,8 @@ export component AppWindow inherits Window {
                 root.ask-browse();
             } else if root.password-for == 4 {
                 root.ask-edit-options(root.password-entry);
+            } else if root.password-for == 5 {
+                root.show-screen(4);
             } else {
                 root.show-screen(2);
             }

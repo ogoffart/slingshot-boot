@@ -71,11 +71,14 @@ pub fn unreadable_partitions() -> Vec<Unreadable> {
     found
 }
 
-/// A folder's entry: name, whether it's a folder, size.
+/// A folder's entry: name, whether it's a folder, size, when it changed.
 pub struct Entry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    pub modified: Option<crate::app::DateTime>,
+    pub read_only: bool,
+    pub hidden: bool,
 }
 
 /// The entries of the folder `path` on the file system `handle`, without
@@ -102,7 +105,23 @@ pub fn read_dir(handle: Handle, path: &str) -> Result<Vec<Entry>, String> {
             Ok(Some(info)) => {
                 let name = format!("{}", info.file_name());
                 if name != "." && name != ".." {
-                    entries.push(Entry { name, is_dir: info.is_directory(), size: info.file_size() });
+                    let t = info.modification_time();
+                    let modified = (t.year() > 0).then(|| crate::app::DateTime {
+                        year: t.year(),
+                        month: t.month(),
+                        day: t.day(),
+                        hour: t.hour(),
+                        minute: t.minute(),
+                    });
+                    let attributes = info.attribute();
+                    entries.push(Entry {
+                        name,
+                        is_dir: info.is_directory(),
+                        size: info.file_size(),
+                        modified,
+                        read_only: attributes.contains(FileAttribute::READ_ONLY),
+                        hidden: attributes.contains(FileAttribute::HIDDEN),
+                    });
                 }
             }
             Ok(None) => break,

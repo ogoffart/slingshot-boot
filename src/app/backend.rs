@@ -209,6 +209,8 @@ pub struct Volume {
     /// An encrypted partition Slingshot can open: its id for
     /// `Backend::unlock`, then `Backend::open_unlocked`.
     pub unlock: Option<usize>,
+    /// Its files can be changed (`Backend::write_volume_file`).
+    pub writable: bool,
 }
 
 /// A file or folder, in "Start a file…".
@@ -217,6 +219,9 @@ pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+    pub modified: Option<DateTime>,
+    pub read_only: bool,
+    pub hidden: bool,
 }
 
 /// What "Start a file…" shows of a folder: its folders, then the EFI
@@ -419,6 +424,14 @@ pub trait Backend {
     fn write_file(&self, _name: &str, _data: &[u8]) -> Result<(), String> {
         Err(String::from("not supported"))
     }
+    /// Replaces the file `path` of `volumes()[volume]` (a `writable` one).
+    fn write_volume_file(&self, _volume: usize, _path: &str, _data: &[u8]) -> Result<(), String> {
+        Err(String::from("not supported here"))
+    }
+    /// The free space and the size of `volumes()[volume]`, in bytes.
+    fn volume_space(&self, _volume: usize) -> Option<(u64, u64)> {
+        None
+    }
     /// The encrypted disks `target` needs that Slingshot can unlock, still
     /// locked: asked for before starting it, so that Linux gets them open.
     fn locked_volumes(&self, _target: &Target) -> Vec<LockedVolume> {
@@ -470,7 +483,7 @@ pub trait Backend {
 }
 
 /// Whether a file is a picture Slingshot can show: PNG or JPEG.
-fn is_picture(name: &str) -> bool {
+pub(crate) fn is_picture(name: &str) -> bool {
     let extensions: &[&str] = &[
         #[cfg(feature = "png")]
         ".png",
@@ -632,7 +645,7 @@ mod tests {
 
     #[test]
     fn browsing() {
-        let e = |name: &str, is_dir: bool| DirEntry { name: name.into(), is_dir, size: 0 };
+        let e = |name: &str, is_dir: bool| DirEntry { name: name.into(), is_dir, ..Default::default() };
         let shown = browse_entries(alloc::vec![e(".", true), e("b.EFI", false), e("readme.txt", false), e("Zed", true), e("a.efi", false), e("apps", true)], false);
         let names: Vec<&str> = shown.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["apps", "Zed", "a.efi", "b.EFI"]);

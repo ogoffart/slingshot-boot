@@ -308,7 +308,7 @@ impl UefiBackend {
 
 /// A file system's label.
 fn volume_label(handle: uefi::Handle) -> Option<String> {
-    volume_info(handle).map(|(label, _)| label)
+    volume_info(handle).map(|(label, ..)| label)
 }
 
 /// The device paths of the disks and partitions there are.
@@ -331,12 +331,13 @@ fn media_signature() -> Vec<usize> {
 }
 
 /// A file system's label and size.
-fn volume_info(handle: uefi::Handle) -> Option<(String, u64)> {
+/// A file system's label, size, free space, and whether it's read-only.
+fn volume_info(handle: uefi::Handle) -> Option<(String, u64, u64, bool)> {
     use uefi::proto::media::file::{File, FileSystemInfo};
     let mut fs = crate::uefi_platform::open_shared::<uefi::proto::media::fs::SimpleFileSystem>(handle)?;
     let mut root = fs.open_volume().ok()?;
     let info = root.get_boxed_info::<FileSystemInfo>().ok()?;
-    Some((format!("{}", info.volume_label()), info.volume_size()))
+    Some((format!("{}", info.volume_label()), info.volume_size(), info.free_space(), info.read_only()))
 }
 
 impl Backend for UefiBackend {
@@ -513,7 +514,7 @@ impl Backend for UefiBackend {
                 continue;
             };
             let (kind, what) = crate::parse::load_option::describe_volume(&dp);
-            let (label, size) = volume_info(handle).unwrap_or_default();
+            let (label, size, _, read_only) = volume_info(handle).unwrap_or_default();
             let mut detail = what.clone();
             if size > 0 {
                 detail = format!("{detail} · {}", format_bytes(size));
@@ -526,7 +527,13 @@ impl Backend for UefiBackend {
                 detail = format!("{detail} · {}", tr("unlocked"));
             }
             let label = label.trim();
-            volumes.push(Volume { name: if label.is_empty() { what } else { label.into() }, detail, kind, format: "", unlock: None });
+            #[cfg(feature = "luks")]
+            let unlocked = self.luks.is_mapped(&dp);
+            #[cfg(not(feature = "luks"))]
+            let unlocked = false;
+            let name = if label.is_empty() { what } else { label.into() };
+            // An unlocked disk is read-only, whatever its file system says.
+            volumes.push(Volume { name, detail, kind, format: "", unlock: None, writable: !read_only && !unlocked });
             found.push((handle, dp));
         }
         *self.volumes.borrow_mut() = found;
@@ -551,7 +558,7 @@ impl Backend for UefiBackend {
                 let unlock = if encrypted(&p) && !mapped(&p) { self.luks.disk_at(&p.device_path) } else { None };
                 #[cfg(not(feature = "luks"))]
                 let unlock = None;
-                Volume { name: what, detail, kind, format: p.kind, unlock }
+                Volume { name: what, detail, kind, format: p.kind, unlock, writable: false }
             })
             .collect()
     }
@@ -560,7 +567,7 @@ impl Backend for UefiBackend {
         let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
         Ok(dir::read_dir(handle, path)?
             .into_iter()
-            .map(|e| DirEntry { name: e.name, is_dir: e.is_dir, size: e.size })
+            .map(|e| DirEntry { name: e.name, is_dir: e.is_dir, size: e.size, modified: e.modified, read_only: e.read_only, hidden: e.hidden })
             .collect())
     }
 
@@ -573,6 +580,19 @@ impl Backend for UefiBackend {
         let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
         // Like `list_dir`: rEFInd's drivers too.
         dir::read_file(handle, path).ok_or_else(|| String::from("cannot read the file"))
+    }
+
+    fn write_volume_file(&self, volume: usize, path: &str, data: &[u8]) -> Result<(), String> {
+        let handle = self.volumes.borrow().get(volume).map(|v| v.0).ok_or("no such disk")?;
+        let path = uefi::CString16::try_from(path).map_err(|e| format!("{e:?}"))?;
+        let fs = uefi::boot::open_protocol_exclusive::<uefi::proto::media::fs::SimpleFileSystem>(handle).map_err(status_text)?;
+        uefi::fs::FileSystem::new(fs).write(path.as_ref(), data).map_err(|e| format!("{e}"))
+    }
+
+    fn volume_space(&self, volume: usize) -> Option<(u64, u64)> {
+        let handle = self.volumes.borrow().get(volume).map(|v| v.0)?;
+        let (_, size, free, _) = volume_info(handle)?;
+        Some((free, size))
     }
 
     fn list_pictures(&self) -> Vec<String> {

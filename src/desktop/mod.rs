@@ -26,7 +26,8 @@ Options of `config`:
   --config-dir DIR    configure DIR instead of EFI/slingshot on the ESP
 
 Options of `simulate`:
-  --this-machine      this computer's boot entries (Linux) instead of examples
+  --this-machine      this computer's boot entries (Linux) and files instead
+                      of examples (files are read, not written)
   --mode WxH          simulated screen resolution (default 1280x800)
   --light             start with the light theme
   --splash            start with the splash screen
@@ -129,7 +130,9 @@ fn simulate(mut args: impl Iterator<Item = String>) {
         }
         // The installed slingshot.toml, unless another one is given.
         let config_dir = config_dir.or_else(|| m.esp.as_ref().map(|e| e.join(machine::SLINGSHOT_DIR)));
-        simulator::SimBackend::from_data(m.boot, config_dir)
+        let mut backend = simulator::SimBackend::from_data(m.boot, config_dir);
+        backend.root = Some(PathBuf::from("/"));
+        backend
     } else {
         simulator::SimBackend::new(with_systemd_boot, config_dir)
     };

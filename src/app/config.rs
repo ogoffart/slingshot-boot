@@ -25,6 +25,7 @@
 //! editor = false               # E, the kernel options: by default allowed,
 //!                              # unless Secure Boot is on or loader.conf
 //!                              # says `editor no`
+//! files = false                # no Files tab (shown by default)
 //!
 //! # Rules for boot entries, by title or systemd-boot entry id (* and ?).
 //! [[entry]]
@@ -187,6 +188,8 @@ pub struct Config {
     /// `settings.editor`: whether the kernel options can be edited (E);
     /// `None`: unless Secure Boot is on or loader.conf says `editor no`.
     pub editor: Option<bool>,
+    /// `settings.files`: the Files tab is there (also locked by `access`).
+    pub files: bool,
     /// Show the "Firmware setup" card (when the firmware supports it).
     pub firmware_setup: bool,
     /// The screen animations are off when full redraws draw fewer frames
@@ -211,6 +214,7 @@ impl Default for Config {
             defaults: SettingsDefaults::default(),
             settings_access: SettingsAccess::Shown,
             editor: None,
+            files: true,
             firmware_setup: true,
             animations_fps: 15,
             entries: Vec::new(),
@@ -402,6 +406,7 @@ pub fn parse(text: &str) -> Config {
             hash
         });
         config.editor = r.bool("editor", w);
+        config.files = r.bool("files", w).unwrap_or(true);
         r.finish(w);
         // A password alone also locks the settings. "password" without a
         // usable password hides them: nothing could unlock them.
@@ -647,11 +652,14 @@ pub fn to_text(config: &Config) -> String {
             line(format!("\n[settings]\naccess = \"password\"\npassword = \"sha256:{hex}\""));
         }
     }
+    if config.settings_access == SettingsAccess::Shown && (config.editor.is_some() || !config.files) {
+        line(String::from("\n[settings]"));
+    }
     if let Some(editor) = config.editor {
-        if config.settings_access == SettingsAccess::Shown {
-            line(String::from("\n[settings]"));
-        }
         line(format!("editor = {editor}"));
+    }
+    if !config.files {
+        line(String::from("files = false"));
     }
     for r in &config.entries {
         line(String::from("\n[[entry]]"));
@@ -1078,6 +1086,18 @@ mod tests {
     }
 
     const HASH: &str = "sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8";
+
+    #[test]
+    fn files_tab() {
+        assert!(parse("").files);
+        let off = parse("[settings]\nfiles = false");
+        assert!(!off.files && off.warnings.is_empty());
+        assert!(!parse(&to_text(&off)).files);
+        assert!(!to_text(&parse("")).contains("files"));
+        let both = parse(&format!("[settings]\naccess = \"password\"\npassword = \"{HASH}\"\nfiles = false\neditor = false"));
+        let again = parse(&to_text(&both));
+        assert!(!again.files && again.editor == Some(false) && again.warnings.is_empty());
+    }
 
     #[test]
     fn editor() {

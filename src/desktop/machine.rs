@@ -226,3 +226,37 @@ pub fn power() -> crate::parse::battery::Power {
     }
     power
 }
+
+/// `path` (`\` separated, as the firmware's) inside `dir`; `None` if it
+/// would leave it.
+pub fn disk_path(dir: &Path, path: &str) -> Option<PathBuf> {
+    let parts = path.split('\\').filter(|p| !p.is_empty() && *p != ".");
+    let mut out = dir.to_path_buf();
+    for part in parts {
+        if part == ".." || part.contains('/') {
+            return None;
+        }
+        out.push(part);
+    }
+    Some(out)
+}
+
+/// The free space and the size of the file system at `dir`, in bytes.
+pub fn space(dir: &Path) -> Option<(u64, u64)> {
+    let s = rustix::fs::statvfs(dir).ok()?;
+    Some((s.f_bavail * s.f_frsize, s.f_blocks * s.f_frsize))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_stay_inside() {
+        let dir = Path::new("/efi");
+        assert_eq!(disk_path(dir, "\\EFI\\BOOT\\BOOTX64.EFI"), Some(PathBuf::from("/efi/EFI/BOOT/BOOTX64.EFI")));
+        assert_eq!(disk_path(dir, "\\"), Some(PathBuf::from("/efi")));
+        assert_eq!(disk_path(dir, "\\EFI\\..\\..\\etc"), None);
+        assert_eq!(disk_path(dir, "\\a/../../etc"), None);
+    }
+}

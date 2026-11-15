@@ -100,11 +100,12 @@ and picks one at random when there's none.
 access = "shown"            # "shown", "hidden" or "password"
 # password = "sha256:…"     # with "password": from `slingshot-setup password`
 # editor = true             # editing kernel options (E); default: see below
+# files = true              # the Files tab: the disks' files, to read and edit
 ```
 
-- `"hidden"`: no Settings screen; only the file counts. Also no "Start a
-  file…" and no kernel option editing.
-- `"password"`: Settings, the date and time, Customize, kernel option editing
+- `"hidden"`: no Settings screen; only the file counts. Also no Files tab, no
+  "Start a file…" and no kernel option editing.
+- `"password"`: Settings, Files, the date and time, Customize, kernel option editing
   and "Start a file…" ask for the password. Prefer letters and digits: the
   firmware's layout may not be yours.
 

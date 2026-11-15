@@ -3,7 +3,11 @@
 
 import { Theme } from "theme.slint";
 import { Frost, Focus } from "widgets.slint";
-import { Install } from "install-screen.slint";
+
+export struct TabInfo {
+    text: string,
+    screen: int,
+}
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -99,10 +103,10 @@ export component TopBar inherits Rectangle {
     // What the desktop program is ("" in the firmware).
     in property <string> badge;
     in property <string> clock;
-    // The screen shown: 0 Boot, 1 System, 2 Settings, 3 Install.
+    // The screen shown: 0 Boot, 1 System, 2 Settings, 3 Install, 4 Files.
     in property <int> screen;
-    // 1: the Settings screen is hidden.
-    in property <int> settings-access;
+    // The tabs, in order.
+    in property <[TabInfo]> tabs;
     callback go-to(int);
     // ← → on the tab bar: the previous or next screen.
     callback step(bool);
@@ -160,25 +164,10 @@ export component TopBar inherits Rectangle {
             HorizontalLayout {
                 padding: 4px;
                 spacing: 4px;
-                for tab in root.settings-access == 1 ? (Install.available ? [
-                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
-                    { text: @tr("System"), shortcut: "F2", screen: 1 },
-                    { text: @tr("Install"), shortcut: "F4", screen: 3 },
-                ] : [
-                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
-                    { text: @tr("System"), shortcut: "F2", screen: 1 },
-                ]) : (Install.available ? [
-                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
-                    { text: @tr("System"), shortcut: "F2", screen: 1 },
-                    { text: @tr("Settings"), shortcut: "F3", screen: 2 },
-                    { text: @tr("Install"), shortcut: "F4", screen: 3 },
-                ] : [
-                    { text: @tr("Boot"), shortcut: "F1", screen: 0 },
-                    { text: @tr("System"), shortcut: "F2", screen: 1 },
-                    { text: @tr("Settings"), shortcut: "F3", screen: 2 },
-                ]): Tab {
+                for tab[i] in root.tabs: Tab {
                     text: tab.text;
-                    shortcut: tab.shortcut;
+                    // F1 for the first tab, and so on: as the window's keys.
+                    shortcut: "F" + (i + 1);
                     active: root.screen == tab.screen;
                     grab: root.follow && root.screen == tab.screen;
                     grabbed => { root.follow = false; }

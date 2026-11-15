@@ -835,6 +835,48 @@ export component TextField inherits Rectangle {
 // Frosted glass: the blurred wallpaper (`Theme.backdrop`) as it is behind
 // this element, clipped to its rounded corners, under a tint. Without a
 // wallpaper, just the tint.
+// A vertical scroll bar for a Flickable (`content-y <=> flickable.content-y`):
+// shows which part is in view, and scrolls when its thumb is dragged or its
+// track clicked. Hidden when everything fits.
+export component ScrollBar inherits Rectangle {
+    in-out property <length> content-y;
+    in property <length> content-height;
+    in property <length> view-height;
+    property <length> max-scroll: max(0px, root.content-height - root.view-height);
+    // The content-y at the press, and where the press was.
+    property <length> drag-start;
+
+    visible: root.max-scroll > 0;
+    width: 10px;
+
+    thumb := Rectangle {
+        x: 2px;
+        width: parent.width - 4px;
+        height: max(28px, parent.height * root.view-height / max(1px, root.content-height));
+        y: root.max-scroll == 0 ? 0 : (parent.height - self.height) * (-root.content-y / root.max-scroll);
+        border-radius: self.width / 2;
+        background: touch.pressed ? Theme.text-soft : touch.has-hover ? Theme.text-muted : Theme.border-strong;
+    }
+
+    touch := TouchArea {
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                // On the track, not the thumb: the thumb's middle goes there.
+                if self.mouse-y < thumb.y || self.mouse-y > thumb.y + thumb.height {
+                    root.content-y = -clamp((self.mouse-y - thumb.height / 2) / max(1px, root.height - thumb.height), 0, 1) * root.max-scroll;
+                }
+                root.drag-start = root.content-y;
+            }
+        }
+        moved => {
+            if self.pressed && root.height > thumb.height {
+                let moved = (self.mouse-y - self.pressed-y) / (root.height - thumb.height) * root.max-scroll;
+                root.content-y = clamp(root.drag-start - moved, -root.max-scroll, 0px);
+            }
+        }
+    }
+}
+
 export component Frost inherits Rectangle {
     in property <color> tint;
     // Over a full-window Theme.backdrop already: the same pixels, so the

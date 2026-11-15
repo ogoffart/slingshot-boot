@@ -7,10 +7,12 @@ Notes for developers and coding agents. The README is for users: keep build and 
 - `src/main.rs`: one crate, two programs (`cfg_select!` picks). Built for `target_os = "uefi"` it's the boot manager
   (`src/firmware/`). Built for a desktop it's `src/desktop/`: `slingshot` (or `slingshot config`) is the same UI
   configuring this computer, and `slingshot simulate` the simulator (winit; `--this-machine` shows this computer's
-  entries, read by `machine.rs`). Configuring saves slingshot.toml on the ESP and the boot order (pkexec when needed),
-  and the Install screen (`install.rs`) runs the embedded `scripts/slingshot-setup`, first as a dry run.
+  entries and files, read by `machine.rs`). Configuring saves slingshot.toml on the ESP and the boot order
+  (pkexec when needed), and the Install screen (`install.rs`) runs the embedded `scripts/slingshot-setup`, first as a
+  dry run.
 - `src/app/`: the UI logic, shared by both. It only reaches the machine through the `Backend` trait (`backend.rs`).
-  `mod.rs` wires the window's callbacks, `cards.rs` builds the boot cards, `config.rs` is slingshot.toml,
+  `mod.rs` wires the window's callbacks, `cards.rs` builds the boot cards, `files.rs` is the Files screen (a tree
+  of the disks' folders, a file opened to edit or see), `config.rs` is slingshot.toml,
   `settings.rs` the settings saved in a firmware variable.
 - `src/parse/`: pure parsers (load options, device paths, Boot Loader Specification entries, SMBIOS, LUKS, HID…) and
   `detect.rs`, what a file system can start. They build on both targets, so `cargo test` runs them on the desktop.
@@ -29,9 +31,12 @@ Notes for developers and coding agents. The README is for users: keep build and 
 - Patched dependencies (`acpi`, `argon2`): `[patch.crates-io]` in Cargo.toml says why.
 - `ui/`: the `.slint` files: `main.slint` (the window, its state and the keyboard), one file per screen, `top-bar`,
   `footer`, `dialogs` and `widgets`. What the Rust code shows and handles is in a global per screen (`BootMenu`,
-  `System`, `SettingsPage`, `Install`) and per dialog it fills, read where it's used; AppWindow keeps the window's state
+  `System`, `SettingsPage`, `Install`, `Explorer`) and per dialog it fills, read where it's used; AppWindow keeps the window's state
   and what the password locks. The globals have sample data (`Platform.uses-mock-data`), so that
   `slint-viewer ui/main.slint` shows the screens and opens the dialogs.
+- Screens are numbered 0 Boot, 1 System, 2 Settings, 3 Install, 4 Files, but shown in the tabs' order (Boot, Files,
+  System, Settings, Install): `tabs` in `main.slint` lists the visible ones, and the top bar's F1, F2… and the keys
+  follow it.
 - Keyboard focus is Slint's own: each control has a FocusScope, and the arrows a control doesn't use move the focus
   like Tab (`Focus.move`). Dialogs are PopupWindows. Entering a screen focuses its first element (`enter-screen`). In
   Settings, ↑ ↓ go from setting to setting (`Section`'s `step`), and past the ends into the next section.

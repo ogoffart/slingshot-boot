@@ -8,6 +8,7 @@ mod backdrop;
 mod backend;
 mod cards;
 pub mod config;
+mod files;
 mod hub;
 mod logos;
 mod power;
@@ -1047,6 +1048,8 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
     // F10 too, not only the card.
     ui.set_firmware_setup_supported(boot.firmware_setup_supported && config.firmware_setup);
     ui.set_options_editor(options_editor(&config, &boot));
+    // Not in `slingshot config`: the desktop has its own file manager.
+    ui.global::<Explorer>().set_available(config.files && !backend.capabilities().configure);
     ui.set_settings_access(match config.settings_access {
         SettingsAccess::Shown => 0,
         SettingsAccess::Hidden => 1,
@@ -1650,6 +1653,11 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             {
                 update_battery(&ui, &*backend);
             }
+            if screen == 4
+                && let Some(ui) = ui_weak.upgrade()
+            {
+                ui.global::<Explorer>().invoke_shown();
+            }
         });
     }
     // A choice in Settings: `set` updates the settings, saved when leaving.
@@ -2210,17 +2218,14 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
             }
         });
     }
-    {
+    // Adds a firmware boot entry for a file (disk, path, title); true if it did.
+    let add_boot_entry: Rc<dyn Fn(usize, String, String) -> bool> = {
         let (state, ui_weak, backend, show_status, refresh) = (state.clone(), ui.as_weak(), backend.clone(), show_status.clone(), refresh_order.clone());
-        ui.global::<FileBrowser>().on_add(move |index| {
-            let Some(ui) = ui_weak.upgrade() else { return };
-            let mut st = state.borrow_mut();
-            let b = &st.browse;
-            let (Some(BrowseRow::File(name)), Some(volume)) = (b.rows.get(index as usize), b.volume) else { return };
-            let title = b.entry_title(name);
-            match backend.add_boot_entry(volume, &b.path(Some(name)), &title) {
+        Rc::new(move |volume, path, title| {
+            let Some(ui) = ui_weak.upgrade() else { return false };
+            match backend.add_boot_entry(volume, &path, &title) {
                 Ok(number) => {
-                    ui.global::<FileBrowser>().set_visible(false);
+                    let mut st = state.borrow_mut();
                     let boot = backend.boot_data();
                     st.edited = (0..boot.options.len()).collect();
                     st.options = boot.options;
@@ -2232,13 +2237,51 @@ pub fn run(backend: Rc<dyn Backend>, hub: Rc<Hub>) -> Result<(), slint::Platform
                     drop(st);
                     refresh();
                     show_status(&trf("Added “{}” as Boot{}", &[&title, &format!("{number:04X}")]));
+                    true
                 }
                 Err(e) => {
-                    drop(st);
                     show_status(&trf("Could not add a boot entry: {}", &[&e]));
+                    false
                 }
             }
+        })
+    };
+    {
+        let (state, ui_weak, add) = (state.clone(), ui.as_weak(), add_boot_entry.clone());
+        ui.global::<FileBrowser>().on_add(move |index| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let st = state.borrow();
+            let b = &st.browse;
+            let (Some(BrowseRow::File(name)), Some(volume)) = (b.rows.get(index as usize), b.volume) else { return };
+            let (title, path) = (b.entry_title(name), b.path(Some(name)));
+            drop(st);
+            if add(volume, path, title) {
+                ui.global::<FileBrowser>().set_visible(false);
+            }
         });
+    }
+    // The Files screen.
+    {
+        let start = start_with_transition.clone();
+        let backend_start = backend.clone();
+        let show_status = show_status.clone();
+        let add = add_boot_entry.clone();
+        files::wire(
+            &ui,
+            backend.clone(),
+            files::Actions {
+                start: Rc::new(move |title, target| {
+                    let backend = backend_start.clone();
+                    start(title, Box::new(move || backend.start(&target)));
+                }),
+                unlock: unlock_disk.clone(),
+                picture_added: picture_added.clone(),
+                add_boot_entry: Rc::new(move |volume, path, title| {
+                    add(volume, path, title);
+                }),
+                show_status: Rc::new(move |m: &str| show_status(m)),
+            },
+        );
     }
     {
         let state = state.clone();

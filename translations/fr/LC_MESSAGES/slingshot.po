@@ -15,7 +15,7 @@ msgstr " et "
 msgid " · {} new"
 msgstr " · {} à neuf"
 
-#: src/firmware/mod.rs:364
+#: src/firmware/mod.rs:411
 msgid "1 memory device"
 msgstr "1 module de mémoire"
 
@@ -24,7 +24,7 @@ msgid "1 other entry"
 msgstr "1 autre entrée"
 
 #: src/firmware/luks.rs:292
-#: src/firmware/mod.rs:625
+#: src/firmware/mod.rs:691
 msgid "A passphrase check is still running. Try again in a moment."
 msgstr "Une vérification de phrase de passe est encore en cours. Réessayez dans un instant."
 
@@ -44,7 +44,7 @@ msgstr "Adaptateur secteur branché"
 msgid "AC adapter unplugged"
 msgstr "Adaptateur secteur débranché"
 
-#: src/parse/load_option.rs:283
+#: src/parse/load_option.rs:290
 msgid "ATA disk"
 msgstr "Disque ATA"
 
@@ -52,15 +52,16 @@ msgstr "Disque ATA"
 msgid "Accent color"
 msgstr "Couleur d'accent"
 
-#: src/app/mod.rs:876
+#: src/app/mod.rs:877
 msgid "Add Slingshot to systemd-boot's menu"
 msgstr "Ajouter Slingshot au menu de systemd-boot"
 
-#: ui/dialogs.slint:1199
+#: ui/dialogs.slint:1206
+#: ui/files-screen.slint:446
 msgid "Add to boot menu"
 msgstr "Ajouter au menu de démarrage"
 
-#: src/app/mod.rs:2228
+#: src/app/mod.rs:2239
 msgid "Added “{}” as Boot{}"
 msgstr "« {} » ajouté comme Boot{}"
 
@@ -68,8 +69,9 @@ msgstr "« {} » ajouté comme Boot{}"
 msgid "Add…"
 msgstr "Ajouter…"
 
-#: src/app/mod.rs:529
-#: src/app/mod.rs:549
+#: src/app/files.rs:282
+#: src/app/mod.rs:530
+#: src/app/mod.rs:550
 msgid "All disks"
 msgstr "Tous les disques"
 
@@ -77,7 +79,7 @@ msgstr "Tous les disques"
 msgid "Also in systemd-boot's menu"
 msgstr "Aussi dans le menu de systemd-boot"
 
-#: ui/footer.slint:61
+#: ui/footer.slint:64
 msgid "Alt ↑ ↓"
 msgstr "Alt ↑ ↓"
 
@@ -97,11 +99,11 @@ msgstr "Appliquée tout de suite. Annulée après 10 s si vous ne la gardez pas.
 msgid "Apply"
 msgstr "Appliquer"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Apr"
 msgstr "avr."
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "April"
 msgstr "avril"
 
@@ -109,11 +111,11 @@ msgstr "avril"
 msgid "At startup, show"
 msgstr "Au démarrage, afficher"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Aug"
 msgstr "août"
 
-#: src/app/backend.rs:587
+#: src/app/backend.rs:601
 msgid "August"
 msgstr "août"
 
@@ -121,8 +123,8 @@ msgstr "août"
 msgid "Auto"
 msgstr "Auto"
 
-#: src/app/mod.rs:153
-#: src/app/mod.rs:155
+#: src/app/mod.rs:154
+#: src/app/mod.rs:156
 msgid "Automatic ({})"
 msgstr "Automatique ({})"
 
@@ -130,15 +132,15 @@ msgstr "Automatique ({})"
 msgid "Back"
 msgstr "Retour"
 
-#: ui/footer.slint:65
+#: ui/footer.slint:68
 msgid "Back to boot"
 msgstr "Retour au démarrage"
 
-#: src/app/mod.rs:553
+#: src/app/mod.rs:554
 msgid "Back to the top folder"
 msgstr "Retour au dossier racine"
 
-#: src/app/mod.rs:553
+#: src/app/mod.rs:554
 msgid "Back to {}"
 msgstr "Retour à {}"
 
@@ -155,13 +157,13 @@ msgstr "Batterie"
 msgid "Blue"
 msgstr "Bleu"
 
-#: src/firmware/mod.rs:380
+#: src/firmware/mod.rs:427
 msgid "Board {}"
 msgstr "Carte {}"
 
 #: ui/install-screen.slint:155
-#: ui/top-bar.slint:164
-#: ui/top-bar.slint:168
+#: ui/main.slint:146
+#: ui/main.slint:150
 msgid "Boot"
 msgstr "Démarrage"
 
@@ -177,21 +179,27 @@ msgstr "Menu de démarrage"
 msgid "Boot order"
 msgstr "Ordre de démarrage"
 
-#: src/app/mod.rs:2287
+#: src/app/mod.rs:2336
 msgid "Boot order saved to the firmware"
 msgstr "Ordre de démarrage enregistré dans le micrologiciel"
 
-#: src/parse/load_option.rs:302
+#: src/parse/load_option.rs:309
 msgid "Built into firmware"
 msgstr "Intégré au micrologiciel"
 
-#: ui/dialogs.slint:280
-#: ui/dialogs.slint:336
-#: ui/dialogs.slint:525
+#: ui/dialogs.slint:287
+#: ui/dialogs.slint:343
+#: ui/dialogs.slint:532
 msgid "Cancel"
 msgstr "Annuler"
 
-#: src/app/mod.rs:574
+#: src/app/files.rs:321
+msgid "Cannot read this file: {}"
+msgstr "Impossible de lire ce fichier : {}"
+
+#: src/app/files.rs:432
+#: src/app/files.rs:470
+#: src/app/mod.rs:575
 msgid "Cannot read this folder: {}"
 msgstr "Impossible de lire ce dossier : {}"
 
@@ -199,7 +207,7 @@ msgstr "Impossible de lire ce dossier : {}"
 msgid "Capacity"
 msgstr "Capacité"
 
-#: ui/footer.slint:60
+#: ui/footer.slint:63
 msgid "Change"
 msgstr "Changer"
 
@@ -219,15 +227,15 @@ msgstr "En charge"
 msgid "Charging at"
 msgstr "Charge à"
 
-#: ui/dialogs.slint:840
+#: ui/dialogs.slint:847
 msgid "Checking the passphrase…"
 msgstr "Vérification de la phrase secrète…"
 
-#: ui/dialogs.slint:1204
+#: ui/dialogs.slint:1211
 msgid "Choose"
 msgstr "Choisir"
 
-#: ui/dialogs.slint:1043
+#: ui/dialogs.slint:1050
 msgid "Choose a picture"
 msgstr "Choisir une image"
 
@@ -235,25 +243,30 @@ msgstr "Choisir une image"
 msgid "Choose…"
 msgstr "Choisir…"
 
-#: src/app/mod.rs:1281
+#: src/app/mod.rs:1284
 msgid "Clock set to {}"
 msgstr "Horloge réglée sur {}"
 
-#: ui/dialogs.slint:1195
-#: ui/main.slint:466
+#: ui/dialogs.slint:1202
+#: ui/main.slint:515
 msgid "Close"
 msgstr "Fermer"
+
+#: ui/footer.slint:60
+msgid "Collapse, expand"
+msgstr "Replier, déplier"
 
 #: ui/install-screen.slint:224
 msgid "Copies it to the boot partition and adds it to the computer's boot menu. Nothing starts differently yet."
 msgstr "Le copie sur la partition de démarrage et l'ajoute au menu de démarrage de l'ordinateur. Rien ne démarre encore différemment."
 
-#: src/app/mod.rs:2232
+#: src/app/mod.rs:2243
 msgid "Could not add a boot entry: {}"
 msgstr "Impossible d’ajouter une entrée de démarrage : {}"
 
-#: src/app/mod.rs:2007
-#: src/app/mod.rs:2123
+#: src/app/files.rs:660
+#: src/app/mod.rs:2021
+#: src/app/mod.rs:2137
 msgid "Could not add the picture: {}"
 msgstr "Impossible d’ajouter l’image : {}"
 
@@ -261,7 +274,7 @@ msgstr "Impossible d’ajouter l’image : {}"
 msgid "Could not reset the settings: {}"
 msgstr "Impossible de réinitialiser les réglages : {}"
 
-#: src/app/mod.rs:975
+#: src/app/mod.rs:976
 msgid "Could not restart: {}"
 msgstr "Impossible de redémarrer : {}"
 
@@ -269,7 +282,7 @@ msgstr "Impossible de redémarrer : {}"
 msgid "Could not save slingshot.toml: {}"
 msgstr "Impossible d’enregistrer slingshot.toml : {}"
 
-#: src/app/mod.rs:2289
+#: src/app/mod.rs:2338
 msgid "Could not save the boot order: {}"
 msgstr "Impossible d’enregistrer l’ordre de démarrage : {}"
 
@@ -277,27 +290,35 @@ msgstr "Impossible d’enregistrer l’ordre de démarrage : {}"
 msgid "Could not save the settings: {}"
 msgstr "Impossible d’enregistrer les réglages : {}"
 
-#: src/app/mod.rs:1283
+#: src/app/files.rs:606
+msgid "Could not save {}: {}"
+msgstr "Impossible d’enregistrer {} : {}"
+
+#: src/app/mod.rs:1286
 msgid "Could not set the clock: {}"
 msgstr "Impossible de régler l’horloge : {}"
 
-#: src/app/mod.rs:1586
+#: src/app/mod.rs:1589
 msgid "Couldn't save the changes"
 msgstr "Impossible d’enregistrer les modifications"
 
-#: src/app/mod.rs:1418
+#: src/app/mod.rs:1421
 msgid "Couldn't save the log: {}"
 msgstr "Impossible d’enregistrer le journal : {}"
 
-#: src/app/mod.rs:1398
+#: src/app/mod.rs:1401
 msgid "Couldn't start {}"
 msgstr "Impossible de démarrer {}"
+
+#: ui/footer.slint:61
+msgid "Ctrl S"
+msgstr "Ctrl S"
 
 #: ui/footer.slint:58
 msgid "Customize"
 msgstr "Personnaliser"
 
-#: ui/dialogs.slint:425
+#: ui/dialogs.slint:432
 msgid "Customize {}"
 msgstr "Personnaliser {}"
 
@@ -313,21 +334,26 @@ msgstr "PAR DÉFAUT"
 msgid "Dark"
 msgstr "Sombre"
 
-#: ui/dialogs.slint:186
+#: ui/dialogs.slint:193
 #: ui/system-screen.slint:295
 msgid "Date and time"
 msgstr "Date et heure"
 
-#: src/app/backend.rs:611
+#: src/app/backend.rs:625
 msgid "Dec"
 msgstr "déc."
 
-#: src/app/backend.rs:587
+#: src/app/backend.rs:601
 msgid "December"
 msgstr "décembre"
 
+#: ui/main.slint:546
+#: ui/main.slint:547
+msgid "Discard"
+msgstr "Abandonner"
+
 #: src/firmware/luks.rs:132
-#: src/parse/load_option.rs:289
+#: src/parse/load_option.rs:296
 msgid "Disk"
 msgstr "Disque"
 
@@ -335,11 +361,11 @@ msgstr "Disque"
 msgid "Disk {} of {}"
 msgstr "Disque {} sur {}"
 
-#: ui/main.slint:450
+#: ui/main.slint:499
 msgid "Do it"
 msgstr "Exécuter"
 
-#: ui/main.slint:463
+#: ui/main.slint:512
 msgid "Done"
 msgstr "Terminé"
 
@@ -380,14 +406,19 @@ msgid "English (US)"
 msgstr "Anglais (États-Unis)"
 
 #: ui/footer.slint:56
+#: ui/footer.slint:59
 msgid "Enter"
 msgstr "Entrée"
 
-#: ui/dialogs.slint:620
+#: ui/files-screen.slint:384
+msgid "Enter or a double click opens a file here: a text to edit, a picture, a program to start."
+msgstr "Entrée ou un double clic ouvre un fichier ici : un texte à modifier, une image, un programme à lancer."
+
+#: ui/dialogs.slint:627
 msgid "Enter the password to change the settings."
 msgstr "Saisissez le mot de passe pour modifier les réglages."
 
-#: ui/footer.slint:65
+#: ui/footer.slint:68
 msgid "Esc"
 msgstr "Échap"
 
@@ -403,16 +434,20 @@ msgstr "Rapide"
 msgid "Faster"
 msgstr "Plus rapide"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Feb"
 msgstr "févr."
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "February"
 msgstr "février"
 
-#: src/desktop/simulator.rs:375
-#: src/firmware/mod.rs:407
+#: ui/main.slint:154
+msgid "Files"
+msgstr "Fichiers"
+
+#: src/desktop/simulator.rs:402
+#: src/firmware/mod.rs:454
 msgid "Firmware"
 msgstr "Firmware"
 
@@ -428,11 +463,11 @@ msgstr "Réglages du micrologiciel"
 msgid "First in the boot order"
 msgstr "Premier dans l'ordre de démarrage"
 
-#: ui/footer.slint:63
+#: ui/footer.slint:66
 msgid "Focus"
 msgstr "Focus"
 
-#: src/app/mod.rs:564
+#: src/app/mod.rs:565
 msgid "Folder"
 msgstr "Dossier"
 
@@ -444,11 +479,11 @@ msgstr "Trouvé"
 msgid "French (AZERTY)"
 msgstr "Français (AZERTY)"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Fri"
 msgstr "ven."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Friday"
 msgstr "vendredi"
 
@@ -460,7 +495,7 @@ msgstr "Chargée"
 msgid "German (QWERTZ)"
 msgstr "Allemand (QWERTZ)"
 
-#: ui/main.slint:599
+#: ui/main.slint:693
 msgid "Going back to the previous resolution in {} s."
 msgstr "Retour à la résolution précédente dans {} s."
 
@@ -468,11 +503,11 @@ msgstr "Retour à la résolution précédente dans {} s."
 msgid "Health"
 msgstr "État"
 
-#: ui/dialogs.slint:822
+#: ui/dialogs.slint:829
 msgid "Hide the passphrase"
 msgstr "Masquer la phrase secrète"
 
-#: ui/dialogs.slint:612
+#: ui/dialogs.slint:619
 msgid "Hide the password"
 msgstr "Masquer le mot de passe"
 
@@ -480,21 +515,21 @@ msgstr "Masquer le mot de passe"
 msgid "How the boot menu looks, and the screen resolution. Applied right away."
 msgstr "L'apparence du menu de démarrage, et la résolution de l'écran. Appliqué tout de suite."
 
-#: ui/dialogs.slint:471
+#: ui/dialogs.slint:478
 msgid "Icon"
 msgstr "Icône"
 
-#: ui/dialogs.slint:842
+#: ui/dialogs.slint:849
 msgid "Incorrect passphrase. Try again."
 msgstr "Phrase secrète incorrecte. Réessayez."
 
 #: ui/install-screen.slint:201
 #: ui/install-screen.slint:217
-#: ui/top-bar.slint:166
+#: ui/main.slint:148
 msgid "Install"
 msgstr "Installer"
 
-#: src/app/mod.rs:872
+#: src/app/mod.rs:873
 msgid "Install Slingshot"
 msgstr "Installer Slingshot"
 
@@ -502,7 +537,7 @@ msgstr "Installer Slingshot"
 msgid "Installed"
 msgstr "Installé"
 
-#: ui/main.slint:463
+#: ui/main.slint:512
 msgid "It didn't work"
 msgstr "Ça n’a pas marché"
 
@@ -514,43 +549,43 @@ msgstr "Italien"
 msgid "Its entries are cards in Slingshot"
 msgstr "Ses entrées sont des cartes dans Slingshot"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Jan"
 msgstr "janv."
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "January"
 msgstr "janvier"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Jul"
 msgstr "juil."
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "July"
 msgstr "juillet"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Jun"
 msgstr "juin"
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "June"
 msgstr "juin"
 
-#: ui/main.slint:601
+#: ui/main.slint:695
 msgid "Keep"
 msgstr "Garder"
 
-#: ui/main.slint:598
+#: ui/main.slint:692
 msgid "Keep this resolution?"
 msgstr "Garder cette résolution ?"
 
-#: ui/dialogs.slint:497
+#: ui/dialogs.slint:504
 msgid "Kernel options"
 msgstr "Options du noyau"
 
-#: src/desktop/simulator.rs:232
+#: src/desktop/simulator.rs:235
 #: src/firmware/detect.rs:67
 msgid "Kernel {}"
 msgstr "Noyau {}"
@@ -563,7 +598,7 @@ msgstr "Aide clavier"
 msgid "Keyboard layout"
 msgstr "Disposition du clavier"
 
-#: src/firmware/mod.rs:390
+#: src/firmware/mod.rs:437
 msgid "Keys enrolled, not enforced"
 msgstr "Clés inscrites, non appliqué"
 
@@ -588,7 +623,7 @@ msgstr "Clair"
 msgid "Linux"
 msgstr "Linux"
 
-#: src/app/mod.rs:1417
+#: src/app/mod.rs:1420
 msgid "Log saved as {}"
 msgstr "Journal enregistré : {}"
 
@@ -596,29 +631,29 @@ msgstr "Journal enregistré : {}"
 msgid "Made {}"
 msgstr "Fabriquée le {}"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Mar"
 msgstr "mars"
 
-#: src/app/backend.rs:586
+#: src/app/backend.rs:600
 msgid "March"
 msgstr "mars"
 
-#: src/app/backend.rs:586
-#: src/app/backend.rs:610
+#: src/app/backend.rs:600
+#: src/app/backend.rs:624
 msgid "May"
 msgstr "mai"
 
-#: src/desktop/simulator.rs:373
-#: src/firmware/mod.rs:399
+#: src/desktop/simulator.rs:400
+#: src/firmware/mod.rs:446
 msgid "Memory"
 msgstr "Mémoire"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Mon"
 msgstr "lun."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Monday"
 msgstr "lundi"
 
@@ -626,11 +661,11 @@ msgstr "lundi"
 msgid "More…"
 msgstr "Autres…"
 
-#: ui/footer.slint:59
+#: ui/footer.slint:62
 msgid "Move"
 msgstr "Déplacer"
 
-#: src/parse/load_option.rs:279
+#: src/parse/load_option.rs:286
 msgid "NVMe disk"
 msgstr "Disque NVMe"
 
@@ -638,7 +673,7 @@ msgstr "Disque NVMe"
 msgid "Name"
 msgstr "Nom"
 
-#: src/parse/load_option.rs:296
+#: src/parse/load_option.rs:303
 msgid "Network · {}"
 msgstr "Réseau · {}"
 
@@ -647,7 +682,7 @@ msgstr "Réseau · {}"
 msgid "Never"
 msgstr "Jamais"
 
-#: src/firmware/mod.rs:392
+#: src/firmware/mod.rs:439
 msgid "No Secure Boot variables"
 msgstr "Pas de variables Secure Boot"
 
@@ -655,11 +690,11 @@ msgstr "Pas de variables Secure Boot"
 msgid "No boot entries found in the firmware."
 msgstr "Aucune entrée de démarrage trouvée dans le micrologiciel."
 
-#: src/app/mod.rs:560
+#: src/app/mod.rs:561
 msgid "No folders or EFI programs here."
 msgstr "Aucun dossier ni programme EFI ici."
 
-#: src/app/mod.rs:560
+#: src/app/mod.rs:561
 msgid "No folders or pictures here."
 msgstr "Aucun dossier ni image ici."
 
@@ -669,7 +704,7 @@ msgstr "Pas de fond d’écran"
 
 #: ui/install-screen.slint:155
 #: ui/widgets.slint:672
-#: src/app/mod.rs:608
+#: src/app/mod.rs:609
 msgid "None"
 msgstr "Aucune"
 
@@ -681,7 +716,8 @@ msgstr "Normale"
 msgid "Not enough memory to check the passphrase."
 msgstr "Pas assez de mémoire pour vérifier la phrase secrète."
 
-#: src/app/mod.rs:2193
+#: src/app/files.rs:575
+#: src/app/mod.rs:2207
 msgid "Not found: {}"
 msgstr "Introuvable : {}"
 
@@ -693,38 +729,38 @@ msgstr "Pas installé"
 msgid "Not on every boot"
 msgstr "Pas à chaque démarrage"
 
-#: src/firmware/mod.rs:392
+#: src/firmware/mod.rs:439
 msgid "Not supported"
 msgstr "Non pris en charge"
 
-#: src/app/backend.rs:611
+#: src/app/backend.rs:625
 msgid "Nov"
 msgstr "nov."
 
-#: src/app/backend.rs:587
+#: src/app/backend.rs:601
 msgid "November"
 msgstr "novembre"
 
-#: ui/main.slint:438
+#: ui/main.slint:487
 msgid "OK"
 msgstr "OK"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Oct"
 msgstr "oct."
 
-#: src/app/backend.rs:587
+#: src/app/backend.rs:601
 msgid "October"
 msgstr "octobre"
 
 #: ui/install-screen.slint:176
-#: src/firmware/mod.rs:390
-#: src/firmware/mod.rs:391
+#: src/firmware/mod.rs:437
+#: src/firmware/mod.rs:438
 msgid "Off"
 msgstr "Désactivé"
 
 #: ui/install-screen.slint:176
-#: src/firmware/mod.rs:389
+#: src/firmware/mod.rs:436
 msgid "On"
 msgstr "Activé"
 
@@ -737,7 +773,7 @@ msgstr "Sur batterie"
 msgid "On every boot"
 msgstr "À chaque démarrage"
 
-#: ui/dialogs.slint:455
+#: ui/dialogs.slint:462
 msgid "On the main row"
 msgstr "Sur la rangée principale"
 
@@ -757,7 +793,8 @@ msgstr "Une fois : le redémarrage suivant revient à la normale, quoi qu’il a
 msgid "Only when chosen"
 msgstr "Seulement quand on le choisit"
 
-#: ui/dialogs.slint:1204
+#: ui/dialogs.slint:1211
+#: ui/footer.slint:59
 msgid "Open"
 msgstr "Ouvrir"
 
@@ -769,19 +806,19 @@ msgstr "Options"
 msgid "Orange"
 msgstr "Orange"
 
-#: ui/dialogs.slint:808
+#: ui/dialogs.slint:815
 msgid "Passphrase"
 msgstr "Phrase secrète"
 
-#: ui/dialogs.slint:603
+#: ui/dialogs.slint:610
 msgid "Password"
 msgstr "Mot de passe"
 
-#: ui/footer.slint:62
+#: ui/footer.slint:65
 msgid "PgUp PgDn"
 msgstr "PgPréc PgSuiv"
 
-#: ui/dialogs.slint:481
+#: ui/dialogs.slint:488
 #: ui/settings-screen.slint:1076
 msgid "Picture"
 msgstr "Image"
@@ -806,8 +843,8 @@ msgstr "Vitesse du pointeur"
 msgid "Press any key for the boot menu"
 msgstr "Appuyez sur une touche pour le menu de démarrage"
 
-#: src/desktop/simulator.rs:372
-#: src/firmware/mod.rs:398
+#: src/desktop/simulator.rs:399
+#: src/firmware/mod.rs:445
 msgid "Processor"
 msgstr "Processeur"
 
@@ -815,15 +852,15 @@ msgstr "Processeur"
 msgid "Reading…"
 msgstr "Lecture…"
 
-#: ui/main.slint:450
+#: ui/main.slint:499
 msgid "Remove"
 msgstr "Retirer"
 
-#: ui/footer.slint:61
+#: ui/footer.slint:64
 msgid "Reorder"
 msgstr "Réordonner"
 
-#: ui/main.slint:584
+#: ui/main.slint:678
 msgid "Reset"
 msgstr "Réinitialiser"
 
@@ -831,7 +868,7 @@ msgstr "Réinitialiser"
 msgid "Reset all settings"
 msgstr "Réinitialiser tous les réglages"
 
-#: ui/main.slint:581
+#: ui/main.slint:675
 msgid "Reset all settings?"
 msgstr "Réinitialiser tous les réglages ?"
 
@@ -840,11 +877,11 @@ msgstr "Réinitialiser tous les réglages ?"
 msgid "Restart"
 msgstr "Redémarrer"
 
-#: ui/main.slint:465
+#: ui/main.slint:514
 msgid "Restart now"
 msgstr "Redémarrer maintenant"
 
-#: src/app/mod.rs:1427
+#: src/app/mod.rs:1430
 msgid "Restarting…"
 msgstr "Redémarrage…"
 
@@ -856,40 +893,50 @@ msgstr "Rétablir l’ordre d’origine"
 msgid "Resuming {} in {} s. Press any key to stay here."
 msgstr "Reprise de {} dans {} s. Appuyez sur une touche pour rester ici."
 
-#: ui/main.slint:600
+#: ui/files-screen.slint:427
+#: ui/main.slint:694
 msgid "Revert"
 msgstr "Annuler"
 
-#: ui/main.slint:450
+#: ui/main.slint:499
 msgid "Running…"
 msgstr "En cours…"
 
-#: src/parse/load_option.rs:281
+#: src/parse/load_option.rs:288
 msgid "SATA disk"
 msgstr "Disque SATA"
 
-#: src/parse/load_option.rs:285
+#: src/parse/load_option.rs:292
 msgid "SCSI disk"
 msgstr "Disque SCSI"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Sat"
 msgstr "sam."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Saturday"
 msgstr "samedi"
 
-#: ui/dialogs.slint:529
-#: ui/main.slint:481
+#: ui/dialogs.slint:536
+#: ui/files-screen.slint:432
+#: ui/footer.slint:61
 msgid "Save"
 msgstr "Enregistrer"
 
-#: ui/footer.slint:64
+#: ui/footer.slint:67
 msgid "Save log"
 msgstr "Enregistrer le journal"
 
-#: ui/main.slint:478
+#: ui/main.slint:542
+msgid "Save the changes?"
+msgstr "Enregistrer les modifications ?"
+
+#: ui/main.slint:527
+msgid "Save the file?"
+msgstr "Enregistrer le fichier ?"
+
+#: ui/main.slint:570
 msgid "Save the new boot order?"
 msgstr "Enregistrer le nouvel ordre de démarrage ?"
 
@@ -897,39 +944,43 @@ msgstr "Enregistrer le nouvel ordre de démarrage ?"
 msgid "Save to firmware…"
 msgstr "Enregistrer dans le micrologiciel…"
 
-#: src/app/mod.rs:1584
-#: src/app/mod.rs:1705
-#: src/app/mod.rs:1725
+#: src/app/mod.rs:1587
+#: src/app/mod.rs:1713
+#: src/app/mod.rs:1733
 msgid "Saved in slingshot.toml"
 msgstr "Enregistré dans slingshot.toml"
 
-#: ui/dialogs.slint:516
+#: ui/dialogs.slint:523
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr "Enregistré dans slingshot.toml, à côté de Slingshot. Les champs vides gardent ceux de l’entrée. Une image est un fichier PNG ou JPEG dans le même dossier."
+
+#: src/app/files.rs:589
+msgid "Saved {}"
+msgstr "{} enregistré"
 
 #: ui/settings-screen.slint:926
 msgid "Screen resolution"
 msgstr "Résolution de l’écran"
 
-#: ui/footer.slint:62
+#: ui/footer.slint:65
 msgid "Section"
 msgstr "Section"
 
 #: ui/install-screen.slint:175
-#: src/desktop/simulator.rs:376
-#: src/firmware/mod.rs:408
+#: src/desktop/simulator.rs:403
+#: src/firmware/mod.rs:455
 msgid "Secure Boot"
 msgstr "Secure Boot"
 
-#: src/firmware/mod.rs:180
+#: src/firmware/mod.rs:226
 msgid "Secure Boot is on, and this program isn't signed by a key this computer trusts. Sign it, or turn Secure Boot off in the firmware setup."
 msgstr "Secure Boot est activé, et ce programme n'est pas signé par une clé reconnue par cet ordinateur. Signez-le, ou désactivez Secure Boot dans la configuration du micrologiciel."
 
-#: src/firmware/mod.rs:394
+#: src/firmware/mod.rs:441
 msgid "Secure Boot off"
 msgstr "Secure Boot désactivé"
 
-#: src/firmware/mod.rs:394
+#: src/firmware/mod.rs:441
 msgid "Secure Boot on"
 msgstr "Secure Boot activé"
 
@@ -937,11 +988,11 @@ msgstr "Secure Boot activé"
 msgid "Select"
 msgstr "Choisir"
 
-#: src/app/backend.rs:610
+#: src/app/backend.rs:624
 msgid "Sep"
 msgstr "sept."
 
-#: src/app/backend.rs:587
+#: src/app/backend.rs:601
 msgid "September"
 msgstr "septembre"
 
@@ -949,13 +1000,13 @@ msgstr "septembre"
 msgid "Serial {}"
 msgstr "N° de série {}"
 
-#: ui/dialogs.slint:284
+#: ui/dialogs.slint:291
 msgid "Set"
 msgstr "Régler"
 
-#: ui/settings-screen.slint:752
-#: ui/top-bar.slint:173
-#: ui/top-bar.slint:178
+#: ui/main.slint:156
+#: ui/main.slint:160
+#: ui/main.slint:165
 msgid "Settings"
 msgstr "Réglages"
 
@@ -963,7 +1014,7 @@ msgstr "Réglages"
 msgid "Settings are kept in this computer's firmware, not on a disk"
 msgstr "Les réglages sont gardés dans le micrologiciel de cet ordinateur, pas sur un disque"
 
-#: ui/dialogs.slint:588
+#: ui/dialogs.slint:595
 msgid "Settings are locked"
 msgstr "Les réglages sont verrouillés"
 
@@ -971,7 +1022,7 @@ msgstr "Les réglages sont verrouillés"
 msgid "Settings are saved in slingshot.toml, next to Slingshot"
 msgstr "Les réglages sont enregistrés dans slingshot.toml, à côté de Slingshot"
 
-#: src/app/mod.rs:1780
+#: src/app/mod.rs:1788
 msgid "Settings reset to their defaults"
 msgstr "Réglages réinitialisés"
 
@@ -979,19 +1030,19 @@ msgstr "Réglages réinitialisés"
 msgid "Settings saved in slingshot.toml"
 msgstr "Réglages enregistrés dans slingshot.toml"
 
-#: src/firmware/mod.rs:391
+#: src/firmware/mod.rs:438
 msgid "Setup mode · no keys enrolled"
 msgstr "Mode configuration · aucune clé inscrite"
 
-#: ui/dialogs.slint:822
+#: ui/dialogs.slint:829
 msgid "Show the passphrase"
 msgstr "Afficher la phrase secrète"
 
-#: ui/dialogs.slint:612
+#: ui/dialogs.slint:619
 msgid "Show the password"
 msgstr "Afficher le mot de passe"
 
-#: ui/dialogs.slint:453
+#: ui/dialogs.slint:460
 msgid "Shown"
 msgstr "Affichée"
 
@@ -1000,21 +1051,21 @@ msgstr "Affichée"
 msgid "Shut down"
 msgstr "Éteindre"
 
-#: src/app/mod.rs:1427
+#: src/app/mod.rs:1430
 msgid "Shutting down…"
 msgstr "Extinction…"
 
-#: ui/dialogs.slint:866
+#: ui/dialogs.slint:873
 msgid "Skip"
 msgstr "Passer"
 
 #: ui/install-screen.slint:147
-#: ui/main.slint:128
+#: ui/main.slint:130
 #: ui/system-screen.slint:411
 msgid "Slingshot"
 msgstr "Slingshot"
 
-#: ui/main.slint:128
+#: ui/main.slint:130
 msgid "Slingshot (simulator)"
 msgstr "Slingshot (simulateur)"
 
@@ -1022,7 +1073,8 @@ msgstr "Slingshot (simulateur)"
 msgid "Slingshot can't read this disk's data."
 msgstr "Slingshot ne peut pas lire les données de ce disque."
 
-#: src/app/mod.rs:2104
+#: src/app/files.rs:514
+#: src/app/mod.rs:2118
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr "Slingshot ne peut pas lire les disques {} : cet ordinateur n'a pas de pilote pour eux."
 
@@ -1054,9 +1106,9 @@ msgstr "Espagnol"
 msgid "Splash screen"
 msgstr "Écran d’accueil"
 
-#: ui/dialogs.slint:340
-#: ui/dialogs.slint:1204
-#: ui/footer.slint:56
+#: ui/dialogs.slint:347
+#: ui/dialogs.slint:1211
+#: ui/files-screen.slint:450
 msgid "Start"
 msgstr "Démarrer"
 
@@ -1064,15 +1116,15 @@ msgstr "Démarrer"
 msgid "Start Slingshot"
 msgstr "Démarrer Slingshot"
 
-#: src/app/mod.rs:874
+#: src/app/mod.rs:875
 msgid "Start Slingshot on every boot"
 msgstr "Démarrer Slingshot à chaque démarrage"
 
-#: src/app/mod.rs:873
+#: src/app/mod.rs:874
 msgid "Start Slingshot once, on the next restart"
 msgstr "Démarrer Slingshot une fois, au prochain redémarrage"
 
-#: ui/dialogs.slint:1043
+#: ui/dialogs.slint:1050
 msgid "Start a file"
 msgstr "Démarrer un fichier"
 
@@ -1084,7 +1136,7 @@ msgstr "Démarrer un fichier…"
 msgid "Start the default entry after"
 msgstr "Démarrer l’entrée par défaut après"
 
-#: ui/dialogs.slint:308
+#: ui/dialogs.slint:315
 msgid "Start {} with"
 msgstr "Démarrer {} avec"
 
@@ -1096,7 +1148,7 @@ msgstr "Démarrage"
 msgid "Starting in {} s"
 msgstr "Démarrage dans {} s"
 
-#: src/app/mod.rs:1408
+#: src/app/mod.rs:1411
 msgid "Starting {}…"
 msgstr "Démarrage de {}…"
 
@@ -1108,25 +1160,25 @@ msgstr "Démarre"
 msgid "Startup"
 msgstr "Démarrage"
 
-#: src/app/mod.rs:875
+#: src/app/mod.rs:876
 msgid "Stop starting Slingshot on every boot"
 msgstr "Ne plus démarrer Slingshot à chaque démarrage"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Sun"
 msgstr "dim."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Sunday"
 msgstr "dimanche"
 
-#: ui/top-bar.slint:165
-#: ui/top-bar.slint:169
-#: ui/top-bar.slint:172
+#: ui/main.slint:147
+#: ui/main.slint:151
+#: ui/main.slint:155
 msgid "System"
 msgstr "Système"
 
-#: ui/footer.slint:63
+#: ui/footer.slint:66
 msgid "Tab"
 msgstr "Tab"
 
@@ -1134,7 +1186,15 @@ msgstr "Tab"
 msgid "Teal"
 msgstr "Turquoise"
 
-#: ui/dialogs.slint:464
+#: ui/main.slint:544
+msgid "The changes to this file aren't saved, and can't be: it's read-only."
+msgstr "Les modifications de ce fichier ne sont pas enregistrées, et ne peuvent pas l’être : il est en lecture seule."
+
+#: ui/main.slint:543
+msgid "The changes to this file aren't saved."
+msgstr "Les modifications de ce fichier ne sont pas enregistrées."
+
+#: ui/dialogs.slint:471
 #: ui/settings-screen.slint:1090
 msgid "The default entry"
 msgstr "L’entrée par défaut"
@@ -1143,11 +1203,12 @@ msgstr "L’entrée par défaut"
 msgid "The disk couldn't be read."
 msgstr "Le disque n’a pas pu être lu."
 
-#: src/app/mod.rs:540
+#: src/app/files.rs:259
+#: src/app/mod.rs:541
 msgid "The firmware can't read any disk."
 msgstr "Le micrologiciel ne peut lire aucun disque."
 
-#: src/firmware/mod.rs:175
+#: src/firmware/mod.rs:221
 msgid "The firmware couldn't load {}. It may not be an EFI program for this computer, or the file is damaged or missing."
 msgstr "Le micrologiciel n’a pas pu charger {}. Ce n’est peut-être pas un programme EFI pour cet ordinateur, ou le fichier est endommagé ou absent."
 
@@ -1159,7 +1220,11 @@ msgstr "Le micrologiciel ne démarre Slingshot qu'une fois signé"
 msgid "The firmware's own settings"
 msgstr "Les réglages propres au micrologiciel"
 
-#: ui/dialogs.slint:327
+#: src/app/files.rs:357
+msgid "The first {} of {}."
+msgstr "Les premiers {} sur {}."
+
+#: ui/dialogs.slint:334
 msgid "The kernel options, for this start only. Enter starts, Esc cancels."
 msgstr "Les options du noyau, pour ce démarrage seulement. Entrée démarre, Échap annule."
 
@@ -1179,15 +1244,23 @@ msgstr "Les entrées principales"
 msgid "The one set as default"
 msgstr "Celle définie par défaut"
 
+#: src/app/files.rs:657
+msgid "The splash picture is changed."
+msgstr "L’image de l’écran d’accueil est changée."
+
+#: src/app/files.rs:656
+msgid "The wallpaper is changed."
+msgstr "Le fond d’écran est changé."
+
 #: ui/settings-screen.slint:882
 msgid "Theme"
 msgstr "Thème"
 
-#: ui/main.slint:582
+#: ui/main.slint:676
 msgid "Theme, accent color, startup screen, timeout and resolution go back to their defaults. The boot order isn't changed."
 msgstr "Le thème, la couleur d’accent, l’écran de démarrage, le délai et la résolution reprennent leurs valeurs par défaut. L’ordre de démarrage ne change pas."
 
-#: ui/main.slint:448
+#: ui/main.slint:497
 msgid "These commands will run as root (your password is asked for):\n\n"
 msgstr "Ces commandes seront exécutées en root (votre mot de passe est demandé) :\n\n"
 
@@ -1208,52 +1281,65 @@ msgstr "Ce disque a disparu."
 msgid "This disk is locked."
 msgstr "Ce disque est verrouillé."
 
+#: src/app/files.rs:337
+msgid "This disk or file is read-only: changes can't be saved."
+msgstr "Ce disque ou ce fichier est en lecture seule : les modifications ne peuvent pas être enregistrées."
+
 #: src/firmware/luks.rs:228
 #: src/firmware/luks.rs:464
 msgid "This disk's encryption couldn't be read."
 msgstr "Le chiffrement de ce disque n'a pas pu être lu."
 
+#: src/app/files.rs:311
+msgid "This file is too large to open here."
+msgstr "Ce fichier est trop grand pour être ouvert ici."
+
 #: ui/system-screen.slint:345
 msgid "This machine"
 msgstr "Cet ordinateur"
 
-#: ui/main.slint:479
+#: src/app/files.rs:348
+msgid "This picture can't be shown."
+msgstr "Cette image ne peut pas être affichée."
+
+#: ui/main.slint:571
 msgid "This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen."
 msgstr "Cela écrit BootOrder dans le micrologiciel. L’ordre d’origine est conservé : vous pourrez le rétablir depuis cet écran."
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Thu"
 msgstr "jeu."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Thursday"
 msgstr "jeudi"
 
-#: ui/dialogs.slint:433
+#: ui/dialogs.slint:440
 msgid "Title"
 msgstr "Titre"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Tue"
 msgstr "mar."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Tuesday"
 msgstr "mardi"
 
-#: ui/dialogs.slint:1188
+#: ui/dialogs.slint:1195
 msgid "Type a name to find it · / types a path · + adds to the menu"
 msgstr "Tapez un nom pour le trouver · / pour un chemin · + ajoute au menu"
 
-#: ui/dialogs.slint:1188
+#: ui/dialogs.slint:1195
 msgid "Type a name to find it · / types a path · Enter chooses"
 msgstr "Tapez un nom pour le trouver · / pour un chemin · Entrée choisit"
 
-#: ui/dialogs.slint:1092
+#: ui/dialogs.slint:1099
+#: ui/files-screen.slint:262
 msgid "Type a path, like \\EFI\\BOOT"
 msgstr "Tapez un chemin, comme \\EFI\\BOOT"
 
-#: ui/dialogs.slint:271
+#: ui/dialogs.slint:278
 msgid "Type the numbers, or use ← → and ↑ ↓. This sets the computer's clock: Windows reads it as local time, Linux usually as UTC."
 msgstr "Tapez les nombres, ou utilisez ← → et ↑ ↓. Ceci règle l'horloge de l'ordinateur : Windows la lit comme l'heure locale, Linux généralement comme l'heure UTC."
 
@@ -1265,15 +1351,15 @@ msgstr "Tapez les secondes, ou utilisez ← →. 0 : jamais."
 msgid "USB stick"
 msgstr "Clé USB"
 
-#: src/parse/load_option.rs:298
+#: src/parse/load_option.rs:305
 msgid "USB · removable"
 msgstr "USB · amovible"
 
-#: ui/dialogs.slint:455
+#: ui/dialogs.slint:462
 msgid "Under More…"
 msgstr "Dans « Autres… »"
 
-#: src/app/mod.rs:877
+#: src/app/mod.rs:878
 msgid "Uninstall Slingshot"
 msgstr "Désinstaller Slingshot"
 
@@ -1281,24 +1367,24 @@ msgstr "Désinstaller Slingshot"
 msgid "Uninstall…"
 msgstr "Désinstaller…"
 
-#: src/firmware/mod.rs:338
+#: src/firmware/mod.rs:385
 msgid "Unknown processor"
 msgstr "Processeur inconnu"
 
-#: src/firmware/mod.rs:402
+#: src/firmware/mod.rs:449
 msgid "Unknown system"
 msgstr "Système inconnu"
 
-#: ui/dialogs.slint:633
-#: ui/dialogs.slint:876
+#: ui/dialogs.slint:640
+#: ui/dialogs.slint:883
 msgid "Unlock"
 msgstr "Déverrouiller"
 
-#: ui/dialogs.slint:777
+#: ui/dialogs.slint:784
 msgid "Unlock the encrypted disk"
 msgstr "Déverrouiller le disque chiffré"
 
-#: src/app/mod.rs:2089
+#: src/app/mod.rs:2103
 msgid "Unlocked, but its files can't be shown: this computer has no driver for what's inside."
 msgstr "Déverrouillé, mais ses fichiers ne peuvent pas être affichés : cet ordinateur n'a pas de pilote pour son contenu."
 
@@ -1307,7 +1393,15 @@ msgstr "Déverrouillé, mais ses fichiers ne peuvent pas être affichés : cet o
 msgid "Update"
 msgstr "Mettre à jour"
 
-#: src/firmware/mod.rs:389
+#: ui/files-screen.slint:442
+msgid "Use as splash"
+msgstr "Pour l’écran d’accueil"
+
+#: ui/files-screen.slint:438
+msgid "Use as wallpaper"
+msgstr "Comme fond d’écran"
+
+#: src/firmware/mod.rs:436
 msgid "User mode · keys enrolled"
 msgstr "Mode utilisateur · clés inscrites"
 
@@ -1324,11 +1418,11 @@ msgstr "Tension"
 msgid "Wallpaper"
 msgstr "Fond d’écran"
 
-#: src/app/backend.rs:608
+#: src/app/backend.rs:622
 msgid "Wed"
 msgstr "mer."
 
-#: src/app/backend.rs:583
+#: src/app/backend.rs:597
 msgid "Wednesday"
 msgstr "mercredi"
 
@@ -1340,28 +1434,38 @@ msgstr "Ce qui s'affiche d'abord, et quand l'entrée par défaut démarre d'elle
 msgid "Windows Boot Manager"
 msgstr "Gestionnaire de démarrage Windows"
 
-#: ui/dialogs.slint:620
+#: ui/dialogs.slint:627
 msgid "Wrong password."
 msgstr "Mot de passe incorrect."
+
+#: src/app/files.rs:137
+msgid "hidden"
+msgstr "caché"
 
 #: src/firmware/detect.rs:65
 msgid "macOS"
 msgstr "macOS"
 
-#: src/app/mod.rs:1427
+#: src/app/files.rs:134
+#: src/app/files.rs:277
+#: src/app/files.rs:277
+msgid "read-only"
+msgstr "lecture seule"
+
+#: src/app/mod.rs:1430
 msgid "restart"
 msgstr "redémarrer"
 
-#: src/app/mod.rs:1427
+#: src/app/mod.rs:1430
 msgid "shut down"
 msgstr "éteindre"
 
-#: src/firmware/mod.rs:480
-#: src/firmware/mod.rs:503
+#: src/firmware/mod.rs:527
+#: src/firmware/mod.rs:556
 msgid "unlocked"
 msgstr "déverrouillé"
 
-#: src/firmware/mod.rs:347
+#: src/firmware/mod.rs:394
 msgid "up to {} GHz"
 msgstr "jusqu’à {} GHz"
 
@@ -1369,17 +1473,21 @@ msgstr "jusqu’à {} GHz"
 msgid "{} %"
 msgstr "{} %"
 
-#: src/parse/load_option.rs:295
+#: src/parse/load_option.rs:302
 msgid "{} boot"
 msgstr "Démarrage {}"
 
-#: src/firmware/mod.rs:341
+#: src/firmware/mod.rs:388
 msgid "{} cores"
 msgstr "{} cœurs"
 
-#: src/firmware/mod.rs:411
+#: src/firmware/mod.rs:458
 msgid "{} firmware {} · {} · {}"
 msgstr "Micrologiciel {} {} · {} · {}"
+
+#: src/app/files.rs:274
+msgid "{} free of {}"
+msgstr "{} libres sur {}"
 
 #: src/app/power.rs:37
 msgid "{} h"
@@ -1389,7 +1497,8 @@ msgstr "{} h"
 msgid "{} h {} min"
 msgstr "{} h {} min"
 
-#: src/app/mod.rs:2102
+#: src/app/files.rs:512
+#: src/app/mod.rs:2116
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr "{} est chiffré d'une façon que Slingshot ne sait pas déverrouiller."
 
@@ -1401,7 +1510,7 @@ msgstr "{} est en veille prolongée : démarrez-le pour reprendre là où vous e
 msgid "{} left"
 msgstr "{} restantes"
 
-#: src/firmware/mod.rs:364
+#: src/firmware/mod.rs:411
 msgid "{} memory devices"
 msgstr "{} modules de mémoire"
 
@@ -1429,7 +1538,7 @@ msgstr "{} s"
 msgid "{} starts in {} s. Press any key to stay here."
 msgstr "{} démarre dans {} s. Appuyez sur une touche pour rester ici."
 
-#: src/firmware/mod.rs:344
+#: src/firmware/mod.rs:391
 msgid "{} threads"
 msgstr "{} threads"
 
@@ -1437,14 +1546,14 @@ msgstr "{} threads"
 msgid "{} until full"
 msgstr "{} avant la charge complète"
 
-#: src/app/backend.rs:615
+#: src/app/backend.rs:629
 msgid "{} {} {}"
 msgstr "{} {} {}"
 
-#: src/app/backend.rs:592
+#: src/app/backend.rs:606
 msgid "{} {} {} {}"
 msgstr "{} {} {} {}"
 
-#: src/parse/load_option.rs:304
+#: src/parse/load_option.rs:311
 msgid "{} · partition {}"
 msgstr "{} · partition {}"

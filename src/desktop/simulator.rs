@@ -3,8 +3,8 @@
 
 //! Runs Slingshot's UI in a desktop window, with simulated firmware: made-up
 //! boot entries (a systemd-boot with two entries, another OS, a USB stick,
-//! network boot and a shell), or this computer's entries (`slingshot simulate
-//! --this-machine`).
+//! network boot and a shell), or this computer's entries and files
+//! (`slingshot simulate --this-machine`).
 //! Starting an entry shows what would happen instead of restarting.
 //!
 //! The window uses Slint's software renderer, like the UEFI build, so it
@@ -56,6 +56,11 @@ pub struct SimBackend {
     /// The files "next to Slingshot" without `config_dir`: kept for the
     /// session (pictures added, slingshot.toml), nothing is written.
     memory: RefCell<std::collections::BTreeMap<String, Vec<u8>>>,
+    /// This computer's file system (`--this-machine`): one disk instead of
+    /// the made-up ones. Read for real, written to `edited` only.
+    pub root: Option<std::path::PathBuf>,
+    /// The files changed in the file explorer, by volume and path.
+    edited: RefCell<std::collections::BTreeMap<(usize, String), Vec<u8>>>,
     /// The Install screen, in `slingshot config`.
     installer: Option<super::install::Installer>,
     /// The made-up machine's encrypted disk: unlocked yet.
@@ -159,6 +164,8 @@ impl SimBackend {
             stick_in: Default::default(),
             last_started: Default::default(),
             memory: RefCell::default(),
+            root: None,
+            edited: RefCell::default(),
         }
     }
 
@@ -245,6 +252,12 @@ impl SimBackend {
         }
     }
 
+    /// Where `edited` keeps the file: the made-up disks are FAT, case-blind;
+    /// this computer's aren't.
+    fn edit_key(&self, volume: usize, path: &str) -> (usize, String) {
+        (volume, if self.root.is_some() { path.into() } else { path.to_ascii_lowercase() })
+    }
+
     /// The encrypted disk's file system is in the file browser.
     fn disk_open(&self) -> bool {
         #[cfg(feature = "luks")]
@@ -268,7 +281,7 @@ impl SimBackend {
                 format!("Simulator: would start {path} {options}")
             }
             Target::File { volume, path } => {
-                let name = SIM_VOLUMES.get(*volume).map_or("?", |v| v.0);
+                let name = self.volumes().get(*volume).map_or_else(|| String::from("?"), |v| v.name.clone());
                 format!("Simulator: would start {path} on {name}")
             }
         }
@@ -319,14 +332,68 @@ const SIM_VOLUMES: [(&str, &str, &str, &[&str]); 3] = [
             "\\boot\\EFI\\Linux\\arch-linux.efi",
             "\\boot\\vmlinuz-linux",
             "\\etc\\",
+            "\\etc\\os-release",
             "\\home\\",
             "\\home\\me\\",
+            "\\home\\me\\notes.txt",
             "\\home\\me\\Pictures\\",
             "\\home\\me\\Pictures\\mountains.png",
             "\\usr\\",
         ],
     ),
 ];
+
+/// What the simulator's files hold: some text, pictures, and bytes for the
+/// rest (a PE header for EFI programs).
+fn sim_file(volume: usize, path: &str) -> Option<Vec<u8>> {
+    let text = |t: &str| Some(t.as_bytes().to_vec());
+    match (volume, path.to_ascii_lowercase().as_str()) {
+        (0, "\\loader\\loader.conf") => text("default arch.conf\ntimeout 3\nconsole-mode max\neditor no\n"),
+        (1, "\\readme.txt") => text("This stick starts Slingshot's simulator.\n\nIts EFI\\BOOT folder holds the program the firmware starts,\nand Pictures a photo to try as a wallpaper.\n"),
+        (1, "\\pictures\\lake.jpg") => Some(include_bytes!("../../assets/wallpapers/lake-mystery.jpg").to_vec()),
+        (2, "\\etc\\os-release") => text("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\nHOME_URL=\"https://archlinux.org/\"\n"),
+        (2, "\\home\\me\\notes.txt") => text("Things to try in Slingshot:\n- the file explorer\n- the splash screen\n"),
+        (2, "\\home\\me\\pictures\\mountains.png") => Some(include_bytes!("../../assets/os/arch.png").to_vec()),
+        (v, p) if SIM_VOLUMES.get(v)?.3.iter().any(|f| f.eq_ignore_ascii_case(p)) && !p.ends_with('\\') => {
+            let mut bytes: Vec<u8> = (0..4096u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+            if p.ends_with(".efi") {
+                bytes[..2].copy_from_slice(b"MZ");
+            }
+            Some(bytes)
+        }
+        _ => None,
+    }
+}
+
+/// Seconds since 1970 of `t`.
+fn utc_seconds(t: std::time::SystemTime) -> Option<i64> {
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64)
+}
+
+/// The UTC date and time of `secs` since 1970, without extra dependencies.
+fn utc(secs: i64) -> DateTime {
+    let days = secs.div_euclid(86400);
+    let (h, m) = (secs.rem_euclid(86400) / 3600, secs.rem_euclid(3600) / 60);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    DateTime { year: year as u16, month: month as u8, day: d as u8, hour: h as u8, minute: m as u8 }
+}
+
+/// `path` of the one disk, `root`, on this computer.
+fn root_path(root: &std::path::Path, volume: usize, path: &str) -> Result<std::path::PathBuf, String> {
+    if volume != 0 {
+        return Err(String::from("no such volume"));
+    }
+    super::machine::disk_path(root, path).ok_or_else(|| format!("{path}: outside the disk"))
+}
 
 /// The USB stick of `--hotplug`.
 fn simulated_stick() -> crate::app::FoundEntry {
@@ -403,7 +470,7 @@ impl Backend for SimBackend {
     fn power(&self) -> Power {
         match self.battery {
             Battery::Simulated => simulated_power(
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+                utc_seconds(std::time::SystemTime::now()).map_or(0, |s| s as u64),
             ),
             Battery::ThisMachine => super::machine::power(),
             Battery::None => Power::default(),
@@ -415,22 +482,8 @@ impl Backend for SimBackend {
     }
 
     fn date_time(&self) -> Option<DateTime> {
-        // UTC, without extra dependencies, shifted by what was "set".
-        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64
-            + self.clock_offset.get();
-        let days = secs.div_euclid(86400);
-        let (h, m) = (secs.rem_euclid(86400) / 3600, secs.rem_euclid(3600) / 60);
-        // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-        let z = days + 719468;
-        let era = z.div_euclid(146097);
-        let doe = z - era * 146097;
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = doy - (153 * mp + 2) / 5 + 1;
-        let month = if mp < 10 { mp + 3 } else { mp - 9 };
-        let year = yoe + era * 400 + i64::from(month <= 2);
-        Some(DateTime { year: year as u16, month: month as u8, day: d as u8, hour: h as u8, minute: m as u8 })
+        // Shifted by what was "set".
+        Some(utc(utc_seconds(std::time::SystemTime::now())? + self.clock_offset.get()))
     }
 
     fn set_date_time(&self, t: DateTime) -> Result<(), String> {
@@ -441,8 +494,7 @@ impl Backend for SimBackend {
         let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + t.day as i64 - 1;
         let days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
         let target = days * 86400 + t.hour as i64 * 3600 + t.minute as i64 * 60;
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs()
-            as i64;
+        let now = utc_seconds(std::time::SystemTime::now()).ok_or("the clock is before 1970")?;
         self.clock_offset.set(target - now);
         println!("simulator: firmware clock set to {t:?}");
         Ok(())
@@ -457,10 +509,41 @@ impl Backend for SimBackend {
     }
 
     fn read_volume_file(&self, volume: usize, path: &str) -> Result<Vec<u8>, String> {
-        match (volume, path) {
-            (1, "\\Pictures\\lake.jpg") => Ok(include_bytes!("../../assets/wallpapers/lake-mystery.jpg").to_vec()),
-            _ => Err(String::from("the simulator only has pictures in \\Pictures on MY STICK")),
+        if let Some(data) = self.edited.borrow().get(&self.edit_key(volume, path)) {
+            return Ok(data.clone());
         }
+        if let Some(root) = &self.root {
+            use std::io::Read;
+            let file = root_path(root, volume, path)?;
+            let cannot = |e: std::io::Error| format!("cannot read {}: {e}", file.display());
+            let mut f = std::fs::File::open(&file).map_err(cannot)?;
+            let meta = f.metadata().map_err(cannot)?;
+            // Not /dev/zero or a FIFO, which never end. The size is only a
+            // backstop: the Files tab asks for less (`OPEN_MAX`).
+            if !meta.is_file() || meta.len() > 256 << 20 {
+                return Err(format!("{}: not a file of at most 256 MB", file.display()));
+            }
+            let mut data = Vec::with_capacity(meta.len() as usize);
+            f.read_to_end(&mut data).map_err(cannot)?;
+            return Ok(data);
+        }
+        sim_file(volume, path).ok_or_else(|| String::from("no such file"))
+    }
+
+    fn write_volume_file(&self, volume: usize, path: &str, data: &[u8]) -> Result<(), String> {
+        let Some(name) = self.volumes().into_iter().nth(volume).filter(|v| v.writable).map(|v| v.name) else {
+            return Err(String::from("read-only"));
+        };
+        println!("Simulator: would write {} bytes to {path} on {name} (kept for this session)", data.len());
+        self.edited.borrow_mut().insert(self.edit_key(volume, path), data.to_vec());
+        Ok(())
+    }
+
+    fn volume_space(&self, volume: usize) -> Option<(u64, u64)> {
+        if let Some(root) = &self.root {
+            return super::machine::space(&root_path(root, volume, "\\").ok()?);
+        }
+        [(412 << 20, 1 << 30), (14_900 << 20, 32_000 << 20), (250_000_000_000, 400_000_000_000)].get(volume).copied()
     }
 
     fn add_picture(&self) -> Result<Option<String>, String> {
@@ -536,21 +619,31 @@ impl Backend for SimBackend {
     }
 
     fn volumes(&self) -> Vec<Volume> {
+        if let Some(root) = &self.root {
+            let detail = root.display().to_string();
+            return vec![Volume { name: "This computer".into(), detail, kind: "disk", format: "", unlock: None, writable: true }];
+        }
         let open = self.disk_open();
         let shown = if open { SIM_VOLUMES.len() } else { SIM_VOLUMES.len() - 1 };
         SIM_VOLUMES[..shown]
             .iter()
-            .map(|(name, detail, kind, _)| Volume { name: (*name).into(), detail: (*detail).into(), kind, format: "", unlock: None })
+            .enumerate()
+            // The unlocked disk is read-only, as in the firmware.
+            .map(|(i, (name, detail, kind, _))| Volume { name: (*name).into(), detail: (*detail).into(), kind, format: "", unlock: None, writable: i < 2 })
             .collect()
     }
 
     fn unreadable_volumes(&self) -> Vec<Volume> {
+        if self.root.is_some() {
+            return Vec::new();
+        }
         let mut volumes = alloc::vec![Volume {
             name: "Simulated USB SSD · partition 1".into(),
             detail: "ext4 · 1.0 TB".into(),
             kind: "usb",
             format: "ext4",
-            unlock: None
+            unlock: None,
+            writable: false,
         }];
         let open = self.disk_open();
         if !open {
@@ -560,12 +653,33 @@ impl Backend for SimBackend {
                 kind: "disk",
                 format: "LUKS",
                 unlock: cfg!(feature = "luks").then_some(0),
+                writable: false,
             });
         }
         volumes
     }
 
     fn list_dir(&self, volume: usize, path: &str) -> Result<Vec<DirEntry>, String> {
+        if let Some(root) = &self.root {
+            let dir = root_path(root, volume, path)?;
+            let entries = std::fs::read_dir(&dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+            let entry = |e: std::fs::DirEntry| {
+                // Links are followed: /bin is one to a folder.
+                let link = e.file_type().ok()?.is_symlink();
+                let meta = if link { std::fs::metadata(e.path()) } else { e.metadata() }.ok()?;
+                let name = e.file_name().to_string_lossy().into_owned();
+                let is_dir = meta.is_dir();
+                Some(DirEntry {
+                    is_dir,
+                    size: if is_dir { 0 } else { meta.len() },
+                    modified: meta.modified().ok().and_then(utc_seconds).map(utc),
+                    read_only: meta.permissions().readonly(),
+                    hidden: name.starts_with('.'),
+                    name,
+                })
+            };
+            return Ok(entries.filter_map(Result::ok).filter_map(entry).collect());
+        }
         let (_, _, _, files) = SIM_VOLUMES.get(volume).ok_or("no such volume")?;
         let dir = if path.ends_with('\\') { String::from(path) } else { format!("{path}\\") };
         let entries = files.iter().filter_map(|f| {
@@ -574,7 +688,9 @@ impl Backend for SimBackend {
                 Some(name) => (name, true),
                 None => (rest, false),
             };
-            (!name.is_empty() && !name.contains('\\')).then(|| DirEntry { name: name.into(), is_dir, size: if is_dir { 0 } else { 1_234_567 } })
+            let size = if is_dir { 0 } else { self.read_volume_file(volume, f).map_or(1_234_567, |d| d.len() as u64) };
+            let modified = Some(crate::app::DateTime { year: 2026, month: 11, day: 9, hour: 14, minute: 22 });
+            (!name.is_empty() && !name.contains('\\')).then(|| DirEntry { name: name.into(), is_dir, size, modified, ..Default::default() })
         });
         Ok(entries.collect())
     }
@@ -583,7 +699,7 @@ impl Backend for SimBackend {
         let mut options = self.options.borrow_mut();
         let mut order = self.order.borrow_mut();
         let number = (0..=u16::MAX).find(|n| !options.iter().any(|o| o.number == *n) && !order.contains(n)).ok_or("no free number")?;
-        let kind = SIM_VOLUMES.get(volume).map_or("disk", |v| v.2);
+        let kind = self.volumes().get(volume).map_or("disk", |v| v.kind);
         options.push(option(number, title, "Added in the simulator", if kind == "usb" { "usb" } else { "app" }));
         order.push(number);
         println!("Simulator: would add Boot{number:04X} \"{title}\" for {path}");
@@ -759,5 +875,43 @@ pub fn run(backend: SimBackend, options: Options) {
     if let Err(e) = crate::app::run(Rc::new(backend), hub) {
         eprintln!("cannot run the UI: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn this_machines_disks_are_read_for_real() {
+        let dir = std::env::temp_dir().join(format!("slingshot-disk-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("EFI/BOOT")).unwrap();
+        std::fs::write(dir.join("EFI/BOOT/BOOTX64.EFI"), b"MZ program").unwrap();
+        std::os::unix::fs::symlink("EFI", dir.join("link")).unwrap();
+        std::fs::write(dir.join("README"), b"upper").unwrap();
+        std::fs::write(dir.join("readme"), b"lower").unwrap();
+        let mut backend = SimBackend::new(false, None);
+        backend.root = Some(dir.clone());
+
+        assert_eq!(backend.volumes().iter().map(|v| v.name.as_str()).collect::<Vec<_>>(), ["This computer"]);
+        assert!(backend.unreadable_volumes().is_empty());
+        let mut root = backend.list_dir(0, "\\").unwrap();
+        root.sort_by(|a, b| a.name.cmp(&b.name));
+        let names: Vec<_> = root.iter().map(|e| (e.name.as_str(), e.is_dir)).collect();
+        assert_eq!(names, [("EFI", true), ("README", false), ("link", true), ("readme", false)], "a link to a folder is one");
+        let boot = backend.list_dir(0, "\\EFI\\BOOT").unwrap();
+        assert_eq!((boot[0].name.as_str(), boot[0].size), ("BOOTX64.EFI", 10));
+        assert!(boot[0].modified.is_some());
+        assert_eq!(backend.read_volume_file(0, "\\EFI\\BOOT\\BOOTX64.EFI").unwrap(), b"MZ program");
+        assert!(backend.read_volume_file(0, "\\..\\..\\etc\\passwd").is_err());
+        assert!(backend.read_volume_file(0, "\\EFI").is_err(), "a folder");
+        assert!(backend.volume_space(0).is_some_and(|(free, size)| free <= size && size > 0));
+        // Edits stay in the session: the disk isn't written.
+        backend.write_volume_file(0, "\\EFI\\BOOT\\BOOTX64.EFI", b"changed").unwrap();
+        assert_eq!(backend.read_volume_file(0, "\\EFI\\BOOT\\BOOTX64.EFI").unwrap(), b"changed");
+        assert_eq!(std::fs::read(dir.join("EFI/BOOT/BOOTX64.EFI")).unwrap(), b"MZ program");
+        backend.write_volume_file(0, "\\README", b"edited").unwrap();
+        assert_eq!(backend.read_volume_file(0, "\\readme").unwrap(), b"lower", "case-sensitive");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

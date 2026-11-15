@@ -70,6 +70,8 @@ slint = { git = "https://github.com/slint-ui/slint", rev = "b4448d86acb4329486e1
 rfd = "0.18"
 # `slingshot keymap`: the system's keyboard layout, for the firmware.
 xkbcommon = { version = "0.9", default-features = false }
+# The simulator's free space of this computer's disks (statvfs).
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [patch.crates-io]
 # acpi 7.0 on a stable compiler, and a store into a buffer keeping its length.
