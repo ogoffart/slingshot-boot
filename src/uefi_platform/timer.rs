@@ -52,6 +52,8 @@ fn timer_freq() -> u64 {
         }}
         _ => None,
     };
+    // `said` is a literal None on other architectures than x86_64.
+    #[allow(clippy::unnecessary_literal_unwrap)]
     let freq = said.unwrap_or_else(|| {
         let start = timer_tick();
         boot::stall(Duration::from_millis(10));
