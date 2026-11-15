@@ -7,6 +7,7 @@
 mod battery;
 mod bootvars;
 mod chainload;
+#[cfg(target_arch = "x86_64")]
 mod cputemp;
 mod dir;
 #[cfg(all(target_arch = "x86_64", feature = "touchpad"))]
@@ -280,6 +281,9 @@ struct UefiBackend {
     volumes: core::cell::RefCell<Vec<(uefi::Handle, Vec<u8>)>>,
     /// Read the first time the System screen asks.
     batteries: core::cell::OnceCell<battery::Batteries>,
+    /// The processor's sensor, looked for the first time ACPI has none.
+    #[cfg(target_arch = "x86_64")]
+    cpu_sensor: core::cell::OnceCell<Option<cputemp::Sensor>>,
     /// The disks there were at the last scan.
     media: core::cell::RefCell<Vec<usize>>,
     /// What `boot_data` read, for `rescan`.
@@ -494,10 +498,12 @@ impl Backend for UefiBackend {
     }
 
     fn sensors(&self) -> crate::parse::sensors::Sensors {
+        #[allow(unused_mut, reason = "only x86 adds the processor's sensor")]
         let mut sensors = self.batteries().sensors();
         // No ACPI thermal zone (desktops): the processor's own sensor.
+        #[cfg(target_arch = "x86_64")]
         if sensors.temperatures.is_empty() {
-            sensors.temperatures.extend(cputemp::package());
+            sensors.temperatures.extend(self.cpu_sensor.get_or_init(cputemp::Sensor::find).as_ref().map(cputemp::Sensor::read));
         }
         sensors
     }
@@ -884,6 +890,8 @@ pub fn main() -> Status {
         counted_entries: Default::default(),
         volumes: Default::default(),
         batteries: Default::default(),
+        #[cfg(target_arch = "x86_64")]
+        cpu_sensor: Default::default(),
         media: Default::default(),
         last: Default::default(),
         boot_once: Default::default(),
