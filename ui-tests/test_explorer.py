@@ -262,3 +262,13 @@ def test_delete_asks_and_keeps_folders_with_files(window):
     accept_dialog(window, "Delete")
     assert wait_until(lambda: labels(window, "Could not delete EFI: the folder isn't empty"))
     assert "EFI" in names(window)
+
+
+def test_a_long_text_opens_in_the_editor(window):
+    """3000 lines: taller than 32767 px, which Slint's software renderer
+    couldn't lay out (an overflow, a panic in this debug build)."""
+    open_files_tab(window)
+    open_text(window, "/EFI/tools/changelog.txt", "1. A change")
+    assert "3000. A change" in editor(window).accessible_value
+    press(window, keys.End, ctrl=True)
+    type_text(window, "#")

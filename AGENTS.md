@@ -66,7 +66,8 @@ draws. `RUSTC_BOOTSTRAP=1 cargo build-uefi-sse` builds for `targets/x86_64-unkno
 core and alloc built from source; needs `rust-src`), about twice as fast. CI and the releases build that one, and
 `scripts/run-qemu.sh --sse` runs it.
 
-Slint is pinned to a commit of the `pre-release/1.19` branch, and the `.slint` files use edition 1.19.
+Slint 1.19 comes from its `pre-release/1.19` branch until it's released (`[patch.crates-io]`; `Cargo.lock` pins the
+commit, `cargo update -p slint` moves to the branch's latest), and the `.slint` files use edition 1.19.
 
 The software renderer only has the glyphs embedded at build time (signed distance fields; `SDF_SIZE` in `build.rs`):
 the characters of string literals and of the bundled translations, and the font weights that appear as literals.

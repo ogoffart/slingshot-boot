@@ -15,7 +15,7 @@ msgstr "和"
 msgid " · {} new"
 msgstr " · 新电池 {}"
 
-#: src/app/files.rs:154
+#: src/app/files.rs:139
 msgid "\"{}\" can't be a name."
 msgstr "“{}”不能用作名称。"
 
@@ -28,7 +28,7 @@ msgid "1 other entry"
 msgstr "1 个其他启动项"
 
 #: src/firmware/luks.rs:292
-#: src/firmware/mod.rs:708
+#: src/firmware/mod.rs:707
 msgid "A passphrase check is still running. Try again in a moment."
 msgstr "仍在检查密码短语，请稍后再试。"
 
@@ -73,7 +73,7 @@ msgstr "已将“{}”添加为 Boot{}"
 msgid "Add…"
 msgstr "添加…"
 
-#: src/app/files.rs:419
+#: src/app/files.rs:404
 #: src/app/mod.rs:530
 #: src/app/mod.rs:550
 msgid "All disks"
@@ -197,13 +197,13 @@ msgstr "固件内置"
 msgid "Cancel"
 msgstr "取消"
 
-#: src/app/files.rs:465
+#: src/app/files.rs:446
 msgid "Cannot read this file: {}"
 msgstr "无法读取此文件：{}"
 
-#: src/app/files.rs:326
-#: src/app/files.rs:606
-#: src/app/files.rs:644
+#: src/app/files.rs:311
+#: src/app/files.rs:581
+#: src/app/files.rs:619
 msgid "Cannot read this folder: {}"
 msgstr "无法读取此文件夹：{}"
 
@@ -273,25 +273,25 @@ msgstr "复制"
 msgid "Could not add a boot entry: {}"
 msgstr "无法添加启动项：{}"
 
-#: src/app/files.rs:996
+#: src/app/files.rs:963
 #: src/app/mod.rs:2021
 #: src/app/mod.rs:2137
 msgid "Could not add the picture: {}"
 msgstr "无法添加图片：{}"
 
-#: src/app/files.rs:939
+#: src/app/files.rs:906
 msgid "Could not copy {}: {}"
 msgstr "无法复制 {}：{}"
 
-#: src/app/files.rs:885
+#: src/app/files.rs:860
 msgid "Could not delete {}: {}"
 msgstr "无法删除 {}：{}"
 
-#: src/app/files.rs:816
+#: src/app/files.rs:785
 msgid "Could not make {}: {}"
 msgstr "无法创建 {}：{}"
 
-#: src/app/files.rs:853
+#: src/app/files.rs:822
 msgid "Could not rename {}: {}"
 msgstr "无法重命名 {}：{}"
 
@@ -315,7 +315,7 @@ msgstr "无法保存启动顺序：{}"
 msgid "Could not save the settings: {}"
 msgstr "无法保存设置：{}"
 
-#: src/app/files.rs:772
+#: src/app/files.rs:741
 msgid "Could not save {}: {}"
 msgstr "无法保存 {}：{}"
 
@@ -386,7 +386,7 @@ msgstr "删除"
 msgid "Delete {}?"
 msgstr "删除 {}？"
 
-#: src/app/files.rs:889
+#: src/app/files.rs:864
 msgid "Deleted {}"
 msgstr "已删除 {}"
 
@@ -424,11 +424,11 @@ msgstr "耗电"
 msgid "EFI System Partition"
 msgstr "EFI 系统分区"
 
-#: src/app/files.rs:196
+#: src/app/files.rs:181
 msgid "EFI application"
 msgstr "EFI 应用程序"
 
-#: src/app/files.rs:197
+#: src/app/files.rs:182
 msgid "EFI driver"
 msgstr "EFI 驱动程序"
 
@@ -436,7 +436,7 @@ msgstr "EFI 驱动程序"
 msgid "EFI program"
 msgstr "EFI 程序"
 
-#: src/app/files.rs:198
+#: src/app/files.rs:183
 msgid "EFI runtime driver"
 msgstr "EFI 运行时驱动程序"
 
@@ -653,7 +653,7 @@ msgstr "保留"
 msgid "Keep this resolution?"
 msgstr "保留此分辨率？"
 
-#: src/app/files.rs:207
+#: src/app/files.rs:192
 msgid "Kernel"
 msgstr "内核"
 
@@ -678,7 +678,7 @@ msgstr "键盘布局"
 msgid "Keys enrolled, not enforced"
 msgstr "已注册密钥，未强制执行"
 
-#: src/app/files.rs:193
+#: src/app/files.rs:178
 msgid "Kind"
 msgstr "类型"
 
@@ -805,7 +805,7 @@ msgstr "无"
 msgid "Normal"
 msgstr "正常"
 
-#: src/app/files.rs:199
+#: src/app/files.rs:184
 msgid "Not an EFI program"
 msgstr "不是 EFI 程序"
 
@@ -813,11 +813,11 @@ msgstr "不是 EFI 程序"
 msgid "Not enough memory to check the passphrase."
 msgstr "内存不足，无法检查密码短语。"
 
-#: src/app/files.rs:791
+#: src/app/files.rs:760
 msgid "Not found"
 msgstr "未找到"
 
-#: src/app/files.rs:749
+#: src/app/files.rs:718
 #: src/app/mod.rs:2207
 msgid "Not found: {}"
 msgstr "未找到：{}"
@@ -830,7 +830,7 @@ msgstr "未安装"
 msgid "Not on every boot"
 msgstr "不在每次启动时"
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Not signed"
 msgstr "未签名"
 
@@ -905,7 +905,7 @@ msgid "Open"
 msgstr "打开"
 
 #: ui/footer.slint:57
-#: src/app/files.rs:207
+#: src/app/files.rs:192
 msgid "Options"
 msgstr "选项"
 
@@ -926,7 +926,7 @@ msgstr "密码"
 msgid "Paste"
 msgstr "粘贴"
 
-#: src/app/files.rs:943
+#: src/app/files.rs:910
 msgid "Pasted {}"
 msgstr "已粘贴 {}"
 
@@ -959,7 +959,7 @@ msgstr "指针速度"
 msgid "Press any key for the boot menu"
 msgstr "按任意键进入启动菜单"
 
-#: src/app/files.rs:191
+#: src/app/files.rs:176
 #: src/desktop/simulator.rs:485
 #: src/firmware/mod.rs:450
 msgid "Processor"
@@ -1081,7 +1081,7 @@ msgstr "已保存到 slingshot.toml"
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr "保存在 Slingshot 旁边的 slingshot.toml 中。留空的字段保持启动项原有的值。图片是同一文件夹中的 PNG 或 JPEG 文件。"
 
-#: src/app/files.rs:763
+#: src/app/files.rs:732
 msgid "Saved {}"
 msgstr "已保存 {}"
 
@@ -1182,11 +1182,11 @@ msgstr "关机"
 msgid "Shutting down…"
 msgstr "正在关机…"
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Signature"
 msgstr "签名"
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Signed (not checked here)"
 msgstr "已签名（此处未验证）"
 
@@ -1208,7 +1208,7 @@ msgstr "Slingshot（模拟器）"
 msgid "Slingshot can't read this disk's data."
 msgstr "Slingshot 无法读取此磁盘的数据。"
 
-#: src/app/files.rs:688
+#: src/app/files.rs:663
 #: src/app/mod.rs:2118
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr "Slingshot 无法读取 {} 磁盘：这台电脑没有相应的驱动。"
@@ -1338,7 +1338,7 @@ msgstr "默认启动项"
 msgid "The disk couldn't be read."
 msgstr "无法读取该磁盘。"
 
-#: src/app/files.rs:396
+#: src/app/files.rs:381
 #: src/app/mod.rs:541
 msgid "The firmware can't read any disk."
 msgstr "固件无法读取任何磁盘。"
@@ -1355,7 +1355,7 @@ msgstr "固件只会启动已签名的 Slingshot"
 msgid "The firmware's own settings"
 msgstr "固件自身的设置"
 
-#: src/app/files.rs:531
+#: src/app/files.rs:506
 msgid "The first {} of {}."
 msgstr "{1} 中的前 {0}。"
 
@@ -1379,11 +1379,11 @@ msgstr "主要启动项"
 msgid "The one set as default"
 msgstr "设为默认的"
 
-#: src/app/files.rs:993
+#: src/app/files.rs:960
 msgid "The splash picture is changed."
 msgstr "启动画面图片已更改。"
 
-#: src/app/files.rs:992
+#: src/app/files.rs:959
 msgid "The wallpaper is changed."
 msgstr "壁纸已更改。"
 
@@ -1416,7 +1416,7 @@ msgstr "此磁盘已不存在。"
 msgid "This disk is locked."
 msgstr "此磁盘已锁定。"
 
-#: src/app/files.rs:502
+#: src/app/files.rs:479
 msgid "This disk or file is read-only: changes can't be saved."
 msgstr "此磁盘或文件为只读：无法保存更改。"
 
@@ -1425,11 +1425,11 @@ msgstr "此磁盘或文件为只读：无法保存更改。"
 msgid "This disk's encryption couldn't be read."
 msgstr "无法读取此磁盘的加密信息。"
 
-#: src/app/files.rs:455
+#: src/app/files.rs:436
 msgid "This file is too large to open here."
 msgstr "此文件太大，无法在此打开。"
 
-#: src/app/files.rs:521
+#: src/app/files.rs:498
 msgid "This isn't a valid EFI program."
 msgstr "这不是有效的 EFI 程序。"
 
@@ -1437,13 +1437,9 @@ msgstr "这不是有效的 EFI 程序。"
 msgid "This machine"
 msgstr "这台电脑"
 
-#: src/app/files.rs:513
+#: src/app/files.rs:490
 msgid "This picture can't be shown."
 msgstr "无法显示此图片。"
-
-#: src/app/files.rs:529
-msgid "This text is too long to edit here: its first {} are shown."
-msgstr "此文本太长，无法在此编辑：仅显示前 {}。"
 
 #: ui/main.slint:608
 msgid "This writes BootOrder in the firmware. The original order is kept, so you can restore it from this screen."
@@ -1502,7 +1498,7 @@ msgstr "USB · 可移动"
 msgid "Under More…"
 msgstr "在“更多…”中"
 
-#: src/app/files.rs:195
+#: src/app/files.rs:180
 msgid "Unified kernel image"
 msgstr "统一内核映像"
 
@@ -1585,7 +1581,7 @@ msgstr "Windows 启动管理器"
 msgid "Wrong password."
 msgstr "密码错误。"
 
-#: src/app/files.rs:232
+#: src/app/files.rs:217
 msgid "hidden"
 msgstr "隐藏"
 
@@ -1593,9 +1589,9 @@ msgstr "隐藏"
 msgid "macOS"
 msgstr "macOS"
 
-#: src/app/files.rs:229
-#: src/app/files.rs:414
-#: src/app/files.rs:414
+#: src/app/files.rs:214
+#: src/app/files.rs:399
+#: src/app/files.rs:399
 msgid "read-only"
 msgstr "只读"
 
@@ -1624,7 +1620,7 @@ msgstr "{}%"
 msgid "{} boot"
 msgstr "{} 启动"
 
-#: src/app/files.rs:917
+#: src/app/files.rs:884
 msgid "{} copied: Paste puts it in the folder chosen."
 msgstr "已复制 {}：“粘贴”会将其放入所选文件夹。"
 
@@ -1636,7 +1632,7 @@ msgstr "{} 核"
 msgid "{} firmware {} · {} · {}"
 msgstr "{} 固件 {} · {} · {}"
 
-#: src/app/files.rs:411
+#: src/app/files.rs:396
 msgid "{} free of {}"
 msgstr "{} 可用，共 {}"
 
@@ -1648,13 +1644,13 @@ msgstr "{} 小时"
 msgid "{} h {} min"
 msgstr "{} 小时 {} 分钟"
 
-#: src/app/files.rs:810
-#: src/app/files.rs:848
-#: src/app/files.rs:933
+#: src/app/files.rs:779
+#: src/app/files.rs:817
+#: src/app/files.rs:900
 msgid "{} is already in this folder."
 msgstr "{} 已在此文件夹中。"
 
-#: src/app/files.rs:686
+#: src/app/files.rs:661
 #: src/app/mod.rs:2116
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr "{} 的加密方式 Slingshot 无法解锁。"
@@ -1679,7 +1675,7 @@ msgstr "{} 分钟"
 msgid "{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it."
 msgstr "共 {} 种模式，最高 {}。立即生效；10 秒内不保留则恢复。"
 
-#: src/app/files.rs:787
+#: src/app/files.rs:756
 #: src/app/power.rs:119
 msgid "{} of {}"
 msgstr "{} / {}"

@@ -356,6 +356,7 @@ const SIM_VOLUMES: [(&str, &str, &str, &[&str]); 3] = [
             "\\EFI\\tools\\",
             "\\EFI\\tools\\shellx64.efi",
             "\\EFI\\tools\\memtest86.efi",
+            "\\EFI\\tools\\changelog.txt",
             "\\loader\\",
             "\\loader\\loader.conf",
             "\\vmlinuz-linux",
@@ -395,6 +396,8 @@ fn sim_file(volume: usize, path: &str) -> Option<Vec<u8>> {
     let text = |t: &str| Some(t.as_bytes().to_vec());
     match (volume, path.to_ascii_lowercase().as_str()) {
         (0, "\\loader\\loader.conf") => text("default arch.conf\ntimeout 3\nconsole-mode max\neditor no\n"),
+        // Taller than 32767 px in the editor: Slint once overflowed there.
+        (0, "\\efi\\tools\\changelog.txt") => Some((1..=3000).map(|i| format!("{i}. A change\n")).collect::<String>().into_bytes()),
         (1, "\\readme.txt") => text("This stick starts Slingshot's simulator.\n\nIts EFI\\BOOT folder holds the program the firmware starts,\nand Pictures a photo to try as a wallpaper.\n"),
         (1, "\\pictures\\lake.jpg") => Some(include_bytes!("../../assets/wallpapers/lake-mystery.jpg").to_vec()),
         (2, "\\etc\\os-release") => text("NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\nHOME_URL=\"https://archlinux.org/\"\n"),

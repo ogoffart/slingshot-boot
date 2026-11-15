@@ -15,7 +15,7 @@ msgstr ""
 msgid " · {} new"
 msgstr ""
 
-#: src/app/files.rs:154
+#: src/app/files.rs:139
 msgid "\"{}\" can't be a name."
 msgstr ""
 
@@ -28,7 +28,7 @@ msgid "1 other entry"
 msgstr ""
 
 #: src/firmware/luks.rs:292
-#: src/firmware/mod.rs:708
+#: src/firmware/mod.rs:707
 msgid "A passphrase check is still running. Try again in a moment."
 msgstr ""
 
@@ -73,7 +73,7 @@ msgstr ""
 msgid "Add…"
 msgstr ""
 
-#: src/app/files.rs:419
+#: src/app/files.rs:404
 #: src/app/mod.rs:530
 #: src/app/mod.rs:550
 msgid "All disks"
@@ -197,13 +197,13 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: src/app/files.rs:465
+#: src/app/files.rs:446
 msgid "Cannot read this file: {}"
 msgstr ""
 
-#: src/app/files.rs:326
-#: src/app/files.rs:606
-#: src/app/files.rs:644
+#: src/app/files.rs:311
+#: src/app/files.rs:581
+#: src/app/files.rs:619
 msgid "Cannot read this folder: {}"
 msgstr ""
 
@@ -273,25 +273,25 @@ msgstr ""
 msgid "Could not add a boot entry: {}"
 msgstr ""
 
-#: src/app/files.rs:996
+#: src/app/files.rs:963
 #: src/app/mod.rs:2021
 #: src/app/mod.rs:2137
 msgid "Could not add the picture: {}"
 msgstr ""
 
-#: src/app/files.rs:939
+#: src/app/files.rs:906
 msgid "Could not copy {}: {}"
 msgstr ""
 
-#: src/app/files.rs:885
+#: src/app/files.rs:860
 msgid "Could not delete {}: {}"
 msgstr ""
 
-#: src/app/files.rs:816
+#: src/app/files.rs:785
 msgid "Could not make {}: {}"
 msgstr ""
 
-#: src/app/files.rs:853
+#: src/app/files.rs:822
 msgid "Could not rename {}: {}"
 msgstr ""
 
@@ -315,7 +315,7 @@ msgstr ""
 msgid "Could not save the settings: {}"
 msgstr ""
 
-#: src/app/files.rs:772
+#: src/app/files.rs:741
 msgid "Could not save {}: {}"
 msgstr ""
 
@@ -386,7 +386,7 @@ msgstr ""
 msgid "Delete {}?"
 msgstr ""
 
-#: src/app/files.rs:889
+#: src/app/files.rs:864
 msgid "Deleted {}"
 msgstr ""
 
@@ -424,11 +424,11 @@ msgstr ""
 msgid "EFI System Partition"
 msgstr ""
 
-#: src/app/files.rs:196
+#: src/app/files.rs:181
 msgid "EFI application"
 msgstr ""
 
-#: src/app/files.rs:197
+#: src/app/files.rs:182
 msgid "EFI driver"
 msgstr ""
 
@@ -436,7 +436,7 @@ msgstr ""
 msgid "EFI program"
 msgstr ""
 
-#: src/app/files.rs:198
+#: src/app/files.rs:183
 msgid "EFI runtime driver"
 msgstr ""
 
@@ -653,7 +653,7 @@ msgstr ""
 msgid "Keep this resolution?"
 msgstr ""
 
-#: src/app/files.rs:207
+#: src/app/files.rs:192
 msgid "Kernel"
 msgstr ""
 
@@ -678,7 +678,7 @@ msgstr ""
 msgid "Keys enrolled, not enforced"
 msgstr ""
 
-#: src/app/files.rs:193
+#: src/app/files.rs:178
 msgid "Kind"
 msgstr ""
 
@@ -805,7 +805,7 @@ msgstr ""
 msgid "Normal"
 msgstr ""
 
-#: src/app/files.rs:199
+#: src/app/files.rs:184
 msgid "Not an EFI program"
 msgstr ""
 
@@ -813,11 +813,11 @@ msgstr ""
 msgid "Not enough memory to check the passphrase."
 msgstr ""
 
-#: src/app/files.rs:791
+#: src/app/files.rs:760
 msgid "Not found"
 msgstr ""
 
-#: src/app/files.rs:749
+#: src/app/files.rs:718
 #: src/app/mod.rs:2207
 msgid "Not found: {}"
 msgstr ""
@@ -830,7 +830,7 @@ msgstr ""
 msgid "Not on every boot"
 msgstr ""
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Not signed"
 msgstr ""
 
@@ -905,7 +905,7 @@ msgid "Open"
 msgstr ""
 
 #: ui/footer.slint:57
-#: src/app/files.rs:207
+#: src/app/files.rs:192
 msgid "Options"
 msgstr ""
 
@@ -926,7 +926,7 @@ msgstr ""
 msgid "Paste"
 msgstr ""
 
-#: src/app/files.rs:943
+#: src/app/files.rs:910
 msgid "Pasted {}"
 msgstr ""
 
@@ -959,7 +959,7 @@ msgstr ""
 msgid "Press any key for the boot menu"
 msgstr ""
 
-#: src/app/files.rs:191
+#: src/app/files.rs:176
 #: src/desktop/simulator.rs:485
 #: src/firmware/mod.rs:450
 msgid "Processor"
@@ -1081,7 +1081,7 @@ msgstr ""
 msgid "Saved in slingshot.toml, next to Slingshot. Empty fields keep the entry's own. A picture is a PNG or JPEG file in the same folder."
 msgstr ""
 
-#: src/app/files.rs:763
+#: src/app/files.rs:732
 msgid "Saved {}"
 msgstr ""
 
@@ -1182,11 +1182,11 @@ msgstr ""
 msgid "Shutting down…"
 msgstr ""
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Signature"
 msgstr ""
 
-#: src/app/files.rs:202
+#: src/app/files.rs:187
 msgid "Signed (not checked here)"
 msgstr ""
 
@@ -1208,7 +1208,7 @@ msgstr ""
 msgid "Slingshot can't read this disk's data."
 msgstr ""
 
-#: src/app/files.rs:688
+#: src/app/files.rs:663
 #: src/app/mod.rs:2118
 msgid "Slingshot can't read {} disks: this computer has no driver for them."
 msgstr ""
@@ -1338,7 +1338,7 @@ msgstr ""
 msgid "The disk couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:396
+#: src/app/files.rs:381
 #: src/app/mod.rs:541
 msgid "The firmware can't read any disk."
 msgstr ""
@@ -1355,7 +1355,7 @@ msgstr ""
 msgid "The firmware's own settings"
 msgstr ""
 
-#: src/app/files.rs:531
+#: src/app/files.rs:506
 msgid "The first {} of {}."
 msgstr ""
 
@@ -1379,11 +1379,11 @@ msgstr ""
 msgid "The one set as default"
 msgstr ""
 
-#: src/app/files.rs:993
+#: src/app/files.rs:960
 msgid "The splash picture is changed."
 msgstr ""
 
-#: src/app/files.rs:992
+#: src/app/files.rs:959
 msgid "The wallpaper is changed."
 msgstr ""
 
@@ -1416,7 +1416,7 @@ msgstr ""
 msgid "This disk is locked."
 msgstr ""
 
-#: src/app/files.rs:502
+#: src/app/files.rs:479
 msgid "This disk or file is read-only: changes can't be saved."
 msgstr ""
 
@@ -1425,11 +1425,11 @@ msgstr ""
 msgid "This disk's encryption couldn't be read."
 msgstr ""
 
-#: src/app/files.rs:455
+#: src/app/files.rs:436
 msgid "This file is too large to open here."
 msgstr ""
 
-#: src/app/files.rs:521
+#: src/app/files.rs:498
 msgid "This isn't a valid EFI program."
 msgstr ""
 
@@ -1437,12 +1437,8 @@ msgstr ""
 msgid "This machine"
 msgstr ""
 
-#: src/app/files.rs:513
+#: src/app/files.rs:490
 msgid "This picture can't be shown."
-msgstr ""
-
-#: src/app/files.rs:529
-msgid "This text is too long to edit here: its first {} are shown."
 msgstr ""
 
 #: ui/main.slint:608
@@ -1502,7 +1498,7 @@ msgstr ""
 msgid "Under More…"
 msgstr ""
 
-#: src/app/files.rs:195
+#: src/app/files.rs:180
 msgid "Unified kernel image"
 msgstr ""
 
@@ -1585,7 +1581,7 @@ msgstr ""
 msgid "Wrong password."
 msgstr ""
 
-#: src/app/files.rs:232
+#: src/app/files.rs:217
 msgid "hidden"
 msgstr ""
 
@@ -1593,9 +1589,9 @@ msgstr ""
 msgid "macOS"
 msgstr ""
 
-#: src/app/files.rs:229
-#: src/app/files.rs:414
-#: src/app/files.rs:414
+#: src/app/files.rs:214
+#: src/app/files.rs:399
+#: src/app/files.rs:399
 msgid "read-only"
 msgstr ""
 
@@ -1624,7 +1620,7 @@ msgstr ""
 msgid "{} boot"
 msgstr ""
 
-#: src/app/files.rs:917
+#: src/app/files.rs:884
 msgid "{} copied: Paste puts it in the folder chosen."
 msgstr ""
 
@@ -1636,7 +1632,7 @@ msgstr ""
 msgid "{} firmware {} · {} · {}"
 msgstr ""
 
-#: src/app/files.rs:411
+#: src/app/files.rs:396
 msgid "{} free of {}"
 msgstr ""
 
@@ -1648,13 +1644,13 @@ msgstr ""
 msgid "{} h {} min"
 msgstr ""
 
-#: src/app/files.rs:810
-#: src/app/files.rs:848
-#: src/app/files.rs:933
+#: src/app/files.rs:779
+#: src/app/files.rs:817
+#: src/app/files.rs:900
 msgid "{} is already in this folder."
 msgstr ""
 
-#: src/app/files.rs:686
+#: src/app/files.rs:661
 #: src/app/mod.rs:2116
 msgid "{} is encrypted in a way Slingshot can't unlock."
 msgstr ""
@@ -1679,7 +1675,7 @@ msgstr ""
 msgid "{} modes available, up to {}. Applied right away; reverts after 10 s unless you keep it."
 msgstr ""
 
-#: src/app/files.rs:787
+#: src/app/files.rs:756
 #: src/app/power.rs:119
 msgid "{} of {}"
 msgstr ""
