@@ -6,9 +6,13 @@
 //! and movement, or a touch pad's fingers. Precision touchpads should start
 //! in mouse mode (relative movement in a mouse collection) until the OS
 //! switches them to report fingers, but some firmware leaves them reporting
-//! fingers (the Framework 13's): both are read.
+//! fingers (the Framework 13's): both are read. The report descriptors are
+//! parsed by `hidparser`.
 
 #![cfg_attr(not(all(target_os = "uefi", target_arch = "x86_64", feature = "touchpad")), allow(dead_code))] // the firmware's, with `touchpad`
+
+use alloc::vec::Vec;
+use hidparser::{ReportField, VariableField};
 
 /// The HID over I2C descriptor's registers (HID over I2C 1.0, section 5.1).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -69,127 +73,66 @@ pub struct MouseReport {
     pub right: bool,
 }
 
-const GENERIC_DESKTOP: u32 = 0x01;
-const BUTTON: u32 = 0x09;
-const MOUSE: u32 = 0x02;
-const POINTER: u32 = 0x01;
-const X: u32 = 0x30;
-const Y: u32 = 0x31;
+// Usages: their page in the high 16 bits, as hidparser gives them.
+const GENERIC_DESKTOP: u32 = 0x01 << 16;
+const POINTER: u32 = GENERIC_DESKTOP | 0x01;
+const MOUSE: u32 = GENERIC_DESKTOP | 0x02;
+const X: u32 = GENERIC_DESKTOP | 0x30;
+const Y: u32 = GENERIC_DESKTOP | 0x31;
+const BUTTON: u32 = 0x09 << 16;
+const DIGITIZER: u32 = 0x0d << 16;
+const TOUCH_PAD: u32 = DIGITIZER | 0x05;
+const FINGER: u32 = DIGITIZER | 0x22;
+const TIP_SWITCH: u32 = DIGITIZER | 0x42;
+const CONTACT_ID: u32 = DIGITIZER | 0x51;
+const CONTACT_COUNT: u32 = DIGITIZER | 0x54;
 
-/// Finds the mouse in a report descriptor: the first application collection
-/// for a mouse (or pointer) with relative X and Y.
+/// The input reports' data fields (not constant), with their report id,
+/// from a report descriptor.
+fn inputs(descriptor: &[u8]) -> impl Iterator<Item = (Option<u8>, Vec<VariableField>)> {
+    hidparser::parse_report_descriptor(descriptor)
+        .ok()
+        .into_iter()
+        .flat_map(|d| d.input_reports)
+        .map(|r| {
+            let fields = r
+                .fields
+                .into_iter()
+                .filter_map(|f| match f {
+                    ReportField::Variable(v) if !v.attributes.constant => Some(v),
+                    _ => None,
+                })
+                .collect();
+            (r.report_id.map(|id| u32::from(id) as u8), fields)
+        })
+}
+
+/// Where a field is in its report, and whether its values are signed
+/// (a negative logical minimum).
+fn field(f: &VariableField) -> Field {
+    Field { offset: f.bits.start as usize, size: f.bits.len(), signed: i32::from(f.logical_minimum) < 0 }
+}
+
+/// The usage of the field's application collection (its outermost).
+fn application(f: &VariableField) -> u32 {
+    f.member_of.first().map_or(0, |c| u32::from(c.usage))
+}
+
+/// Finds the mouse in a report descriptor: the first report with a mouse (or
+/// pointer) application collection with relative X and Y.
 pub fn mouse_layout(descriptor: &[u8]) -> Option<MouseLayout> {
-    let mut usage_page = 0u32;
-    let mut report_size = 0usize;
-    let mut report_count = 0usize;
-    let mut logical_min = 0i64;
-    let mut report_id: Option<u8> = None;
-    let mut usages: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
-    let mut usage_min: Option<u32> = None;
-    // Bit offsets so far, per report id.
-    let mut offsets: alloc::collections::BTreeMap<Option<u8>, usize> = Default::default();
-    let mut depth = 0usize;
-    // The depth of the mouse's application collection, while in it.
-    let mut in_mouse: Option<usize> = None;
-    let mut layout: Option<MouseLayout> = None;
-
-    let mut i = 0;
-    while i < descriptor.len() {
-        let prefix = descriptor[i];
-        if prefix == 0xfe {
-            // A long item: skip it.
-            let size = *descriptor.get(i + 1)? as usize;
-            i += 3 + size;
-            continue;
-        }
-        let size = [0, 1, 2, 4][(prefix & 3) as usize];
-        let data = descriptor.get(i + 1..i + 1 + size)?;
-        i += 1 + size;
-        let value = data.iter().rev().fold(0u32, |v, b| (v << 8) | *b as u32);
-        let signed = match size {
-            1 => value as u8 as i8 as i64,
-            2 => value as u16 as i16 as i64,
-            _ => value as i32 as i64,
-        };
-        let full_usage = |u: u32| if size == 4 { u } else { (usage_page << 16) | u };
-        match (prefix >> 2) & 3 {
-            // Main items.
-            0 => {
-                match prefix >> 4 {
-                    // Collection.
-                    0xa => {
-                        depth += 1;
-                        let usage = usages.first().copied().unwrap_or(0);
-                        if value == 1 && in_mouse.is_none() && layout.is_none_or(|l| l.x.is_none())
-                            && (usage == (GENERIC_DESKTOP << 16 | MOUSE) || usage == (GENERIC_DESKTOP << 16 | POINTER))
-                        {
-                            in_mouse = Some(depth);
-                        }
-                    }
-                    // End collection.
-                    0xc => {
-                        if in_mouse == Some(depth) {
-                            in_mouse = None;
-                        }
-                        depth = depth.saturating_sub(1);
-                    }
-                    // Input.
-                    0x8 => {
-                        let offset = offsets.entry(report_id).or_insert(0);
-                        let start = *offset;
-                        // Reports are at most a few hundred bytes: a
-                        // descriptor saying more is broken.
-                        if report_size > 32 || report_count > 1024 {
-                            return None;
-                        }
-                        *offset = offset.saturating_add(report_size * report_count);
-                        let constant = value & 1 != 0;
-                        let relative = value & 4 != 0;
-                        if in_mouse.is_some() && !constant {
-                            let l = layout.get_or_insert(MouseLayout { report_id, ..Default::default() });
-                            if l.report_id == report_id {
-                                let field = |n: usize| Field { offset: start + n * report_size, size: report_size, signed: logical_min < 0 };
-                                for n in 0..report_count {
-                                    let usage = match (usages.get(n).or(usages.last()), usage_min) {
-                                        (Some(u), _) => *u,
-                                        (None, Some(min)) => min + n as u32,
-                                        (None, None) => 0,
-                                    };
-                                    if usage >> 16 == BUTTON && l.buttons.is_none() {
-                                        l.buttons = Some(start + n * report_size);
-                                    } else if usage == (GENERIC_DESKTOP << 16 | X) && relative {
-                                        l.x = Some(field(n));
-                                    } else if usage == (GENERIC_DESKTOP << 16 | Y) && relative {
-                                        l.y = Some(field(n));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                usages.clear();
-                usage_min = None;
+    inputs(descriptor).find_map(|(report_id, fields)| {
+        let mut l = MouseLayout { report_id, ..Default::default() };
+        for f in fields.iter().filter(|f| matches!(application(f), MOUSE | POINTER)) {
+            match u32::from(f.usage) {
+                u if u & 0xffff_0000 == BUTTON && l.buttons.is_none() => l.buttons = Some(f.bits.start as usize),
+                X if f.attributes.relative => l.x = Some(field(f)),
+                Y if f.attributes.relative => l.y = Some(field(f)),
+                _ => {}
             }
-            // Global items.
-            1 => match prefix >> 4 {
-                0x0 => usage_page = value,
-                0x1 => logical_min = signed,
-                0x7 => report_size = value as usize,
-                0x8 => report_id = Some(value as u8),
-                0x9 => report_count = value as usize,
-                _ => {}
-            },
-            // Local items.
-            2 => match prefix >> 4 {
-                0x0 => usages.push(full_usage(value)),
-                0x1 => usage_min = Some(full_usage(value)),
-                _ => {}
-            },
-            _ => {}
         }
-    }
-    layout.filter(|l| l.x.is_some() && l.y.is_some())
+        (l.x.is_some() && l.y.is_some()).then_some(l)
+    })
 }
 
 fn bits(data: &[u8], field: Field) -> Option<i32> {
@@ -203,13 +146,6 @@ fn bits(data: &[u8], field: Field) -> Option<i32> {
     }
     Some(if field.signed && v >> (field.size - 1) & 1 != 0 { (v as i64 - (1i64 << field.size)) as i32 } else { v as i32 })
 }
-
-const DIGITIZER: u32 = 0x0d;
-const TOUCH_PAD: u32 = 0x05;
-const FINGER: u32 = 0x22;
-const TIP_SWITCH: u32 = 0x42;
-const CONTACT_ID: u32 = 0x51;
-const CONTACT_COUNT: u32 = 0x54;
 
 /// Where a touch pad's input report (Digitizer, Touch Pad) puts its first
 /// finger, its button and how many fingers touch.
@@ -238,118 +174,30 @@ pub struct Touch {
 }
 
 /// Finds a touch pad in a report descriptor: the first finger of its input
-/// report, with absolute X and Y.
+/// report, with absolute X and Y. The first finger's fields come first.
 pub fn touchpad_layout(descriptor: &[u8]) -> Option<TouchLayout> {
-    let mut usage_page = 0u32;
-    let mut report_size = 0usize;
-    let mut report_count = 0usize;
-    let mut logical_min = 0i64;
-    let mut report_id: Option<u8> = None;
-    let mut usages: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
-    let mut usage_min: Option<u32> = None;
-    let mut offsets: alloc::collections::BTreeMap<Option<u8>, usize> = Default::default();
-    let mut depth = 0usize;
-    // The depth of the touch pad's application collection, while in it.
-    let mut in_pad: Option<usize> = None;
-    // Fingers met so far, and the depth of the first one's collection.
-    let mut fingers = 0;
-    let mut in_finger: Option<usize> = None;
-    let mut layout: Option<TouchLayout> = None;
-
-    let mut i = 0;
-    while i < descriptor.len() {
-        let prefix = descriptor[i];
-        if prefix == 0xfe {
-            let size = *descriptor.get(i + 1)? as usize;
-            i += 3 + size;
-            continue;
-        }
-        let size = [0, 1, 2, 4][(prefix & 3) as usize];
-        let data = descriptor.get(i + 1..i + 1 + size)?;
-        i += 1 + size;
-        let value = data.iter().rev().fold(0u32, |v, b| (v << 8) | *b as u32);
-        let signed = match size {
-            1 => value as u8 as i8 as i64,
-            2 => value as u16 as i16 as i64,
-            _ => value as i32 as i64,
-        };
-        let full_usage = |u: u32| if size == 4 { u } else { (usage_page << 16) | u };
-        match (prefix >> 2) & 3 {
-            0 => {
-                match prefix >> 4 {
-                    0xa => {
-                        depth += 1;
-                        let usage = usages.first().copied().unwrap_or(0);
-                        if value == 1 && in_pad.is_none() && layout.is_none() && usage == (DIGITIZER << 16 | TOUCH_PAD) {
-                            in_pad = Some(depth);
-                        } else if in_pad.is_some() && usage == (DIGITIZER << 16 | FINGER) {
-                            fingers += 1;
-                            if fingers == 1 {
-                                in_finger = Some(depth);
-                            }
-                        }
-                    }
-                    0xc => {
-                        if in_finger == Some(depth) {
-                            in_finger = None;
-                        }
-                        if in_pad == Some(depth) {
-                            in_pad = None;
-                        }
-                        depth = depth.saturating_sub(1);
-                    }
-                    // Input.
-                    0x8 => {
-                        let offset = offsets.entry(report_id).or_insert(0);
-                        let start = *offset;
-                        *offset += report_size * report_count;
-                        let constant = value & 1 != 0;
-                        let relative = value & 4 != 0;
-                        if in_pad.is_some() && !constant {
-                            let l = layout.get_or_insert(TouchLayout { report_id, ..Default::default() });
-                            if l.report_id == report_id {
-                                let field = |n: usize| Field { offset: start + n * report_size, size: report_size, signed: logical_min < 0 };
-                                for n in 0..report_count {
-                                    let usage = match (usages.get(n).or(usages.last()), usage_min) {
-                                        (Some(u), _) => *u,
-                                        (None, Some(min)) => min + n as u32,
-                                        (None, None) => 0,
-                                    };
-                                    match usage {
-                                        u if in_finger.is_some() && u == (DIGITIZER << 16 | TIP_SWITCH) => l.tip = Some(field(n)),
-                                        u if in_finger.is_some() && u == (DIGITIZER << 16 | CONTACT_ID) => l.contact = Some(field(n)),
-                                        u if in_finger.is_some() && !relative && u == (GENERIC_DESKTOP << 16 | X) => l.x = Some(field(n)),
-                                        u if in_finger.is_some() && !relative && u == (GENERIC_DESKTOP << 16 | Y) => l.y = Some(field(n)),
-                                        u if u == (BUTTON << 16 | 1) && l.button.is_none() => l.button = Some(start + n * report_size),
-                                        u if u == (DIGITIZER << 16 | CONTACT_COUNT) => l.count = Some(field(n)),
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
+    inputs(descriptor).find_map(|(report_id, fields)| {
+        let mut l = TouchLayout { report_id, ..Default::default() };
+        for f in fields.iter().filter(|f| application(f) == TOUCH_PAD) {
+            let finger = f.member_of.iter().any(|c| u32::from(c.usage) == FINGER);
+            let position = finger && !f.attributes.relative;
+            let first = |slot: &mut Option<Field>| {
+                if slot.is_none() {
+                    *slot = Some(field(f));
                 }
-                usages.clear();
-                usage_min = None;
+            };
+            match u32::from(f.usage) {
+                TIP_SWITCH if finger => first(&mut l.tip),
+                CONTACT_ID if finger => first(&mut l.contact),
+                X if position => first(&mut l.x),
+                Y if position => first(&mut l.y),
+                u if u == BUTTON | 1 && l.button.is_none() => l.button = Some(f.bits.start as usize),
+                CONTACT_COUNT => l.count = Some(field(f)),
+                _ => {}
             }
-            1 => match prefix >> 4 {
-                0x0 => usage_page = value,
-                0x1 => logical_min = signed,
-                0x7 => report_size = value as usize,
-                0x8 => report_id = Some(value as u8),
-                0x9 => report_count = value as usize,
-                _ => {}
-            },
-            2 => match prefix >> 4 {
-                0x0 => usages.push(full_usage(value)),
-                0x1 => usage_min = Some(full_usage(value)),
-                _ => {}
-            },
-            _ => {}
         }
-    }
-    layout.filter(|l| l.tip.is_some() && l.x.is_some() && l.y.is_some())
+        (l.tip.is_some() && l.x.is_some() && l.y.is_some()).then_some(l)
+    })
 }
 
 /// The first finger of a touch pad report (with its report id first, when
@@ -417,7 +265,7 @@ mod tests {
         "43 09 06 15 00 26 ff 00 75 08 95 03 b1 02 c0",
     );
 
-    fn hex(s: &str) -> alloc::vec::Vec<u8> {
+    fn hex(s: &str) -> Vec<u8> {
         s.split_whitespace().map(|b| u8::from_str_radix(b, 16).unwrap()).collect()
     }
 

@@ -54,6 +54,8 @@ sha2 = { version = "0.11", default-features = false }
 toml = { version = "1", default-features = false, features = ["parse", "serde", "display"] }
 # The Files screen's details of an EFI program (PE sections, the signature).
 object = { version = "0.41", default-features = false, features = ["read_core", "pe"] }
+# The touchpads' HID report descriptors (no_std, made for UEFI firmware).
+hidparser = "1.0.4"
 
 [target.'cfg(target_os = "uefi")'.dependencies]
 slint = { version = "1.19", default-features = false, features = ["log", "unsafe-single-threaded"] }
