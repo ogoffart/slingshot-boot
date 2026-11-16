@@ -68,6 +68,23 @@ pub struct Display {
     pub width: usize,
     pub height: usize,
     pub fb: Vec<Pixel>,
+    /// The screen's memory, when frames are copied there, not through the
+    /// firmware's Blt (which took 55 ms a frame on a Framework 13 AMD).
+    screen: Option<Screen>,
+}
+
+/// The screen's memory, write-combining.
+struct Screen {
+    pixels: &'static mut [Pixel],
+    /// Pixels per line.
+    stride: usize,
+}
+
+impl Screen {
+    /// `w` pixels of line `y`, from `x`.
+    fn row(&mut self, x: usize, y: usize, w: usize) -> &mut [Pixel] {
+        &mut self.pixels[y * self.stride + x..][..w]
+    }
 }
 
 impl Display {
@@ -77,19 +94,42 @@ impl Display {
         let gop = open_shared::<GraphicsOutput>(handle)
             .ok_or_else(|| slint::PlatformError::Other("Cannot open GOP".into()))?;
         let (width, height) = gop.current_mode_info().resolution();
-        let mut display = Display { gop, width, height, fb: vec![Pixel(BltPixel::new(0, 0, 0)); width * height] };
-        display.write_combining();
+        let mut display = Display { gop, width, height, fb: vec![Pixel(BltPixel::new(0, 0, 0)); width * height], screen: None };
+        display.map_screen();
         Ok(display)
     }
 
-    /// Makes the current mode's framebuffer write-combining (x86), when
-    /// the firmware gives its address.
-    fn write_combining(&mut self) {
+    /// Maps the current mode's screen memory, for the frames.
+    fn map_screen(&mut self) {
+        self.screen = self.screen_memory();
+        log::info!("display: copied {}", if self.screen.is_some() { "to the screen's memory" } else { "with Blt" });
+    }
+
+    /// Makes the screen's memory write-combining (x86), when the firmware
+    /// gives its address, and returns it when its pixels are a BltPixel's
+    /// (blue, green, red, reserved).
+    fn screen_memory(&mut self) -> Option<Screen> {
         #[cfg(target_arch = "x86_64")]
-        if self.gop.current_mode_info().pixel_format() != uefi::proto::console::gop::PixelFormat::BltOnly {
+        {
+            use uefi::proto::console::gop::PixelFormat;
+            let info = self.gop.current_mode_info();
+            if info.pixel_format() == PixelFormat::BltOnly {
+                return None;
+            }
             let mut fb = self.gop.frame_buffer();
-            super::write_combining::enable(fb.as_mut_ptr() as u64, fb.size() as u64);
+            let (base, size) = (fb.as_mut_ptr(), fb.size());
+            // Faster for Blt too, when the pixels are another order.
+            if !super::write_combining::enable(base as u64, size as u64) || info.pixel_format() != PixelFormat::Bgr {
+                return None;
+            }
+            // SAFETY: The mode's frame buffer, `size` bytes the firmware
+            // maps for us (identity mapped), of pixels laid out as Pixel's.
+            // Only Display writes to it, until the next mode replaces it.
+            let pixels = unsafe { core::slice::from_raw_parts_mut(base.cast::<Pixel>(), size / size_of::<Pixel>()) };
+            Some(Screen { pixels, stride: info.stride() })
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        None
     }
 
     /// The modes, without duplicates, smallest first.
@@ -110,6 +150,13 @@ impl Display {
         if w == 0 || h == 0 {
             return;
         }
+        if let Some(screen) = &mut self.screen {
+            for row in y..y + h {
+                let line = &self.fb[row * self.width + x..][..w];
+                screen.row(x, row, w).copy_from_slice(line);
+            }
+            return;
+        }
         // SAFETY: Pixel is a repr(transparent) BltPixel.
         let buffer = unsafe { core::slice::from_raw_parts(self.fb.as_ptr() as *const BltPixel, self.fb.len()) };
         let _ = self.gop.blt(BltOp::BufferToVideo {
@@ -128,7 +175,7 @@ impl Display {
         self.width = w;
         self.height = h;
         self.fb = vec![Pixel(BltPixel::new(0, 0, 0)); w * h];
-        self.write_combining();
+        self.map_screen();
         true
     }
 
@@ -141,11 +188,14 @@ impl Display {
     /// Puts back the mode and the picture after another program drew on
     /// the screen.
     pub fn restore(&mut self, modes: &[DisplayMode]) {
-        if self.mode_lost()
-            && let Some(mode) = modes.iter().find(|m| m.width == self.width && m.height == self.height)
-            && self.gop.set_mode(&mode.mode).is_ok()
-        {
-            self.write_combining();
+        if self.mode_lost() {
+            // Another mode's memory: not written to until ours is back.
+            self.screen = None;
+            if let Some(mode) = modes.iter().find(|m| m.width == self.width && m.height == self.height)
+                && self.gop.set_mode(&mode.mode).is_ok()
+            {
+                self.map_screen();
+            }
         }
         self.blit_from_fb(0, 0, self.width, self.height);
     }
@@ -163,14 +213,18 @@ impl Display {
             let (x, y) = (cursor.x as usize, cursor.y as usize);
             let w = cw.min(self.width - x);
             let h = ch.min(self.height - y);
-            let mut buf: Vec<BltPixel> = Vec::with_capacity(w * h);
-            for row in 0..h {
-                for col in 0..w {
-                    let px = self.fb[(y + row) * self.width + x + col].0;
-                    buf.push(cursor::blend(px, col, row, cursor_scale));
+            let pixel = |row: usize, col: usize| cursor::blend(self.fb[(y + row) * self.width + x + col].0, col, row, cursor_scale);
+            if let Some(screen) = &mut self.screen {
+                for row in 0..h {
+                    for (col, out) in screen.row(x, y + row, w).iter_mut().enumerate() {
+                        *out = Pixel(pixel(row, col));
+                    }
                 }
+            } else {
+                let mut buf: Vec<BltPixel> = Vec::with_capacity(w * h);
+                buf.extend((0..h).flat_map(|row| (0..w).map(move |col| pixel(row, col))));
+                let _ = self.gop.blt(BltOp::BufferToVideo { buffer: &buf, src: BltRegion::Full, dest: (x, y), dims: (w, h) });
             }
-            let _ = self.gop.blt(BltOp::BufferToVideo { buffer: &buf, src: BltRegion::Full, dest: (x, y), dims: (w, h) });
             cursor.drawn_at = Some((x, y));
         }
     }

@@ -42,17 +42,18 @@ const CR4_PGE: u64 = 1 << 7;
 const CR4_LA57: u64 = 1 << 12;
 
 /// Makes `size` bytes at `base` write-combining, and logs how it went.
-pub fn enable(base: u64, size: u64) {
+/// Returns whether it is.
+pub fn enable(base: u64, size: u64) -> bool {
     if __cpuid(1).edx & (1 << 16) == 0 {
         log::info!("display: no PAT, the screen's memory stays uncached");
-        return;
+        return false;
     }
     // Already changed for a previous mode, or the default.
     // SAFETY: The PAT, which every processor with a PAT has.
     let pat = unsafe { rdmsr(IA32_PAT) };
     if pat != DEFAULT_PAT && pat != COMBINING_PAT {
         log::info!("display: PAT {pat:#x} isn't the default, the screen's memory stays as it is");
-        return;
+        return false;
     }
     let start = base & !0xfff;
     let end = (base + size).next_multiple_of(0x1000);
@@ -61,7 +62,7 @@ pub fn enable(base: u64, size: u64) {
     let mut splits = 0;
     if let Err(e) = walk(read_cr3() & ADDRESS, levels, 0, start..end, &mut leaves, &mut splits) {
         log::info!("display: the screen's memory stays uncached: {e}");
-        return;
+        return false;
     }
     writable_page_tables(|| {
         wrmsr(IA32_PAT, COMBINING_PAT);
@@ -77,6 +78,7 @@ pub fn enable(base: u64, size: u64) {
         end - start,
         leaves.len()
     );
+    true
 }
 
 /// The memory an entry maps at `level`: 4 KiB at 1, 2 MiB at 2, 1 GiB at 3…
