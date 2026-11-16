@@ -84,8 +84,8 @@ const DIGITIZER: u32 = 0x0d << 16;
 const TOUCH_PAD: u32 = DIGITIZER | 0x05;
 const FINGER: u32 = DIGITIZER | 0x22;
 const TIP_SWITCH: u32 = DIGITIZER | 0x42;
+const CONFIDENCE: u32 = DIGITIZER | 0x47;
 const CONTACT_ID: u32 = DIGITIZER | 0x51;
-const CONTACT_COUNT: u32 = DIGITIZER | 0x54;
 
 /// The input reports' data fields (not constant), with their report id,
 /// from a report descriptor.
@@ -147,75 +147,116 @@ fn bits(data: &[u8], field: Field) -> Option<i32> {
     Some(if field.signed && v >> (field.size - 1) & 1 != 0 { (v as i64 - (1i64 << field.size)) as i32 } else { v as i32 })
 }
 
-/// Where a touch pad's input report (Digitizer, Touch Pad) puts its first
-/// finger, its button and how many fingers touch.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// Where a touch pad's input report (Digitizer, Touch Pad) puts its
+/// fingers and its button.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TouchLayout {
     pub report_id: Option<u8>,
+    pub fingers: Vec<FingerLayout>,
+    /// The button's bit (a clickpad's press).
+    pub button: Option<usize>,
+    /// The largest X and Y a finger can be at.
+    pub size: (i32, i32),
+}
+
+/// One finger's fields in a touch pad report.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FingerLayout {
+    /// Not a palm (precision touchpads say).
+    pub confidence: Option<Field>,
     pub tip: Option<Field>,
     pub contact: Option<Field>,
     pub x: Option<Field>,
     pub y: Option<Field>,
-    /// The button's bit (a clickpad's press).
-    pub button: Option<usize>,
-    pub count: Option<Field>,
 }
 
-/// The first finger of a touch pad report.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A touch pad report: the fingers on it (not the palms), and the button.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Touch {
-    pub touching: bool,
+    pub fingers: Vec<Finger>,
+    pub button: bool,
+    /// A palm touches it too.
+    pub palm: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Finger {
     /// Which finger it is: the same while it stays down.
     pub contact: i32,
     pub x: i32,
     pub y: i32,
-    pub fingers: i32,
-    pub button: bool,
 }
 
-/// Finds a touch pad in a report descriptor: the first finger of its input
-/// report, with absolute X and Y. The first finger's fields come first.
-pub fn touchpad_layout(descriptor: &[u8]) -> Option<TouchLayout> {
-    inputs(descriptor).find_map(|(report_id, fields)| {
-        let mut l = TouchLayout { report_id, ..Default::default() };
-        for f in fields.iter().filter(|f| application(f) == TOUCH_PAD) {
-            let finger = f.member_of.iter().any(|c| u32::from(c.usage) == FINGER);
-            let position = finger && !f.attributes.relative;
-            let first = |slot: &mut Option<Field>| {
-                if slot.is_none() {
-                    *slot = Some(field(f));
-                }
-            };
-            match u32::from(f.usage) {
-                TIP_SWITCH if finger => first(&mut l.tip),
-                CONTACT_ID if finger => first(&mut l.contact),
-                X if position => first(&mut l.x),
-                Y if position => first(&mut l.y),
-                u if u == BUTTON | 1 && l.button.is_none() => l.button = Some(f.bits.start as usize),
-                CONTACT_COUNT => l.count = Some(field(f)),
-                _ => {}
-            }
-        }
-        (l.tip.is_some() && l.x.is_some() && l.y.is_some()).then_some(l)
+/// A finger's field for `usage`, if it's one a finger has (X and Y:
+/// absolute).
+fn finger_field(finger: &mut FingerLayout, usage: u32, relative: bool) -> Option<&mut Option<Field>> {
+    Some(match usage {
+        CONFIDENCE => &mut finger.confidence,
+        TIP_SWITCH => &mut finger.tip,
+        CONTACT_ID => &mut finger.contact,
+        X if !relative => &mut finger.x,
+        Y if !relative => &mut finger.y,
+        _ => return None,
     })
 }
 
-/// The first finger of a touch pad report (with its report id first, when
-/// the device uses them); `None` for another report.
+/// Finds a touch pad in a report descriptor: its input report's fingers,
+/// with absolute X and Y. Each finger has the same fields: one the finger
+/// has already starts the next.
+pub fn touchpad_layout(descriptor: &[u8]) -> Option<TouchLayout> {
+    inputs(descriptor).find_map(|(report_id, fields)| {
+        let mut l = TouchLayout { report_id, ..Default::default() };
+        let mut finger = FingerLayout::default();
+        for f in fields.iter().filter(|f| application(f) == TOUCH_PAD) {
+            let usage = u32::from(f.usage);
+            if usage == BUTTON | 1 {
+                l.button.get_or_insert(f.bits.start as usize);
+                continue;
+            }
+            if !f.member_of.iter().any(|c| u32::from(c.usage) == FINGER) {
+                continue;
+            }
+            let relative = f.attributes.relative;
+            match finger_field(&mut finger, usage, relative) {
+                None => continue,
+                Some(Some(_)) => l.fingers.push(core::mem::take(&mut finger)),
+                Some(None) => {}
+            }
+            *finger_field(&mut finger, usage, relative).unwrap() = Some(field(f));
+            match usage {
+                X => l.size.0 = l.size.0.max(i32::from(f.logical_maximum)),
+                Y => l.size.1 = l.size.1.max(i32::from(f.logical_maximum)),
+                _ => {}
+            }
+        }
+        l.fingers.push(finger);
+        l.fingers.retain(|f| f.tip.is_some() && f.x.is_some() && f.y.is_some());
+        (!l.fingers.is_empty()).then_some(l)
+    })
+}
+
+/// A touch pad report (with its report id first, when the device uses
+/// them); `None` for another report.
 pub fn parse_touch_report(layout: &TouchLayout, report: &[u8]) -> Option<Touch> {
     let data = match layout.report_id {
         Some(id) => report.strip_prefix(&[id])?,
         None => report,
     };
     let get = |f: Option<Field>| f.and_then(|f| bits(data, f));
-    Some(Touch {
-        touching: get(layout.tip)? != 0,
-        contact: get(layout.contact).unwrap_or(0),
-        x: get(layout.x)?,
-        y: get(layout.y)?,
-        fingers: get(layout.count).unwrap_or(1),
-        button: layout.button.and_then(|b| bits(data, Field { offset: b, size: 1, signed: false })) == Some(1),
-    })
+    let mut fingers = Vec::new();
+    let mut palm = false;
+    for f in &layout.fingers {
+        if get(f.tip)? == 0 {
+            continue;
+        }
+        if get(f.confidence).unwrap_or(1) == 0 {
+            palm = true;
+        } else {
+            fingers.push(Finger { contact: get(f.contact).unwrap_or(0), x: get(f.x)?, y: get(f.y)? });
+        }
+    }
+    let button = layout.button.and_then(|b| bits(data, Field { offset: b, size: 1, signed: false })) == Some(1);
+    Some(Touch { fingers, button, palm })
 }
 
 /// A mouse report, from an input report (with its report id first, when
@@ -237,6 +278,7 @@ pub fn parse_mouse_report(layout: &MouseLayout, report: &[u8]) -> Option<MouseRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     /// The Framework Laptop 13 (AMD Ryzen AI 300)'s touchpad (PIXA 093a:0274),
     /// which its firmware leaves reporting fingers: its report descriptor.
@@ -277,12 +319,22 @@ mod tests {
         // What it sent: a finger down (contact 0), and lifted.
         let zeros = " 00".repeat(24);
         let mut down = hex(&format!("01 03 00 3b 02 bd 01{zeros} 01 00 1e b7"));
+        assert_eq!(l.fingers.len(), 5);
+        assert_eq!(l.size, (1337, 876));
         let t = parse_touch_report(&l, &down).unwrap();
-        assert_eq!((t.touching, t.contact, t.x, t.y, t.fingers, t.button), (true, 0, 0x23b, 0x1bd, 1, false));
+        assert_eq!(t, Touch { fingers: vec![Finger { contact: 0, x: 0x23b, y: 0x1bd }], ..Default::default() });
         down[32] = 1; // the button
         assert!(parse_touch_report(&l, &down).unwrap().button);
         let up = hex(&format!("01 01 00 37 02 b7 01{zeros} 01 00 bd be"));
-        assert!(!parse_touch_report(&l, &up).unwrap().touching);
+        assert!(parse_touch_report(&l, &up).unwrap().fingers.is_empty());
+        // A palm (not confident) isn't a finger; a second finger is.
+        let palm = hex(&format!("01 02 00 3b 02 bd 01{zeros} 01 00 1e b7"));
+        let t = parse_touch_report(&l, &palm).unwrap();
+        assert!(t.fingers.is_empty() && t.palm);
+        let mut two = hex(&format!("01 03 00 3b 02 bd 01{zeros} 02 00 1e b7"));
+        two[7..13].copy_from_slice(&[0x03, 0x01, 0x00, 0x03, 0x00, 0x01]);
+        let t = parse_touch_report(&l, &two).unwrap();
+        assert_eq!(t.fingers[1], Finger { contact: 1, x: 0x300, y: 0x100 });
         assert_eq!(parse_touch_report(&l, &hex("02 00 01 00 01 00")), None, "the mouse report");
         // Its mouse collection is found too.
         assert_eq!(mouse_layout(&d).unwrap().report_id, Some(2));

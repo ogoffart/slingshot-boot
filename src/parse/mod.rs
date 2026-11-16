@@ -25,6 +25,10 @@ pub mod pe;
 // the other builds have them for the tests.
 #[cfg_attr(not(all(target_os = "uefi", target_arch = "x86_64", feature = "battery")), allow(dead_code))]
 pub mod sensors;
+// Touchpad gestures: only the x86 firmware drives a touchpad (the touchpad
+// feature); the other builds have them for the tests.
+#[cfg_attr(not(all(target_os = "uefi", target_arch = "x86_64", feature = "touchpad")), allow(dead_code))]
+pub mod touch;
 // The variables of systemd's Boot Loader Interface: only the firmware sets
 // them; the desktop build has it for the tests.
 #[cfg_attr(not(target_os = "uefi"), allow(dead_code))]

@@ -12,8 +12,8 @@
 //! - HID over I2C: power on, reset, read the report descriptor, then poll
 //!   the input reports, read with `parse::hid`. Touchpads should start in
 //!   mouse mode (relative movement and buttons), but some report fingers
-//!   anyway (the Framework 13's): the first finger's moves move the
-//!   pointer, its press clicks (with two fingers, a right click).
+//!   anyway (the Framework 13's): `parse::touch` makes them a pointer.
+//!   Palms, which the touchpad tells, are left out.
 //!
 //! Everything is logged: F12 on the System screen saves the log.
 
@@ -32,7 +32,9 @@ use super::battery::acpi::Acpi;
 use super::i2c::{self, I2c, Timing};
 use super::port::{inl, outl, pci_select};
 use crate::parse::battery::acpi::AmlValue;
-use crate::parse::hid::{self, MouseLayout, MouseReport, TouchLayout};
+use crate::parse::hid::{self, MouseLayout, TouchLayout};
+use crate::parse::touch::{self, Pointer};
+use crate::uefi_platform::uptime;
 
 /// HID over I2C's `_DSM` (its function 1 gives the HID descriptor's
 /// register), in ACPI's byte order.
@@ -45,18 +47,12 @@ pub struct Touchpad {
     address: u16,
     max_input: usize,
     layout: Option<MouseLayout>,
-    touch: Option<TouchLayout>,
-    /// The finger down at the last touch report: its contact, where.
-    finger: Option<(i32, i32, i32)>,
-    /// What's left of the movement, under a pixel.
-    carry: (f32, f32),
+    /// Its finger reports, and what they do.
+    touch: Option<(TouchLayout, touch::Gestures)>,
     /// Reads so far, to log the first ones.
     reads: u32,
     /// Errors in a row: the touchpad is given up after too many.
     errors: u32,
-    /// The pad pressed, with how many fingers and the pointer's movement
-    /// since: logged on release.
-    press: Option<(i32, i32, i32)>,
 }
 
 fn hex(data: &[u8]) -> String {
@@ -216,7 +212,11 @@ fn open(acpi: &Acpi, device: &AmlName) -> Result<Touchpad, String> {
     if layout.is_none() && touch.is_none() {
         return Err(String::from("neither a mouse nor a touch pad in the report descriptor"));
     }
-    Ok(Touchpad { i2c, address, max_input, layout, touch, finger: None, carry: (0., 0.), reads: 0, errors: 0, press: None })
+    let touch = touch.map(|t| {
+        let gestures = touch::Gestures::new(t.size);
+        (t, gestures)
+    });
+    Ok(Touchpad { i2c, address, max_input, layout, touch, reads: 0, errors: 0 })
 }
 
 /// The touchpad, if there's one Slingshot can drive. Loads the machine's
@@ -238,8 +238,14 @@ pub fn find() -> Option<Touchpad> {
 }
 
 impl Touchpad {
-    /// A report, if the touchpad has one (`None` when it's given up).
-    pub fn poll(&mut self) -> Option<MouseReport> {
+    /// What the pointer does, if the touchpad has a report (`None` when it's
+    /// given up).
+    pub fn poll(&mut self) -> Option<Pointer> {
+        if let Some((_, gestures)) = &mut self.touch
+            && let Some(release) = gestures.release()
+        {
+            return Some(release);
+        }
         if self.errors > 50 {
             return None;
         }
@@ -265,51 +271,11 @@ impl Touchpad {
             log::info!("touchpad: report {}", hex(&data[2..length]));
         }
         let report = &data[2..length];
-        if let Some(t) = self.touch.as_ref().and_then(|l| hid::parse_touch_report(l, report)) {
-            return Some(self.touch_to_mouse(t));
+        if let Some((layout, gestures)) = &mut self.touch
+            && let Some(t) = hid::parse_touch_report(layout, report)
+        {
+            return Some(gestures.touch(t, uptime()));
         }
-        hid::parse_mouse_report(self.layout.as_ref()?, report)
-    }
-
-    /// Pixels per touch pad unit, at scale 1: the Framework's pad is 1337
-    /// units for 11 cm (2.5 on its screen, scaled ×1.5). The platform
-    /// accelerates fast moves.
-    const SPEED: f32 = 1.7;
-
-    /// A finger report as a mouse's: the movement of the finger since the
-    /// last report (none when it just came down, or with more fingers), and
-    /// the button, a right click with two fingers.
-    fn touch_to_mouse(&mut self, t: hid::Touch) -> MouseReport {
-        let (mut dx, mut dy) = (0, 0);
-        if t.touching {
-            if let Some((contact, x, y)) = self.finger
-                && contact == t.contact
-                && t.fingers <= 1
-            {
-                let (mx, my) = ((t.x - x) as f32, (t.y - y) as f32);
-                let fx = mx * Self::SPEED + self.carry.0;
-                let fy = my * Self::SPEED + self.carry.1;
-                (dx, dy) = (fx as i32, fy as i32);
-                self.carry = (fx - dx as f32, fy - dy as f32);
-            } else {
-                self.carry = (0., 0.);
-            }
-            self.finger = Some((t.contact, t.x, t.y));
-        } else {
-            self.finger = None;
-        }
-        match (&mut self.press, t.button) {
-            (None, true) => {
-                log::info!("touchpad: pressed, {} finger(s)", t.fingers);
-                self.press = Some((t.fingers, dx, dy));
-            }
-            (Some((_, x, y)), true) => (*x, *y) = (*x + dx, *y + dy),
-            (Some((fingers, x, y)), false) => {
-                log::info!("touchpad: released ({fingers} finger(s) down), pointer moved by {x},{y} while pressed");
-                self.press = None;
-            }
-            (None, false) => {}
-        }
-        MouseReport { dx, dy, left: t.button && t.fingers < 2, right: t.button && t.fingers >= 2 }
+        hid::parse_mouse_report(self.layout.as_ref()?, report).map(Pointer::from)
     }
 }

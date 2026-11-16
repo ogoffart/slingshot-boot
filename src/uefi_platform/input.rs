@@ -23,6 +23,9 @@ pub struct PointerReport {
     pub delta: Option<(f32, f32)>,
     pub position: Option<(f32, f32)>,
     pub wheel: i32,
+    /// Scrolled smoothly (a touchpad), in logical pixels: positive toward
+    /// the top, like the wheel.
+    pub scroll: f32,
     pub left: bool,
     pub right: bool,
 }

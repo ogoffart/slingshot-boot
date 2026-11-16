@@ -116,8 +116,7 @@ impl Hooks for Slingshot {
             // the clicks lag. Bounded, for a pad that repeats.
             for _ in 0..16 {
                 let Some(r) = t.poll() else { break };
-                let delta = Some((r.dx as f32, r.dy as f32));
-                reports.push(PointerReport { delta, left: r.left, right: r.right, ..Default::default() });
+                reports.push(PointerReport { delta: Some((r.dx, r.dy)), scroll: r.scroll, left: r.left, right: r.right, ..Default::default() });
             }
             return true;
         }

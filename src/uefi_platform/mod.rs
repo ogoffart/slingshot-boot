@@ -395,12 +395,13 @@ impl<H: Hooks> UefiPlatform<H> {
             cursor.visible = true;
             let position = LogicalPosition::new(cursor.x / scale, cursor.y / scale);
             self.window.dispatch_event(WindowEvent::PointerMoved { position });
-            if r.wheel != 0 {
-                if !pointer.wheel_seen {
+            if r.wheel != 0 || r.scroll != 0. {
+                if r.wheel != 0 && !pointer.wheel_seen {
                     pointer.wheel_seen = true;
                     log::info!("mouse wheel working");
                 }
-                let delta_y = (r.wheel as f32 * WHEEL_NOTCH).clamp(-10. * WHEEL_NOTCH, 10. * WHEEL_NOTCH);
+                // At most ten notches at once, a touchpad's scroll too.
+                let delta_y = (r.wheel as f32 * WHEEL_NOTCH + r.scroll).clamp(-10. * WHEEL_NOTCH, 10. * WHEEL_NOTCH);
                 self.window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0., delta_y });
             }
             for (pressed, state, button) in [
