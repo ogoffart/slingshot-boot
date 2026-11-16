@@ -27,6 +27,7 @@ mod write_combining;
 #[cfg(target_arch = "x86_64")]
 pub use write_combining::rdmsr;
 
+use alloc::string::String;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -111,6 +112,9 @@ pub struct UefiPlatform<H> {
     hooks: H,
     /// `uptime` when the platform was made: Slint's time starts there.
     start: Duration,
+    /// What Ctrl+C and Ctrl+X copied, for Ctrl+V: the firmware has no
+    /// clipboard.
+    clipboard: core::cell::RefCell<String>,
 }
 
 impl<H: Hooks> UefiPlatform<H> {
@@ -119,6 +123,7 @@ impl<H: Hooks> UefiPlatform<H> {
             window: MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer),
             hooks,
             start: uptime(),
+            clipboard: Default::default(),
         }
     }
 
@@ -217,6 +222,16 @@ impl<H: Hooks> slint::platform::Platform for UefiPlatform<H> {
 
     fn duration_since_start(&self) -> Duration {
         uptime() - self.start
+    }
+
+    fn set_clipboard_text(&self, text: &str, clipboard: slint::platform::Clipboard) {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            *self.clipboard.borrow_mut() = text.into();
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: slint::platform::Clipboard) -> Option<String> {
+        (clipboard == slint::platform::Clipboard::DefaultClipboard).then(|| self.clipboard.borrow().clone())
     }
 
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
