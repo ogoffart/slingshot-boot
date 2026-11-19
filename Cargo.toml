@@ -78,10 +78,6 @@ xkbcommon = { version = "0.9", default-features = false }
 rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [patch.crates-io]
-# Slint 1.19 before its release: its pre-release branch (texts taller than
-# 32767 px, slint-ui/slint#14971). Cargo.lock pins the commit.
-slint = { git = "https://github.com/slint-ui/slint", branch = "pre-release/1.19" }
-slint-build = { git = "https://github.com/slint-ui/slint", branch = "pre-release/1.19" }
 # acpi 7.0 on a stable compiler, and a store into a buffer keeping its length.
 acpi = { git = "https://github.com/ogoffart/acpi", branch = "olivier/slingshot" }
 # argon2's `Hashing` (lanes on several cores without `std`): until a release has it.
