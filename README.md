@@ -33,6 +33,14 @@ https://github.com/user-attachments/assets/e7206b0e-a50d-4cc1-a8d7-2d55f78f3529
 
 ![The passphrase window](docs/screenshots/unlock.png)
 
+## Try it from a USB stick
+
+Nothing to install: copy
+[`slingshot.efi`](https://github.com/ogoffart/slingshot-boot/releases/latest) to
+a USB stick as `EFI/BOOT/BOOTX64.EFI`, and start the computer from the stick,
+in its boot menu (often F12). Secure Boot must be off.
+[Step by step](docs/install-manually.md#from-a-usb-stick).
+
 ## Install
 
 On Linux, with a 64-bit PC (Intel or AMD) with UEFI firmware, and
@@ -48,7 +56,7 @@ scripts/slingshot-setup make-default   # if you like it: start it on every boot
 The script shows each command before running it, and asks before changing
 anything; `scripts/slingshot-setup uninstall` removes it. With Secure Boot on, see [docs/secure-boot.md](docs/secure-boot.md).
 
-systemd-boot and GRUB, Windows, Macs, 64-bit ARM, USB sticks, step by step:
+systemd-boot and GRUB, Windows, Macs, 64-bit ARM, step by step:
 [docs/install.md](docs/install.md).
 
 ## Configure
@@ -57,6 +65,10 @@ Change things where you see them: Settings and Customize at boot, or the same
 screens from Linux with `slingshot config`. A `slingshot.toml` next to
 Slingshot can also rename entries, move them under More… and lock the settings:
 [docs/configuration.md](docs/configuration.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

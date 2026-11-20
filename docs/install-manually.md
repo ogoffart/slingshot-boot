@@ -183,16 +183,6 @@ sudo target/release/slingshot keymap -o /boot/EFI/slingshot/keymap.txt
 Or name one of the built-in layouts, `keyboard = "fr"`, in `slingshot.toml`
 next to `slingshot.efi` ([configuration.md](configuration.md#keyboard-layout)).
 
-## Alternative: start it from systemd-boot
-
-Instead of steps 4–6, add a systemd-boot menu entry (no firmware variables
-change):
-
-```sh
-printf 'title Slingshot\nefi /EFI/slingshot/slingshot.efi\n' | \
-    sudo tee /boot/loader/entries/slingshot.conf   # ⚠ /boot: your ESP
-```
-
 ## Removing it
 
 First, in Slingshot, use Settings → "Reset all settings": its settings
@@ -203,11 +193,31 @@ With the number of Slingshot's entry (`efibootmgr` shows it):
 ```sh
 # ⚠ 0003: Slingshot's entry number; /boot: your ESP
 sudo efibootmgr --delete-bootnum --bootnum 0003
-sudo rm -rf /boot/EFI/slingshot /boot/loader/entries/slingshot.conf
+sudo rm -rf /boot/EFI/slingshot
 ```
 
 ## From a USB stick
 
-Copy the built `slingshot.efi` to a FAT32 USB stick as `EFI/BOOT/BOOTX64.EFI` (ARM:
-`BOOTAA64.EFI`) and start it from the firmware's boot menu. Secure Boot must
-be off, or the binary signed (step 3).
+Nothing is installed: the computer starts Slingshot from the stick, and its
+menu lists the systems on the disks as usual.
+
+1. Get `slingshot.efi`: download it from the
+   [releases](https://github.com/ogoffart/slingshot-boot/releases), or build it
+   ([1. Get slingshot.efi](#1-get-slingshotefi)).
+2. On the stick (most are FAT32 already), make a folder `EFI`, in it a folder
+   `BOOT`, and copy `slingshot.efi` there, renamed `BOOTX64.EFI`
+   (`BOOTAA64.EFI` on 64-bit ARM). A file manager does it, or:
+
+   ```sh
+   mkdir -p /media/$USER/STICK/EFI/BOOT   # ⚠ where your stick is mounted
+   cp slingshot.efi /media/$USER/STICK/EFI/BOOT/BOOTX64.EFI
+   ```
+
+3. A wallpaper (recommended): copy pictures, PNG or JPEG, next to it in
+   `EFI/BOOT`: the repository's [`assets/wallpapers`](../assets/wallpapers)
+   (also in the release's archive), or your own, at least the screen's size.
+   Slingshot's Settings then offer them.
+4. Restart with the stick in, open the firmware's boot menu (a key at
+   startup: often F12, F11, F9 or Esc) and pick the stick.
+
+Secure Boot must be off, or the program signed ([3. Secure Boot](#3-secure-boot)).
